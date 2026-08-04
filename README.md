@@ -1,25 +1,16 @@
 # AcousticScattering.jl
 
 A standalone Julia package for 3D acoustic scattering: exact modal-series
-solutions for canonical spheres and spheroids, exterior BEM and interior FEM
-solvers for the Helmholtz equation, FEM-BEM hybrid coupling, and far-field /
-target-strength post-processing.
-
-This package is **not** specific to any one project. It is, however, also
-used as the external numerical-reference engine for the
-[`acousticTS`](https://github.com/brandynlucca/acousticTS) R package's
-validation suite,
-[`acousticTSValidation`](https://github.com/brandynlucca/acousticTSValidation) —
-see that repo's `docs/acousticTS-plans/ACOUSTICSCATTERING_JL_PLAN.md` for the
-full scoping document, dependency survey, architecture, and phased roadmap
-this package follows.
+solutions for canonical spheres and spheroids, axisymmetric/Fourier-mode and
+full 3D boundary-element and finite-element solvers for the Helmholtz
+equation, FEM-BEM hybrid coupling, and far-field / target-strength
+post-processing.
 
 ## Status
 
 Early scaffolding. Module structure (`src/analytical/`, `src/engine/`,
 `src/postprocessing/`, `src/ecosystem/`) is in place; solvers are not yet
-implemented. See the plan document linked above for current progress and
-open decisions (BEM/FEM backend selection).
+implemented.
 
 ## Scope
 
@@ -27,9 +18,11 @@ open decisions (BEM/FEM backend selection).
    spheroidal wave functions) for fluid/rigid/soft/elastic spheres and
    prolate/oblate spheroids; Kirchhoff Approximation and Kirchhoff-Ray-Mode
    high-frequency baselines.
-2. **Numerical Physics Engine** — exterior BEM (collocation/Galerkin,
-   Burton-Miller/CHIEF), interior FEM for inhomogeneous fluid/viscoelastic
-   domains, and FEM-BEM hybrid coupling.
+2. **Numerical Physics Engine** — axisymmetric (Fourier-mode) boundary
+   element and radial finite-element solvers for bodies of revolution, full
+   3D boundary-element/finite-element solvers (collocation/Galerkin,
+   Burton-Miller/CHIEF) for general geometry, and FEM-BEM hybrid coupling
+   for elastic-shell/fluid interaction problems.
 3. **Acoustic Post-Processing & Target Metrics** — Kirchhoff-Helmholtz
    far-field extrapolation, backscatter/bistatic target strength (TS),
    near-field pressure maps and polar radiation patterns.
@@ -43,11 +36,6 @@ open decisions (BEM/FEM backend selection).
 - [`SpheroidalWaves.jl`](https://github.com/brandynlucca/SpheroidalWaveFunctions) —
   prolate/oblate angular and radial spheroidal wave functions; direct
   dependency of this package's spheroidal analytical solvers.
-- [`acousticTS`](https://github.com/brandynlucca/acousticTS) — R package for
-  physics-based target strength models.
-- [`acousticTSValidation`](https://github.com/brandynlucca/acousticTSValidation) —
-  validation suite for `acousticTS`; consumes this package as its external
-  numerical reference.
 
 ## Installation
 
