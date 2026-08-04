@@ -1,0 +1,17 @@
+name = "AcousticScattering"
+uuid = "37bc0722-8b3f-41d8-b4ae-17decd3486a9"
+authors = ["brandynlucca <brandyn.lucca@gmail.com> and contributors"]
+version = "0.1.0-DEV"
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
