@@ -6,6 +6,7 @@
 Manifest.toml
 LocalPreferences.toml
 .vscode/
+/output/logo/
 
 # Fortran debug-unit artifact written by the SpheroidalWaves.jl backend
 fort.60

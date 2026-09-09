@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/src/assets/logo.svg" alt="AcousticScattering.jl logo" width="240" height="240">
+</p>
+
 # AcousticScattering.jl
 
 AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides
@@ -59,4 +63,5 @@ Please also cite the relevant model papers listed in the
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) for the package. The [logo artwork](docs/src/assets/LICENSE) incorporates
+Julia's dots and is licensed separately under CC BY-NC-SA 4.0.

@@ -16,7 +16,12 @@ makedocs(
     repo = "https://github.com/brandynlucca/AcousticScattering.jl/blob/{commit}{path}#{line}",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        assets = ["assets/gallery.css"],
+        assets = ["assets/gallery.css", "assets/branding.css", "assets/favicon.ico"],
+        sidebar_sitename = false,
+        footer = "Powered by [Documenter.jl](https://github.com/JuliaDocs/Documenter.jl). " *
+                 "[Logo attribution and license](" *
+                 "https://github.com/brandynlucca/AcousticScattering.jl/blob/main/" *
+                 "docs/src/assets/LICENSE).",
         repolink = "https://github.com/brandynlucca/AcousticScattering.jl",
         edit_link = "main"
     ),

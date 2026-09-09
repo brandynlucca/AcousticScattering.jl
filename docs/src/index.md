@@ -1,5 +1,10 @@
 # AcousticScattering.jl
 
+```@raw html
+<img class="home-logo" src="assets/logo.svg" alt="AcousticScattering.jl logo"
+     width="224" height="224">
+```
+
 AcousticScattering.jl predicts how individual bodies scatter sound in a fluid. Construct a
 geometry and material configuration, solve with a modal, Kirchhoff, FEM, BEM, or MFS method,
 and extract target strength in dB re 1 m². Compare idealized shapes, explore frequency and
