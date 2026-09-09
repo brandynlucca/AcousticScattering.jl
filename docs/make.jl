@@ -16,6 +16,7 @@ makedocs(
     repo = "https://github.com/brandynlucca/AcousticScattering.jl/blob/{commit}{path}#{line}",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
+        assets = ["assets/gallery.css"],
         repolink = "https://github.com/brandynlucca/AcousticScattering.jl",
         edit_link = "main"
     ),
@@ -39,7 +40,10 @@ makedocs(
             "FEM and shell coupling" => "models/fem.md",
             "References" => "models/references.md"
         ],
-        "Visualization Gallery" => "gallery/index.md",
+        "Visualization Gallery" => [
+            "Gallery" => "gallery/index.md",
+            "Example code" => "gallery/examples/index.md"
+        ],
         "API Reference" => "api.md",
         "Developer Guide" => "developer/index.md"
     ]

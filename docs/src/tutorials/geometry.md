@@ -71,4 +71,4 @@ typeof(surface_mesh)
 This is an axisymmetric meridian discretization. `resolution` means panel count for
 `method = :axisymmetric`, but target edge length in meters for `method = :full`. Supply either
 `resolution` or `k`, not both. Full surface meshing currently supports spheres and spheroids.
-Visualization recipes are tracked in the [gallery](@ref gallery).
+See the [gallery](@ref gallery) for mesh and surface-field plots.
