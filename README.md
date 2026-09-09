@@ -1,51 +1,64 @@
 # AcousticScattering.jl
 
-A standalone Julia package for 3D acoustic scattering: exact modal-series
-solutions for canonical spheres and spheroids, axisymmetric/Fourier-mode and
-full 3D boundary-element and finite-element solvers for the Helmholtz
-equation, FEM-BEM hybrid coupling, and far-field / target-strength
-post-processing.
+AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides
+modal-series and Kirchhoff models, boundary-element and finite-element methods, and the
+method of fundamental solutions for calculating scattering amplitude and target strength.
 
-## Status
+Supported geometries include spheres, spheroids, straight and bent cylinders, and shells.
+Material options include rigid, pressure-release, fluid-filled, and elastic configurations.
+Support varies by solver. See the [model guide](docs/src/models/selection.md) for available
+combinations and limitations.
 
-Early scaffolding. Module structure (`src/analytical/`, `src/engine/`,
-`src/postprocessing/`, `src/ecosystem/`) is in place; solvers are not yet
-implemented.
-
-## Scope
-
-1. **Analytical & Benchmark Modules** — exact modal series (Mie scattering,
-   spheroidal wave functions) for fluid/rigid/soft/elastic spheres and
-   prolate/oblate spheroids; Kirchhoff Approximation and Kirchhoff-Ray-Mode
-   high-frequency baselines.
-2. **Numerical Physics Engine** — axisymmetric (Fourier-mode) boundary
-   element and radial finite-element solvers for bodies of revolution, full
-   3D boundary-element/finite-element solvers (collocation/Galerkin,
-   Burton-Miller/CHIEF) for general geometry, and FEM-BEM hybrid coupling
-   for elastic-shell/fluid interaction problems.
-3. **Acoustic Post-Processing & Target Metrics** — Kirchhoff-Helmholtz
-   far-field extrapolation, backscatter/bistatic target strength (TS),
-   near-field pressure maps and polar radiation patterns.
-4. **Ecosystem Integration** — thin wrappers over established Julia
-   infrastructure (`GeometryBasics.jl`, `MeshIO.jl`, `Gmsh.jl`,
-   `LinearAlgebra`, `Krylov.jl`, optional $H$-matrix/FMM acceleration)
-   rather than reimplementing mesh I/O or linear algebra.
-
-## Related packages
-
-- [`SpheroidalWaves.jl`](https://github.com/brandynlucca/SpheroidalWaveFunctions) —
-  prolate/oblate angular and radial spheroidal wave functions; direct
-  dependency of this package's spheroidal analytical solvers.
+The package is under active development, and its API may change.
 
 ## Installation
 
-Not yet registered. During active development:
+Requires Julia 1.10 or later, CMake, and a Fortran toolchain. See the
+[build prerequisites](docs/src/getting_started/index.md#build-prerequisites) for details.
+Install the development version from GitHub:
 
 ```julia
-using Pkg
-Pkg.develop(path = "C:/Users/Brandyn/GitHub/AcousticScattering.jl")
+import Pkg
+Pkg.add(url = "https://github.com/brandynlucca/AcousticScattering.jl")
 ```
+
+Installation runs an optional precompile workload to reduce first-call latency.
+[Getting Started](docs/src/getting_started/index.md#opt-out-before-the-first-precompile)
+explains how to disable it before installation.
+
+## Example
+
+Calculate backscatter target strength for a rigid sphere with a 1 cm radius at 38 kHz:
+
+```julia
+using AcousticScattering
+
+frequency = 38000.0 # Hz
+sound_speed = 1477.4 # m/s
+wavenumber = 2pi * frequency / sound_speed
+
+solution = modal(Sphere(0.01), Rigid(), wavenumber)
+target_strength(solution) # approximately -49.09 dB re 1 m²
+```
+
+## Documentation
+
+- [Getting Started](docs/src/getting_started/index.md): installation and your first calculation.
+- [First frequency sweep](docs/src/tutorials/index.md): plot target strength and save the data.
+- [Models and theory](docs/src/models/index.md): conventions, assumptions, and solver selection.
+- [API reference](docs/src/api.md): geometry, materials, solvers, and result queries.
+- [Visualization gallery](docs/src/gallery/index.md): figures with links to their examples.
+
+## Citation
+
+If you use this package in research, cite the software and record the version or commit used:
+
+> Lucca, B., and contributors. *AcousticScattering.jl* [Computer software].
+> https://github.com/brandynlucca/AcousticScattering.jl
+
+Please also cite the relevant model papers listed in the
+[documentation references](docs/src/models/references.md).
 
 ## License
 
-MIT
+[MIT](LICENSE).
