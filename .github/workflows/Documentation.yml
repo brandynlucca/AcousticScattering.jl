@@ -60,7 +60,7 @@ jobs:
           version: "1"
       - uses: julia-actions/cache@v2
       - name: Check GitHub Pages configuration
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Install documentation tools
         env:
           JULIA_PKG_PRECOMPILE_AUTO: "0"
