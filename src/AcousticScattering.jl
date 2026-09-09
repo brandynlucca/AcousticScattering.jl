@@ -43,16 +43,10 @@ include("engine/mfs.jl")
 include("engine/shell_fem.jl")
 include("engine/shell_fem_general.jl")
 include("engine/full_bem.jl")
-include("engine/full_fem.jl")
 include("engine/hybrid.jl")
 include("engine/hybrid_general_shell.jl")
 
 include("postprocessing/farfield.jl")
-include("postprocessing/fields.jl")
-include("postprocessing/validator_io.jl")
-
-include("ecosystem/mesh_io.jl")
-include("ecosystem/solvers.jl")
 
 include("api.jl")
 
