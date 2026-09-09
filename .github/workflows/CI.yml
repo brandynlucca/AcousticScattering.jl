@@ -48,7 +48,7 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
         with:
           cache-name: tests-${{ matrix.version }}-${{ matrix.flavor }}
           include-matrix: false
@@ -99,7 +99,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
         with:
           cache-name: tests-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
           include-matrix: false
