@@ -19,7 +19,7 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Install documentation dependencies
         env:
           JULIA_PKG_PRECOMPILE_AUTO: "0"
@@ -62,13 +62,13 @@ jobs:
       group: documentation-deployment
       cancel-in-progress: false
     steps:
-      - name: Check GitHub Pages configuration
-        uses: actions/configure-pages@v5
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
+      - name: Check GitHub Pages configuration
+        uses: actions/configure-pages@v6
       - name: Install documentation tools
         env:
           JULIA_PKG_PRECOMPILE_AUTO: "0"
@@ -79,7 +79,7 @@ jobs:
             Pkg.add(PackageSpec(; name="Documenter", version))'
       - name: Precompile deployment tools
         run: julia --project="${{ runner.temp }}/docs-deploy" -e 'using Pkg; Pkg.precompile(; strict=true)'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: documentation
           path: docs/build/

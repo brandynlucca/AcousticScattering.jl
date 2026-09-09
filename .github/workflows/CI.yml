@@ -18,7 +18,7 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Check SciML formatting
         shell: julia --startup-file=no --color=yes {0}
         run: |
@@ -34,6 +34,7 @@ jobs:
     env:
       TEST_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
       JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_CPU_TARGET: generic
       JULIA_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "1"
     strategy:
@@ -51,6 +52,7 @@ jobs:
         with:
           cache-name: tests-${{ matrix.version }}-${{ matrix.flavor }}
           include-matrix: false
+          delete-old-caches: false
       - name: Install test dependencies
         shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
         run: |
@@ -80,6 +82,7 @@ jobs:
       GROUP: ${{ matrix.group }}
       TEST_PROJECT: ${{ startsWith(matrix.group, 'Plots') && 'test' || 'test/core' }}
       JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_CPU_TARGET: generic
       JULIA_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "1"
     strategy:
@@ -100,6 +103,7 @@ jobs:
         with:
           cache-name: tests-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
           include-matrix: false
+          delete-old-caches: false
       - name: Restore resolved test environment
         uses: actions/download-artifact@v4
         with:
