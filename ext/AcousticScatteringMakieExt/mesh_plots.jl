@@ -1,3 +1,8 @@
+# GeometryBasics is a Makie dependency, not a direct dependency of this package; access its
+# types through Makie's own binding rather than adding a new project dependency for two names.
+const Point3f = Makie.GeometryBasics.Point3f
+const TriangleFace = Makie.GeometryBasics.TriangleFace
+
 function _field_values(field_complex::AbstractArray, field::Symbol)
     field === :pressure_magnitude && return abs.(field_complex)
     field === :pressure_phase && return angle.(field_complex)
@@ -70,24 +75,35 @@ function _inti_mesh_points_faces(quad)
     return points, faces
 end
 
-# Per-node (quadrature-node) field averaged to one flat value per mesh face: a quadrature rule
-# generally has several nodes per face (e.g. qorder=4), not one node per vertex, so there is no
-# single natural per-vertex value to interpolate — averaging the face's own nodes is the one
-# reduction that doesn't invent data the discretization doesn't have.
-function _inti_mesh_face_field(quad, field_complex::AbstractArray, field::Symbol)
+# Makie.mesh!'s color array must be per-VERTEX (length(points)), not per-face — confirmed
+# empirically, a per-face-length array is silently misindexed as per-vertex without erroring
+# whenever there happen to be at least as many faces as vertices (the typical case for a closed
+# triangulated surface), producing meaningless scrambled coloring rather than a clear error. A
+# quadrature rule generally has several nodes per face (e.g. qorder=4), not one node per vertex,
+# so there is no single quadrature node at any given vertex either: first average each face's own
+# quadrature nodes, then average those per-face values over every face touching each vertex.
+function _inti_mesh_vertex_field(quad, field_complex::AbstractArray, field::Symbol)
     msh = quad.mesh
     per_node = _field_values(field_complex, field)
-    values = Float64[]
+    npts = length(Inti.nodes(msh))
+    sums = zeros(Float64, npts)
+    counts = zeros(Int, npts)
     for E in Inti.element_types(msh)
         E <: SVector && continue
+        idxs = Inti.vertices_idxs(E)
         connec = Inti.connectivity(msh, E)
         qtags = Inti.etype2qtags(quad, E)
         for j in axes(connec, 2)
             tags = @view qtags[:, j]
-            push!(values, sum(per_node[tags]) / length(tags))
+            face_avg = sum(per_node[tags]) / length(tags)
+            for vi in idxs
+                v = connec[vi, j]
+                sums[v] += face_avg
+                counts[v] += 1
+            end
         end
     end
-    return values
+    return sums ./ max.(counts, 1)
 end
 
 # --- Point clouds: bent-cylinder MFS surface field (no face connectivity) ---
@@ -138,7 +154,7 @@ function _solution_render(
         field::Union{Nothing, Symbol})
     quad = sol.data.quad
     points, faces = _inti_mesh_points_faces(quad)
-    values = field === nothing ? nothing : _inti_mesh_face_field(quad, sol.data.p_scat, field)
+    values = field === nothing ? nothing : _inti_mesh_vertex_field(quad, sol.data.p_scat, field)
     return (:trimesh, points, faces, values)
 end
 
@@ -194,6 +210,9 @@ function _render_solution_plot(kind::Symbol, x, y, z, values; kwargs...)
 end
 function _render_solution_plot(kind::Symbol, a, b, c; kwargs...)
     kind === :trimesh && return trimeshplot(a, b, c; kwargs...)
+    error("unreachable")
+end
+function _render_solution_plot(kind::Symbol, a, b; kwargs...)
     kind === :points && return pointcloudplot(a, b; kwargs...)
     error("unreachable")
 end
@@ -203,6 +222,9 @@ function _render_solution_plot!(ax, kind::Symbol, x, y, z, values; kwargs...)
 end
 function _render_solution_plot!(ax, kind::Symbol, a, b, c; kwargs...)
     kind === :trimesh && return trimeshplot!(ax, a, b, c; kwargs...)
+    error("unreachable")
+end
+function _render_solution_plot!(ax, kind::Symbol, a, b; kwargs...)
     kind === :points && return pointcloudplot!(ax, a, b; kwargs...)
     error("unreachable")
 end
