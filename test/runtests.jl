@@ -1,7 +1,7 @@
 using SafeTestsets: @safetestset
 
 const TEST_GROUPS = ("Analytical", "RadialFEM", "MeridianFEM", "Boundary", "Spheroidal",
-    "Oblique", "Interfaces", "Plots1D", "Plots2D", "Plots3D")
+    "Oblique", "Interfaces", "Plots1D", "Plots2D", "Plots3DModels", "Plots3DFull")
 const TEST_GROUP = get(ENV, "GROUP", isempty(ARGS) ? "All" : only(ARGS))
 TEST_GROUP in ("All", "Core", TEST_GROUPS...) ||
     throw(ArgumentError("Unknown test group: $TEST_GROUP. Choose All, Core, or $(join(TEST_GROUPS, ", "))."))
@@ -42,6 +42,10 @@ if TEST_GROUP in ("All", "Plots2D")
     @time @safetestset "Plots2D" include("visualization/plots_2d.jl")
 end
 
-if TEST_GROUP in ("All", "Plots3D")
-    @time @safetestset "Plots3D" include("visualization/plots_3d.jl")
+if TEST_GROUP in ("All", "Plots3DModels")
+    @time @safetestset "Plots3DModels" include("visualization/plots_3d.jl")
+end
+
+if TEST_GROUP in ("All", "Plots3DFull")
+    @time @safetestset "Plots3DFull" include("visualization/plots_3d_full.jl")
 end
