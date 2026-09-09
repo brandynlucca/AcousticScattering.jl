@@ -78,7 +78,7 @@ jobs:
           julia --project=docs dev/check_deployment.jl
           julia --project=docs docs/make.jl
       - name: Upload documentation preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: documentation
           path: docs/build/
