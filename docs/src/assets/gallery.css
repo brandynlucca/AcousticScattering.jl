@@ -1,11 +1,11 @@
-.scattering-gallery {
+#documenter .scattering-gallery {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1.25rem;
     margin: 1.5rem 0;
 }
 
-.scattering-gallery figure {
+#documenter .scattering-gallery figure {
     margin: 0;
     border: 1px solid rgba(128, 128, 128, 0.35);
     border-radius: 0.4rem;
@@ -14,41 +14,42 @@
     flex-direction: column;
 }
 
-.scattering-gallery figure > a {
+#documenter .scattering-gallery figure > a {
     display: block;
     background: white;
 }
 
-.scattering-gallery img {
+#documenter .scattering-gallery img {
     display: block;
     width: 100%;
     aspect-ratio: 19 / 12;
     object-fit: contain;
 }
 
-.scattering-gallery figcaption {
+#documenter .scattering-gallery figcaption {
     padding: 1rem;
     text-align: left;
+    font-style: normal;
 }
 
-.scattering-gallery figcaption h2 {
+#documenter .scattering-gallery figcaption h2 {
     margin: 0 0 0.5rem;
     font-size: 1.1rem;
     border: 0;
 }
 
-.scattering-gallery figcaption p {
+#documenter .scattering-gallery figcaption p {
     margin: 0 0 0.75rem;
     font-size: 0.9rem;
 }
 
-.scattering-gallery a:focus-visible {
+#documenter .scattering-gallery a:focus-visible {
     outline: 3px solid currentColor;
     outline-offset: -3px;
 }
 
 @media (max-width: 600px) {
-    .scattering-gallery {
+    #documenter .scattering-gallery {
         grid-template-columns: minmax(0, 1fr);
     }
 }
