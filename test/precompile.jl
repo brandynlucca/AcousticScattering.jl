@@ -18,7 +18,7 @@ withenv("JULIA_PKG_PRECOMPILE_AUTO" => "0") do
     Pkg.add(["Preferences", "PrecompileTools"])
 end
 all(dependency.name == "AcousticScattering" || !dependency.is_tracking_path
-    for dependency in values(Pkg.dependencies())) ||
+for dependency in values(Pkg.dependencies())) ||
     throw(ArgumentError("Unexpected local dependency override in the installation test"))
 
 # Preferences is installed in the temporary environment before it can be imported.
