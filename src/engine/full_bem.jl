@@ -10,6 +10,7 @@ the target element edge length, see [`bem3d_elements_per_wavelength`](@ref)
 for a wavelength-based default.
 """
 function gmsh_sphere_mesh(radius::Real; meshsize::Real, qorder::Integer = 4)
+    meshsize > 0 || throw(ArgumentError("meshsize must be positive, got $meshsize"))
     msh = try
         gmsh.initialize(String[], false)
         gmsh.option.setNumber("General.Verbosity", 2)
@@ -37,6 +38,7 @@ if `a < b`), via Gmsh (a unit sphere, non-uniformly scaled with OpenCASCADE's
 `dilate`).
 """
 function gmsh_spheroid_mesh(a::Real, b::Real; meshsize::Real, qorder::Integer = 4)
+    meshsize > 0 || throw(ArgumentError("meshsize must be positive, got $meshsize"))
     msh = try
         gmsh.initialize(String[], false)
         gmsh.option.setNumber("General.Verbosity", 2)

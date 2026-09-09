@@ -229,5 +229,8 @@ end
         @test_throws ArgumentError AS.sphere_mesh(0.01, 2)
         @test_throws ArgumentError AS.spheroid_mesh(0.05, 0.02, 2)
         @test_throws ArgumentError AS.Shell(AS.Sphere(0.01), 5.0)
+        @test_throws ArgumentError AS.gmsh_sphere_mesh(0.01; meshsize = 0.0)
+        @test_throws ArgumentError AS.gmsh_sphere_mesh(0.01; meshsize = -0.001)
+        @test_throws ArgumentError AS.gmsh_spheroid_mesh(0.05, 0.02; meshsize = -0.001)
     end
 end
