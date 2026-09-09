@@ -26,6 +26,26 @@ BLAS.set_num_threads(1)
         end
     end
 
+    @testset "no-argument target_strength/scattering_amplitude matches the antipodal backscatter query, at the actual incidence angle used" begin
+        a = 0.01
+        freq = 38000.0
+        k = 2pi * freq / c_water
+        body = AS.Sphere(a)
+        for β_deg in (0.0, 30.0, 90.0)
+            β = deg2rad(β_deg)
+            sol = AS.bem(body, AS.Rigid(), k; incidence_angle = β, m_max = 8, n = 16)
+            @test AS.target_strength(sol) == AS.target_strength(sol; angle = pi - β, azimuth = pi)
+            @test AS.scattering_amplitude(sol) ==
+                  AS.scattering_amplitude(sol; angle = pi - β, azimuth = pi)
+        end
+
+        spheroid = AS.Spheroid(0.05, 0.02)
+        β = deg2rad(30.0)
+        sol_mfs = AS.mfs(spheroid, AS.Rigid(), k; incidence_angle = β, m_max = 8, offset = 0.015)
+        @test AS.target_strength(sol_mfs) ==
+              AS.target_strength(sol_mfs; angle = pi - β, azimuth = pi)
+    end
+
     @testset "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" for boundary in (AS.Rigid(), AS.PressureRelease())
         a, b = 0.05, 0.02
         spheroid = AS.Spheroid(a, b)

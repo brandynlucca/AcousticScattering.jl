@@ -108,6 +108,14 @@ end
         @test sweep_0.target_strength[1] ≈ sweep_2pi.target_strength[1] atol = 1e-8
     end
 
+    @testset "bistatic_sweep/BistaticSweep records the solution's actual incidence angle" begin
+        β = deg2rad(30.0)
+        spheroid = AS.Spheroid(0.02, 0.01)
+        sol = AS.bem(spheroid, AS.Rigid(), k; incidence_angle = β, m_max = 8, n = 16)
+        sweep = AS.bistatic_sweep(sol, 0:(pi / 4):pi; azimuth = pi)
+        @test sweep.incidence_angle == β
+    end
+
     @testset "bistatic_map: shape, endpoint agreement" begin
         thetas = 0:(pi / 4):pi
         phis = 0:(pi / 2):(2pi)
@@ -208,4 +216,18 @@ end
     # Round-trip mesh I/O is genuinely untestable, not merely unwritten: `src/ecosystem/mesh_io.jl`
     # is a stub ("Mesh import (.stl/.msh/.vtk). Not yet implemented."), so there is no I/O
     # capability to round-trip yet. Flagged here rather than silently skipped from the suite.
+
+    @testset "bent cylinder geometry is rejected, not silently straightened" begin
+        bent = AS.Cylinder(0.01, 0.07; radius_curvature = 0.20)
+        @test_throws ArgumentError AS.mesh(bent; resolution = 20)
+        @test_throws ArgumentError AS.mesh(bent; k = 2pi * 38000.0 / 1477.4)
+        @test_throws ArgumentError AS.fem(bent, AS.Rigid(), 100.0)
+        @test_throws ArgumentError AS.fem(bent, AS.SolidElastic(7.8, 3.7, 1.9), 100.0)
+    end
+
+    @testset "resolution/thickness sanity checks" begin
+        @test_throws ArgumentError AS.sphere_mesh(0.01, 2)
+        @test_throws ArgumentError AS.spheroid_mesh(0.05, 0.02, 2)
+        @test_throws ArgumentError AS.Shell(AS.Sphere(0.01), 5.0)
+    end
 end

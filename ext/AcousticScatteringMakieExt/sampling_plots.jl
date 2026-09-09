@@ -51,8 +51,18 @@ end
         show_incidence = true
     )
 end
-# theta=0 is forward scatter (same direction the incident wave was traveling), theta=pi is
-# backscatter (looking back toward the source), matching far_field's own documented convention.
+# theta=0/pi poles are azimuth-independent, so a marker there is always valid.
+function _incidence_markers(sweep)
+    β = sweep.incidence_angle
+    az = mod(sweep.azimuth, 2π)
+    pole = isapprox(β, 0.0; atol = 1e-9) || isapprox(β, π; atol = 1e-9)
+    near(a, b) = isapprox(mod(a - b, 2π), 0.0; atol = 1e-6) ||
+                 isapprox(mod(a - b, 2π), 2π; atol = 1e-6)
+    thetas, labels = Float64[], String[]
+    (pole || near(az, 0.0)) && (push!(thetas, β); push!(labels, "Forward"))
+    (pole || near(az, π)) && (push!(thetas, π - β); push!(labels, "Backscatter"))
+    return thetas, labels
+end
 function Makie.plot!(plot::BistaticSweepPlot)
     sweep = plot.sweep[]
     kind = plot.kind[]
@@ -64,22 +74,26 @@ function Makie.plot!(plot::BistaticSweepPlot)
         lines!(plot, sweep.angles, r; color = plot.color, linewidth = plot.linewidth)
         if plot.show_incidence[]
             rmax = maximum(r)
-            lines!(plot, [0.0, 0.0], [0.0, rmax]; color = :gray, linestyle = :dash)
-            lines!(plot, [pi, pi], [0.0, rmax]; color = :gray, linestyle = :dash)
-            text!(plot, [0.0, pi], [0.5 * rmax, 0.5 * rmax];
-                text = ["Forward", "Backscatter"],
-                color = :gray, align = (:center, :bottom))
+            thetas, labels = _incidence_markers(sweep)
+            for (θ, lbl) in zip(thetas, labels)
+                lines!(plot, [θ, θ], [0.0, rmax]; color = :gray, linestyle = :dash)
+                text!(plot, [θ], [0.5 * rmax]; text = [lbl],
+                    color = :gray, align = (:center, :bottom))
+            end
         end
     elseif kind === :cartesian
         angles = _convert_angle(sweep.angles, plot.angle_units[])
         lines!(plot, angles, sweep.target_strength;
             color = plot.color, linewidth = plot.linewidth)
         if plot.show_incidence[]
-            fwd, back = _convert_angle([0.0, pi], plot.angle_units[])
-            vlines!(plot, [fwd, back]; color = :gray, linestyle = :dash)
-            ymax = maximum(sweep.target_strength)
-            text!(plot, [fwd, back], [ymax, ymax]; text = ["Forward", "Backscatter"],
-                color = :gray, align = (:left, :bottom))
+            thetas, labels = _incidence_markers(sweep)
+            if !isempty(thetas)
+                converted = _convert_angle(thetas, plot.angle_units[])
+                vlines!(plot, converted; color = :gray, linestyle = :dash)
+                ymax = maximum(sweep.target_strength)
+                text!(plot, converted, fill(ymax, length(converted)); text = labels,
+                    color = :gray, align = (:left, :bottom))
+            end
         end
     else
         throw(ArgumentError("kind must be :polar or :cartesian, got $kind"))

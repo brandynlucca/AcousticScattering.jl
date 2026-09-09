@@ -81,12 +81,14 @@ const _BistaticAngleAzimuthSolution = Union{
 
 Target strength [dB re 1 m²] vs. observation polar angle `angles` [rad] at
 a fixed observation `azimuth` [rad], from an already-solved bistatic-
-capable solution, no re-solve.
+capable solution, no re-solve. `incidence_angle` [rad] is the solution's
+own solve-time incidence angle.
 """
 struct BistaticSweep
     angles::Vector{Float64}
     azimuth::Float64
     target_strength::Vector{Float64}
+    incidence_angle::Float64
 end
 
 """
@@ -102,7 +104,7 @@ they already define.
 function bistatic_sweep(
         sol::_BistaticAngleAzimuthSolution, angles::AbstractVector{<:Real}; azimuth::Real = 0.0)
     ts = [target_strength(sol; angle = a, azimuth = azimuth) for a in angles]
-    return BistaticSweep(Float64.(angles), Float64(azimuth), ts)
+    return BistaticSweep(Float64.(angles), Float64(azimuth), ts, sol.data.incidence_angle)
 end
 
 """

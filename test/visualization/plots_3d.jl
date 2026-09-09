@@ -42,11 +42,13 @@ BLAS.set_num_threads(1)
         @test plot(shell_sol; kind = :surface_field) isa Makie.FigureAxisPlot
     end
 
-    @testset "bent-cylinder MFS: mesh falls back, surface_field is a point cloud" begin
+    @testset "bent-cylinder MFS: both :mesh and :surface_field render as point clouds over the real solved points" begin
         bent = AS.Cylinder(0.01, 0.1; radius_curvature = 0.5)
         k_bent = 2pi * 20000.0 / c_water
         mfs_sol = AS.mfs(bent, AS.Rigid(), k_bent; n_s = 8, n_φ = 8)
-        @test plot(mfs_sol; kind = :mesh) isa Makie.FigureAxisPlot
+        fig_mesh = plot(mfs_sol; kind = :mesh)
+        @test fig_mesh isa Makie.FigureAxisPlot
+        @test length(fig_mesh.plot.points[]) == length(mfs_sol.data.points)
         @test plot(mfs_sol; kind = :surface_field) isa Makie.FigureAxisPlot
     end
 

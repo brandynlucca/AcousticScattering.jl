@@ -192,12 +192,8 @@ end
 function _solution_render(
         sol::AcousticScattering.MFSSolution{AcousticScattering._BentMFSSurfaceData},
         field::Union{Nothing, Symbol})
-    if field === nothing
-        m = AcousticScattering.mesh(sol.body; k = sol.k)
-        return _mesh_render(m)
-    end
     points = [Point3f(p...) for p in sol.data.points]
-    values = _field_values(sol.data.p_scat, field)
+    values = field === nothing ? nothing : _field_values(sol.data.p_scat, field)
     return (:points, points, values)
 end
 

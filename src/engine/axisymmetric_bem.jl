@@ -85,6 +85,7 @@ along the semicircular profile from the north pole (ρ=0, z=a) to the
 south pole (ρ=0, z=-a).
 """
 function sphere_mesh(a::Real, n::Integer)
+    n >= 3 || throw(ArgumentError("n must be at least 3 (one panel per segment)"))
     ψ = range(0, π; length = n + 1)
     return MeridianMesh(a .* sin.(ψ), a .* cos.(ψ))
 end
@@ -121,6 +122,7 @@ independent of prolate/oblate labeling) and does not disadvantage the
 already-fine prolate case.
 """
 function spheroid_mesh(a::Real, b::Real, n::Integer)
+    n >= 3 || throw(ArgumentError("n must be at least 3 (one panel per segment)"))
     ψ_dense = range(0, π; length = max(2000, 40n))
     speed = [hypot(b * cos(ψ), a * sin(ψ)) for ψ in ψ_dense]
     s = similar(speed)

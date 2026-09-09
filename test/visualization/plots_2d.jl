@@ -40,6 +40,25 @@ BLAS.set_num_threads(1)
         @test length(fig_with.plot.plots) > length(fig_without.plot.plots)
     end
 
+    @testset "incidence markers are derived from the actual incidence direction, not a fixed 0/pi" begin
+        spheroid = AS.Spheroid(0.02, 0.01)
+        β = deg2rad(30.0)
+        sol = AS.bem(spheroid, AS.Rigid(), k; incidence_angle = β, m_max = 8, n = 16)
+        n_base = length(plot(sol; kind = :bistatic_polar, angles = 0:0.1:pi,
+            azimuth = 0.3, show_incidence = false).plot.plots)
+
+        fig_neither = plot(
+            sol; kind = :bistatic_polar, angles = 0:0.1:pi, azimuth = 0.3)
+        @test length(fig_neither.plot.plots) == n_base
+
+        fig_forward = plot(
+            sol; kind = :bistatic_polar, angles = 0:0.1:pi, azimuth = 0.0)
+        @test length(fig_forward.plot.plots) == n_base + 2
+
+        fig_back = plot(sol; kind = :bistatic_polar, angles = 0:0.1:pi, azimuth = pi)
+        @test length(fig_back.plot.plots) == n_base + 2
+    end
+
     @testset "colorrange: default handles a deep null without erroring, explicit override works" begin
         fap = plot(bem_sol; kind = :bistatic_map, thetas = 0:0.3:pi,
             phis = 0:0.3:(2pi), colorrange = (-60.0, -40.0))

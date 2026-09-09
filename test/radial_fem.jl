@@ -399,5 +399,6 @@ end
         ts_stiff = AS.target_strength(sol; angle = pi - beta, azimuth = pi)
 
         @test ts_stiff ≈ ts_rigid atol = 0.1
+        @test AS.target_strength(sol) == ts_stiff
     end
 end

@@ -75,6 +75,10 @@ struct Shell <: AbstractBody
         body isa Union{Sphere, Spheroid} ||
             throw(ArgumentError("Shell only supports a Sphere or Spheroid base body"))
         thickness > 0 || throw(ArgumentError("Shell thickness must be positive"))
+        thickness < _characteristic_radius(body) || throw(ArgumentError(
+            "Shell thickness ($thickness) must be less than the base body's characteristic " *
+            "radius ($(_characteristic_radius(body))) — the shell FEM theory assumes a thin " *
+            "shell over a solid base body, not a thickness comparable to or larger than the body itself"))
         return new(body, Float64(thickness))
     end
 end
@@ -93,6 +97,7 @@ struct _AxisymmetricSurfaceData
     dpdn_scat_modes::Vector{Vector{ComplexF64}}
     p_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     dpdn_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
+    incidence_angle::Float64
 end
 
 # Full 3D (non-axisymmetric) BEM surface-field data, `bem(...; method=:full)` only.
@@ -133,6 +138,7 @@ struct _ShellFEMSurfaceData
     p_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     dpdn_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     shell_state::Any
+    incidence_angle::Float64
 end
 
 """
@@ -380,6 +386,8 @@ end
 function fem(body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :meridian, R::Real = 1.2body.radius, incidence_angle::Real = π / 2,
         m_max::Integer = _default_mode_count(k * body.radius), kwargs...)
+    _isbent(body) && throw(ArgumentError(
+        "fem(::Cylinder, ...) has no bent-cylinder implementation in this package yet"))
     method === :meridian ||
         throw(ArgumentError("fem(::Cylinder, ::Union{Rigid,PressureRelease,FluidFilled}, ...) only supports method=:meridian"))
     ts = cylinder_meridian_fem_target_strength(
@@ -390,6 +398,8 @@ end
 function fem(body::Cylinder,
         boundary::Union{SolidElastic, Shelled{ElasticLayer, FluidInterior}}, k::Real;
         method::Symbol = :radial, incidence_angle::Real = π / 2, kwargs...)
+    _isbent(body) && throw(ArgumentError(
+        "fem(::Cylinder, ...) has no bent-cylinder implementation in this package yet"))
     method === :radial ||
         throw(ArgumentError("fem(::Cylinder, ::Union{SolidElastic,Shelled{ElasticLayer,FluidInterior}}, ...) only supports method=:radial"))
     ts = elastic_cylinder_radial_fem_target_strength(
@@ -458,6 +468,8 @@ function mesh(body::AbstractBody; resolution::Union{Nothing, Real} = nothing,
         k::Union{Nothing, Real} = nothing, method::Symbol = :axisymmetric)
     (resolution === nothing) == (k === nothing) &&
         throw(ArgumentError("mesh(...) needs exactly one of `resolution` or `k`"))
+    body isa Cylinder && _isbent(body) && throw(ArgumentError(
+        "mesh(::Cylinder, ...) has no bent-cylinder implementation (axisymmetric or full) in this package yet"))
     if method === :axisymmetric
         n = resolution === nothing ? _axisymmetric_default_panels(body, k) : Int(resolution)
         return Mesh(_axisymmetric_mesh(body, n), body, method, Float64(n))
@@ -556,21 +568,21 @@ function bem(body::Sphere,
     mesh_outer = sphere_mesh(body.radius, n)
     mesh_inner = sphere_mesh(body.radius * boundary.radius_ratio, n)
     p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh_outer, mesh_inner; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh_outer, [p_scat], [dpdn_scat], nothing, nothing)
+    data = _AxisymmetricSurfaceData(mesh_outer, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
 function _bem_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
         k::Real, mesh::MeridianMesh; kwargs...)
     p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing)
+    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
 function _bem_axial(
         body::AbstractBody, boundary::FluidFilled, k::Real, mesh::MeridianMesh; kwargs...)
     p_scat, dpdn_scat, _, p_int, dpdn_int = solve_axial(boundary, k, mesh; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int])
+    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
@@ -580,7 +592,8 @@ function _bem_oblique(
         incidence_angle::Real; m_max::Integer, kwargs...)
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique(
         boundary, k, mesh, incidence_angle; m_max = m_max, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing)
+    data = _AxisymmetricSurfaceData(
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
@@ -636,7 +649,7 @@ end
 function _mfs_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
         k::Real, mesh::MeridianMesh; offset::Real, kwargs...)
     p_scat, dpdn_scat, _ = solve_axial_mfs(boundary, k, mesh; offset = offset, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing)
+    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
     return MFSSolution(body, boundary, k, data)
 end
 
@@ -645,7 +658,7 @@ function _mfs_axial(
         offset_ext::Real = offset, offset_int::Real = offset, kwargs...)
     p_scat, dpdn_scat, _, p_int, dpdn_int = solve_axial_mfs(
         boundary, k, mesh; offset_ext = offset_ext, offset_int = offset_int, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int])
+    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0)
     return MFSSolution(body, boundary, k, data)
 end
 
@@ -654,7 +667,8 @@ function _mfs_oblique(body::AbstractBody, boundary::Union{Rigid, PressureRelease
         offset::Real, m_max::Integer, kwargs...)
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique_mfs(
         boundary, k, mesh, incidence_angle; m_max = m_max, offset = offset, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing)
+    data = _AxisymmetricSurfaceData(
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
     return MFSSolution(body, boundary, k, data)
 end
 
@@ -664,7 +678,8 @@ function _mfs_oblique(body::AbstractBody, boundary::FluidFilled, k::Real,
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique_mfs(
         boundary, k, mesh, incidence_angle;
         m_max = m_max, offset_ext = offset_ext, offset_int = offset_int, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing)
+    data = _AxisymmetricSurfaceData(
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
     return MFSSolution(body, boundary, k, data)
 end
 
@@ -728,7 +743,7 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
                 geometry, material, ext_density, ext_soundspeed,
                 freq_hz; n_eta = n_eta, kwargs...)
             data = _ShellFEMSurfaceData(
-                ps, [p_scat], [dpdn_scat], nothing, nothing, nothing, shell_state)
+                ps, [p_scat], [dpdn_scat], nothing, nothing, nothing, shell_state, incidence_angle)
             return FEMSolution(s, boundary, k, method, data)
         end
         p_ext, dpdn_ext, ps_ext, p_int, dpdn_int, ps_int,
@@ -736,7 +751,7 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
             geometry, material, ext_density, ext_soundspeed, int_density,
             int_soundspeed, freq_hz; n_eta = n_eta, kwargs...)
         data = _ShellFEMSurfaceData(
-            ps_ext, [p_ext], [dpdn_ext], ps_int, [p_int], [dpdn_int], shell_state)
+            ps_ext, [p_ext], [dpdn_ext], ps_int, [p_int], [dpdn_int], shell_state, incidence_angle)
         return FEMSolution(s, boundary, k, method, data)
     end
     method === :general ||
@@ -755,7 +770,7 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
             freq_hz, incidence_angle; m_max = m_max, kwargs...)
     end
     data = _ShellFEMSurfaceData(
-        ps, p_scat_modes, dpdn_scat_modes, nothing, nothing, nothing, nothing)
+        ps, p_scat_modes, dpdn_scat_modes, nothing, nothing, nothing, nothing, incidence_angle)
     return FEMSolution(s, boundary, k, method, data)
 end
 
@@ -816,11 +831,13 @@ function scattering_amplitude(sol::FEMSolution{_ScalarFEMData}; kwargs...)
         "the complex amplitude."))
 end
 
-function target_strength(sol::FEMSolution{_ShellFEMSurfaceData}; angle::Real = π, azimuth::Real = 0.0)
+function target_strength(sol::FEMSolution{_ShellFEMSurfaceData};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
     return target_strength(scattering_amplitude(sol; angle = angle, azimuth = azimuth))
 end
 
-function scattering_amplitude(sol::FEMSolution{_ShellFEMSurfaceData}; angle::Real = π, azimuth::Real = 0.0)
+function scattering_amplitude(sol::FEMSolution{_ShellFEMSurfaceData};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
     d = sol.data
     length(d.p_ext_modes) == 1 &&
         return far_field(d.ps_ext, d.p_ext_modes[1], d.dpdn_ext_modes[1], sol.k, angle)
@@ -837,14 +854,14 @@ end
 function target_strength(
         sol::Union{
             BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData}};
-        angle::Real = π, azimuth::Real = 0.0)
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
     return target_strength(scattering_amplitude(sol; angle = angle, azimuth = azimuth))
 end
 
 function scattering_amplitude(
         sol::Union{
             BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData}};
-        angle::Real = π, azimuth::Real = 0.0)
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
     _axisymmetric_amplitude(sol.k, sol.data; angle = angle, azimuth = azimuth)
 end
 
