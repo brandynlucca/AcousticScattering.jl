@@ -1,8 +1,8 @@
 # [CI and installation checks](@id ci-guide)
 
 Pull requests run tests, formatting checks, isolated installation checks, and the documentation
-build. Deployment is a separate job restricted to pushes to `main` and `v*` tags in the upstream
-repository. Local documentation builds never deploy.
+build. The dedicated Documentation workflow publishes successful builds from upstream `main`
+and `v*` tags, including manual runs on those refs. Local documentation builds never deploy.
 
 ## Isolated installation checks
 
@@ -60,14 +60,21 @@ warnings when reporting installation problems rather than treating this run as w
 
 ## Workflow coverage
 
-The workflow in `.github/workflows/CI.yml` has five jobs:
+The package workflow in `.github/workflows/CI.yml` has three jobs:
 
 - `format` checks Julia files with the pinned SciML formatter.
 - `test` runs the package tests on Julia 1.10 and the latest stable Julia, on Linux.
 - `install` runs both isolated installation modes on those Julia versions.
+
+The separate `.github/workflows/Documentation.yml` workflow has two jobs:
+
 - `docs` builds the site, runs doctests and executable examples, and uploads the HTML as the
   `documentation` artifact. This job has read-only repository permissions.
-- `docs-deploy` waits for all four checks before publishing the validated artifact.
+- `docs-deploy` waits for the docs build before publishing the validated artifact. It checks
+  that GitHub Pages is enabled before updating the versioned site.
+
+Documentation deployment does not wait for the full package test and installation matrix.
+Package CI remains separate and should still be required before merging code changes.
 
 As of September 9, 2026, Julia 1.10 is both the package's minimum supported series and the
 current LTS series. Review this matrix when the LTS changes, retaining minimum-version coverage.
@@ -88,6 +95,10 @@ Repository maintainers must complete these settings after the workflow is pushed
 4. After the first successful run, select the appropriate format, test, installation, and docs
    checks in the protected-branch rules or ruleset.
 5. Inspect the published site and a versioned release before considering deployment verified.
+
+Once the workflow is on `main`, open **Actions > Documentation > Run workflow** and select
+`main` to build and publish without making another commit. Feature-branch and fork runs can
+build previews but cannot deploy. Ordinary pushes to `main` and `v*` tags trigger it automatically.
 
 `docs/deploy.jl` uses Documenter to update the versioned `gh-pages` tree. The workflow then
 packages that tree and publishes it using the GitHub Pages actions. This explicit deployment
