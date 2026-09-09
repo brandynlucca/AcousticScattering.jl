@@ -130,7 +130,7 @@ jobs:
           ref: gh-pages
           path: documentation-site
       - name: Package GitHub Pages site
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: documentation-site/
       - name: Deploy GitHub Pages site
