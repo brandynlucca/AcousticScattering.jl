@@ -6,44 +6,40 @@ and `v*` tags, including manual runs on those refs. Local documentation builds n
 
 ## Isolated installation checks
 
-From the repository root, run both installation modes:
+From the repository root, check the precompile opt-out and re-enable paths:
 
 ```sh
-julia --startup-file=no dev/check_install.jl
+julia --startup-file=no test/precompile.jl
 ```
 
-Or select one mode:
+To check normal installation, select the standard mode:
 
 ```sh
-julia --startup-file=no dev/check_install.jl --mode=standard
-julia --startup-file=no dev/check_install.jl --mode=opt-out
+julia --startup-file=no test/precompile.jl standard
 ```
 
-Each mode gets an empty project and Julia depot. The harness copies the working package source
-without a manifest or local preferences, then resolves dependencies from the registry. It rejects
-local dependency overrides other than that source snapshot. Startup files and the default global
-Julia environment are excluded. System tools, network settings, and the installed Julia runtime
-are still used, so this is not an isolated operating-system test.
+The single test script creates a temporary project and develops the checkout into it. It resolves
+dependencies without reusing the project's manifest or preferences. Local runs reuse your Julia
+depot. CI sets an empty depot for each matrix job and does not restore an installation cache.
+System tools, network settings, and the installed Julia runtime are still used, so this is not
+an isolated operating-system test.
 
 The standard mode checks default precompilation. The opt-out mode sets the workload preference
 before the first import, checks it, re-enables it, and checks again in a new Julia process.
 Both modes use strict precompilation and test rigid-sphere, fluid-sphere, and spheroid outputs.
 The spheroid calculation exercises the registered dependency's native backend.
 
-These checks test the working source snapshot, not a release downloaded with
-`Pkg.add("AcousticScattering")` or the GitHub URL. Registry availability and published source
-must be checked separately before release.
-
-For a faster local check, append `--reuse-depot`. This still isolates the project and source
-snapshot, but it reuses installed packages and artifacts and is not a cold-depot test.
-`julia docs/check_precompile.jl` is a shortcut for the opt-out mode and accepts the same flag.
+Local runs test your working files, including uncommitted changes. CI tests the GitHub checkout,
+so an untracked file can make a local run pass while CI fails. Include all required source files
+in the package commit. These checks do not establish that a published registry version installs.
 
 Install the [native build prerequisites](@ref getting-started) before running these commands.
 The CI installation jobs intentionally do not restore a Julia cache.
 
 ### Local verification record
 
-On September 9, 2026, both modes passed on Windows with Julia 1.12.1 and registered
+Before the test scripts were consolidated, both modes passed on September 9, 2026 on Windows
+with Julia 1.12.1 and registered
 SpheroidalWaves 0.3.0. The default, disabled, and re-enabled workload probes passed all
 12 assertions. The dependency built with CMake and GNU Fortran from a MinGW-w64 toolchain.
 This does not establish results for Linux or Julia 1.10 before CI runs there.
@@ -115,11 +111,17 @@ releases, register the package, or configure repository protection rules.
 ## Dependency updates
 
 `.github/dependabot.yml` schedules weekly pull requests for Julia dependencies in the root,
-`docs`, and `dev` projects, and for GitHub Actions versions. Dependabot replaces the checklist's
+and `docs` projects, and for GitHub Actions versions. Dependabot replaces the checklist's
 original CompatHelper proposal, following the maintainers' recommendation.
 [CompatHelper status](https://juliaregistries.github.io/CompatHelper.jl/dev/).
 
-Review compatibility changes and run CI before merging. The formatter is deliberately pinned
-in `dev/Project.toml`, so a formatter update also requires reviewing any new formatting changes.
+Review compatibility changes and run CI before merging. The formatter version is pinned inline
+in `.github/workflows/CI.yml` and updated manually, with a review of any formatting changes.
 Dependabot configuration does not establish that all declared dependency lower bounds have
 been tested. That remains a separate compatibility task.
+
+FMM3D major-version updates are temporarily ignored because Inti's current compatibility bound
+requires FMM3D 1.x. The package keeps its existing `FMM3D = "1.0.1"` compat entry. Revisit the
+ignore rule when Inti supports a newer major version. Do not disable the test action's
+latest-version check to make an incompatible update pass.
+[Inti's registered compatibility bounds](https://github.com/JuliaRegistries/General/blob/master/I/Inti/WeakCompat.toml).

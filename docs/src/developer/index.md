@@ -37,11 +37,10 @@ shell example is explicitly unexecuted because it is more expensive.
 
 ## Reference and source docstrings
 
-Verify the installation preference recipe with `julia docs/check_precompile.jl` from the
-repository root. This now uses an empty Julia depot and a manifest-free source snapshot,
-checks numerical output with the workload disabled, and re-enables it in a new process.
-See [CI and installation checks](@ref ci-guide) for both installation modes and a faster,
-explicitly cache-reusing option.
+Verify the installation preference recipe with `julia --startup-file=no test/precompile.jl`
+from the repository root. This creates a temporary project, checks numerical output with the
+workload disabled, and re-enables it in a new process. Local runs reuse the installed depot.
+CI gives each installation job an empty depot. See [CI and installation checks](@ref ci-guide).
 
 The public reference is curated prose. `checkdocs = :none` temporarily disables source-docstring
 coverage checking because legacy docstrings still refer to removed API names and internal
@@ -59,19 +58,22 @@ Follow the [SciML style guide](https://docs.sciml.ai/SciMLStyle/stable/) and the
 JuliaFormatter configuration. Use descriptive ASCII names in examples and semicolons before
 keywords. Keep numerical algorithm changes separate from documentation changes.
 
-The `dev` environment pins JuliaFormatter to the same version used by CI. From the repository
-root, install it and run the read-only check:
+CI pins JuliaFormatter directly in its formatting job. To use the same version locally, start
+Julia from the repository root and run:
 
-```sh
-julia --project=dev -e 'using Pkg; Pkg.instantiate()'
-julia --project=dev dev/format.jl --check
+```julia
+import Pkg
+Pkg.activate(; temp = true)
+Pkg.add(Pkg.PackageSpec(; name = "JuliaFormatter", version = "2.14.0"))
+using JuliaFormatter: format
+format(["src", "ext", "test", "docs"]; overwrite = false)
 ```
 
-To apply formatting, run `julia --project=dev dev/format.jl` without `--check`. It formats Julia
-files under `src`, `ext`, `test`, `docs`, and `dev` using `.JuliaFormatter.toml`. Markdown prose
-and embedded examples are unchanged. Coordinate with other contributors before formatting
-files they are editing. Upgrade the formatter pin in `dev/Project.toml` deliberately, and
-review any resulting formatting changes before committing.
+The check returns `true` when all files are formatted. To apply changes, call
+`format(["src", "ext", "test", "docs"])`. It uses `.JuliaFormatter.toml` and leaves Markdown
+prose and embedded examples unchanged. Coordinate with other contributors before formatting
+files they are editing. Update the version in `.github/workflows/CI.yml` and this example
+together, and review the resulting formatting changes before committing.
 
 The formatter does not check API naming, type piracy, or test organization. Those require the
 separate manual checks in the documentation and API checklist.

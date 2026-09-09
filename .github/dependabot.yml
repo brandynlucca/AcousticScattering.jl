@@ -4,10 +4,14 @@ updates:
     directories:
       - "/"
       - "/docs"
-      - "/dev"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Inti currently requires FMM3D 1.x. Revisit when its compatibility bound changes.
+      # https://github.com/JuliaRegistries/General/blob/master/I/Inti/WeakCompat.toml
+      - dependency-name: FMM3D
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

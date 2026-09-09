@@ -19,10 +19,15 @@ jobs:
         with:
           version: "1"
       - uses: julia-actions/cache@v2
-      - name: Install pinned formatter
-        run: julia --project=dev -e 'using Pkg; Pkg.instantiate()'
       - name: Check SciML formatting
-        run: julia --project=dev dev/format.jl --check
+        shell: julia --startup-file=no --color=yes {0}
+        run: |
+          import Pkg
+          Pkg.activate(; temp = true)
+          Pkg.add(Pkg.PackageSpec(; name = "JuliaFormatter", version = "2.14.0"))
+          using JuliaFormatter: format
+          format(["src", "ext", "test", "docs"]; overwrite = false) ||
+              error("Formatting required. See the developer guide for the formatting command.")
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -46,6 +51,10 @@ jobs:
     name: Install (Julia ${{ matrix.version }}, ${{ matrix.mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      JULIA_DEPOT_PATH: ${{ runner.temp }}/install-depot
+      JULIA_LOAD_PATH: "@:@stdlib"
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +66,6 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-      # No cache: the harness gives each case its own empty depot and source snapshot.
+      # No cache: each matrix job uses a fresh Julia depot and the checked-out source.
       - name: Verify isolated installation and precompile preferences
-        run: julia --startup-file=no dev/check_install.jl --mode=${{ matrix.mode }}
+        run: julia --startup-file=no test/precompile.jl ${{ matrix.mode }}
