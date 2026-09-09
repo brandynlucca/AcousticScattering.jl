@@ -28,7 +28,7 @@ AcousticScatteringMakieExt = "Makie"
 
 [compat]
 CairoMakie = "0.12 - 0.15"
-FMM3D = "1.0.1"
+FMM3D = "1.0.1, 2.1"
 Ferrite = "1.6.0"
 GenericLinearAlgebra = "0.4.0"
 Gmsh = "0.3.1"
