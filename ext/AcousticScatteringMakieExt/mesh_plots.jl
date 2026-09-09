@@ -66,7 +66,8 @@ function Makie.plot!(plot::TriMeshPlot)
         mesh!(plot, points, faces; color = values,
             colormap = plot.colormap, colorrange = colorrange)
     end
-    plot.show_edges[] && wireframe!(plot, GBMesh(points, faces); color = :black, linewidth = 0.5)
+    plot.show_edges[] &&
+        wireframe!(plot, GBMesh(points, faces); color = :black, linewidth = 0.5)
     plot.show_nodes[] && scatter!(plot, points; color = :black, markersize = 4)
     qnormals = plot.qnormals[]
     if plot.show_normals[] && qnormals !== nothing
