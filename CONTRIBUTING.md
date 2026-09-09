@@ -28,8 +28,9 @@ julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.in
 julia --check-bounds=yes --project=test test/runtests.jl Plots1D
 ```
 
-The plotting groups are `Plots1D`, `Plots2D`, and `Plots3D`. `All` runs every group and is the
-default. The `GROUP` environment variable can select a group instead of the command-line argument.
+The plotting groups are `Plots1D`, `Plots2D`, `Plots3DModels`, and `Plots3DFull`. `All` runs every
+group and is the default. The `GROUP` environment variable can select a group instead of the
+command-line argument.
 Each group can also be run directly, for example `julia --project=test/core test/spheroidal.jl`.
 
 CI prepares dependencies once per environment and Julia version, then runs groups in separate
