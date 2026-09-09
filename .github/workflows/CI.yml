@@ -105,7 +105,7 @@ jobs:
           include-matrix: false
           delete-old-caches: false
       - name: Restore resolved test environment
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: test-environment-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
           path: ${{ env.TEST_PROJECT }}
