@@ -1674,7 +1674,8 @@ BLAS.set_num_threads(1)
         k38 = 2pi * 38000.0 / c_water
 
         @testset "plot(body, boundary, freqs; kind=:frequency) builds a figure" begin
-            fap = plot(sphere, AS.Rigid(), 20e3:10e3:60e3; kind = :frequency, sound_speed = c_water)
+            fap = plot(sphere, AS.Rigid(), 20e3:10e3:60e3;
+                kind = :frequency, sound_speed = c_water)
             @test fap isa Makie.FigureAxisPlot
         end
 
@@ -1692,7 +1693,8 @@ BLAS.set_num_threads(1)
         @testset "plot! overlays onto an existing axis" begin
             fig = Figure()
             ax = Axis(fig[1, 1])
-            plot!(ax, sphere, AS.Rigid(), 20e3:10e3:60e3; kind = :frequency, sound_speed = c_water)
+            plot!(ax, sphere, AS.Rigid(), 20e3:10e3:60e3;
+                kind = :frequency, sound_speed = c_water)
             @test !isempty(ax.scene.plots)
         end
 
@@ -1742,6 +1744,58 @@ BLAS.set_num_threads(1)
 
         @testset "unsupported kind errors clearly" begin
             @test_throws ArgumentError plot(bem_sol; kind = :bogus, angles = 0:0.2:(2pi))
+        end
+    end
+
+    @testset "Makie visualization: 3D mesh/field plots" begin
+        a = 0.01
+        c_water = 1477.4
+        k = 2pi * 38000.0 / c_water
+        sphere = AS.Sphere(a)
+
+        @testset "axisymmetric BEM: mesh and surface_field" begin
+            bem_sol = AS.bem(sphere, AS.Rigid(), k; n = 16)
+            @test plot(bem_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test plot(bem_sol; kind = :surface_field) isa Makie.FigureAxisPlot
+            @test plot(bem_sol; kind = :surface_field, field = :pressure_phase) isa
+                  Makie.FigureAxisPlot
+        end
+
+        @testset "full 3D BEM: mesh and surface_field" begin
+            full_sol = AS.bem(sphere, AS.Rigid(), k; method = :full,
+                meshsize = AS.bem3d_elements_per_wavelength(k))
+            @test plot(full_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test plot(full_sol; kind = :surface_field) isa Makie.FigureAxisPlot
+        end
+
+        @testset "bent-cylinder MFS: mesh falls back, surface_field is a point cloud" begin
+            bent = AS.Cylinder(0.01, 0.1; radius_curvature = 0.5)
+            k_bent = 2pi * 20000.0 / c_water
+            mfs_sol = AS.mfs(bent, AS.Rigid(), k_bent)
+            @test plot(mfs_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test plot(mfs_sol; kind = :surface_field) isa Makie.FigureAxisPlot
+        end
+
+        @testset "ModalSolution/KirchhoffSolution: mesh works, surface_field errors" begin
+            modal_sol = AS.modal(sphere, AS.Rigid(), k)
+            kirch_sol = AS.kirchhoff(sphere, AS.Rigid(), k)
+            @test plot(modal_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test plot(kirch_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test_throws ArgumentError plot(modal_sol; kind = :surface_field)
+            @test_throws ArgumentError plot(kirch_sol; kind = :surface_field)
+        end
+
+        @testset "FEMSolution{_ScalarFEMData}: mesh works, surface_field errors naming the gap" begin
+            fem_sol = AS.fem(sphere, AS.Rigid(), k)
+            @test plot(fem_sol; kind = :mesh) isa Makie.FigureAxisPlot
+            @test_throws ArgumentError plot(fem_sol; kind = :surface_field)
+        end
+
+        @testset "standalone Mesh: both representations" begin
+            m1 = AS.mesh(sphere; k = k)
+            m2 = AS.mesh(sphere; k = k, method = :full)
+            @test plot(m1) isa Makie.FigureAxisPlot
+            @test plot(m2) isa Makie.FigureAxisPlot
         end
     end
 
