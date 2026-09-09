@@ -5,3 +5,6 @@
 /docs/Manifest.toml
 Manifest.toml
 .vscode/
+
+# Fortran debug-unit artifact written by the SpheroidalWaves.jl backend
+fort.60

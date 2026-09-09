@@ -1,27 +1,35 @@
 # AcousticScattering.jl
 
-A Julia package for 3D acoustic scattering: exact modal-series solutions for
-canonical spheres and spheroids, axisymmetric and full 3D BEM/FEM solvers for
-the Helmholtz equation, FEM-BEM hybrid coupling, and far-field/target-strength
-post-processing.
+AcousticScattering.jl predicts how individual bodies scatter sound in a fluid. Construct a
+geometry and material configuration, solve with a modal, Kirchhoff, FEM, BEM, or MFS method,
+and extract target strength in dB re 1 m². Compare idealized shapes, explore frequency and
+orientation dependence, and check numerical calculations against analytical models.
 
-`AcousticScattering.jl` is a standalone package with no dependency on any
-particular downstream application.
+```@example home
+using AcousticScattering
 
-## Status
+sound_speed = 1477.4 # m/s
+frequency = 38000.0 # Hz
+wavenumber = 2pi * frequency / sound_speed
+solution = modal(Sphere(0.01), Rigid(), wavenumber)
+target_strength(solution)
+```
 
-This package is in early scaffolding — module structure is in place, solvers
-are not yet implemented.
+![Modal backscatter from a rigid 1 cm sphere across 12–200 kHz.](tutorials/rigid_sphere_frequency.png)
 
-## Pillars
+Start with [Getting Started](@ref getting-started), then follow
+[Your first frequency sweep](@ref first-sweep) to generate this plot and save its data.
+[Choosing a solver](@ref solver-selection) lists supported combinations. The
+[API Reference](@ref api-reference) describes current calls.
 
-1. **Analytical & Benchmark** — exact modal series (Mie scattering,
-   spheroidal wave functions) and high-frequency approximations (KA, KRM).
-2. **Numerical Physics Engine** — axisymmetric (Fourier-mode) BEM and radial
-   FEM for bodies of revolution, full 3D BEM (Burton-Miller/CHIEF) and FEM
-   for general geometry, and FEM-BEM hybrid coupling.
-3. **Acoustic Post-Processing** — far-field extrapolation, target strength,
-   field visualization.
-4. **Ecosystem Integration** — thin wrappers over `GeometryBasics.jl`,
-   `MeshIO.jl`, `Gmsh.jl`, `LinearAlgebra`, `Krylov.jl`, and optional
-   $H$-matrix/FMM acceleration.
+## Scope and maturity
+
+Implemented methods include sphere/spheroid series, finite-cylinder approximations,
+curved-cylinder models, physical-optics surface integrals, axisymmetric and full surface BEM,
+radial and meridian FEM, MFS, and coupled structural shells. Supported materials differ by
+solver and geometry. Creating a material does not guarantee support in every solver.
+
+This is a development package (`0.1.0-DEV`). These pages describe the current source tree.
+Consult the [migration guide](@ref migration) when updating older scripts. Full 3D volume FEM
+is not implemented. KRM is not a public solver, and full 3D BEM does not implement
+Burton–Miller/CHIEF regularization. Additional visualization recipes are under development.

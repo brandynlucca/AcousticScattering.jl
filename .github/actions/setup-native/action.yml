@@ -1,0 +1,12 @@
+name: Install native build tools
+description: Install tools required by the registered SpheroidalWaves dependency on Ubuntu
+runs:
+  using: composite
+  steps:
+    - name: Install CMake and GNU Fortran
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes cmake gfortran make
+        cmake --version
+        gfortran --version
