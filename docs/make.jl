@@ -7,7 +7,7 @@ DocMeta.setdocmeta!(AcousticScattering, :DocTestSetup, :(using AcousticScatterin
 makedocs(
     sitename = "AcousticScattering.jl",
     modules = [AcousticScattering],
-    # Curated reference prose is used while legacy source docstrings are being migrated.
+    # The API reference uses curated prose rather than source-docstring inclusion.
     # Doctests, examples, and cross-references still fail the build on errors.
     checkdocs = :none,
     doctest = true,
@@ -41,10 +41,6 @@ makedocs(
         ],
         "Visualization Gallery" => "gallery/index.md",
         "API Reference" => "api.md",
-        "Developer Guide" => [
-            "Building and contributing" => "developer/index.md",
-            "CI and installation checks" => "developer/ci.md",
-            "API migration" => "developer/migration.md"
-        ]
+        "Developer Guide" => "developer/index.md"
     ]
 )

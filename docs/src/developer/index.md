@@ -28,29 +28,25 @@ modal sphere. Material and geometry examples also check finite outputs. Finite-o
 are smoke checks, not independent model validation. The full package tests remain necessary:
 
 ```sh
-julia --project=. -t auto test/runtests.jl
+julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
 Examples on different pages are independent. Blocks on one page use a named Documenter session.
 Copy all preceding blocks on that page when reproducing a later calculation. The structural
 shell example is explicitly unexecuted because it is more expensive.
 
+See the repository's
+[contributor instructions](https://github.com/brandynlucca/AcousticScattering.jl/blob/main/CONTRIBUTING.md)
+for individual test groups and their environments.
+
 ## Reference and source docstrings
 
-Verify the installation preference recipe with `julia --startup-file=no test/precompile.jl`
-from the repository root. This creates a temporary project, checks numerical output with the
-workload disabled, and re-enables it in a new process. Local runs reuse the installed depot.
-CI gives each installation job an empty depot. See [CI and installation checks](@ref ci-guide).
-
-The public reference is curated prose. `checkdocs = :none` temporarily disables source-docstring
-coverage checking because legacy docstrings still refer to removed API names and internal
-fields. This does **not** disable doctests, executable examples, or unresolved-reference errors.
-Migrating exported source docstrings and restoring `checkdocs = :exports` remain open tasks.
+The public reference is curated prose. `checkdocs = :none` disables source-docstring coverage
+checking. Doctests, executable examples, and unresolved-reference errors still fail the build.
 A successful website build does not establish source-docstring coverage.
 
 Prefer interface descriptions and public accessors over undocumented solution storage.
-When adding a capability, update the support table, relevant theory page, an executable example,
-and the checklist. Check an item only after its stated acceptance criteria are met.
+When adding a capability, update the support table, relevant theory page, and an executable example.
 
 ## Style and citations
 
@@ -75,9 +71,8 @@ prose and embedded examples unchanged. Coordinate with other contributors before
 files they are editing. Update the version in `.github/workflows/CI.yml` and this example
 together, and review the resulting formatting changes before committing.
 
-The formatter does not check API naming, type piracy, or test organization. Those require the
-separate manual checks in the documentation and API checklist.
+Review API naming, type piracy, and test organization separately from automatic formatting.
 
 Use a persistent primary-source link near literature claims and add author–year metadata to
-[References](@ref references). Label package-derived formulas and unverified extensions.
-Do not infer support from a literature inventory, an old roadmap, or an outer dispatch signature.
+[References](@ref references). Distinguish model assumptions from numerical approximations.
+Verify supported combinations against the implementation and tests.

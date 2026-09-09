@@ -39,6 +39,7 @@ LinearMaps = "3.11.4"
 Makie = "0.21 - 0.24"
 PrecompileTools = "1"
 QuadGK = "2"
+SafeTestsets = "0.1"
 SpecialFunctions = "2"
 SpheroidalWaves = "0.2, 0.3"
 StaticArrays = "1.9.20"
@@ -46,7 +47,8 @@ julia = "1.10"
 
 [extras]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["CairoMakie", "Test"]
+test = ["CairoMakie", "SafeTestsets", "Test"]

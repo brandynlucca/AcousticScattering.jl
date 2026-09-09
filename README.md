@@ -9,8 +9,6 @@ Material options include rigid, pressure-release, fluid-filled, and elastic conf
 Support varies by solver. See the [model guide](docs/src/models/selection.md) for available
 combinations and limitations.
 
-The package is under active development, and its API may change.
-
 ## Installation
 
 Requires Julia 1.10 or later, CMake, and a Fortran toolchain. See the

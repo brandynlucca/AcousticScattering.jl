@@ -2,8 +2,6 @@
 
 This section defines the equations, units, and directions used throughout the examples.
 Choose a method using [Choosing a solver](@ref solver-selection), then read its theory page.
-Equations below describe the implemented conventions. They are not a claim that every solver
-can produce every field or observation direction.
 
 ## Harmonic acoustic problem
 

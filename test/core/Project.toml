@@ -1,0 +1,13 @@
+[deps]
+AcousticScattering = "37bc0722-8b3f-41d8-b4ae-17decd3486a9"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Preferences = "21216c6a-2e73-6563-6e65-726566657250"
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+Preferences = "1"
+SafeTestsets = "0.1"
+SpecialFunctions = "2"
+julia = "1.10"

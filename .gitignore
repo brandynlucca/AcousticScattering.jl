@@ -4,6 +4,7 @@
 /docs/build/
 /docs/Manifest.toml
 Manifest.toml
+LocalPreferences.toml
 .vscode/
 
 # Fortran debug-unit artifact written by the SpheroidalWaves.jl backend

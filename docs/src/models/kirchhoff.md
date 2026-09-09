@@ -19,8 +19,7 @@ Rigid and pressure-release boundaries use `+1` and `-1`. A fluid-shell sphere us
 frequency- and thickness-dependent two-interface reflection approximation. There is no
 general implemented elastic-material Kirchhoff reflection law.
 
-For a sphere, the implemented finite-frequency expression in
-`analytical/high_frequency.jl` is
+For a sphere, the finite-frequency expression used by the solver is
 
 ```math
 f_s = R_c a\left[-\frac{i}{2}e^{2ika}
@@ -31,13 +30,13 @@ Its leading magnitude tends to `abs(R_c) * a / 2` at high frequency. The correct
 part of the physical-optics surface integral, not a replacement for the exact modal series
 at small `ka`.
 
-## Geometry-specific implementation
+## Geometry-specific formulations
 
 Straight cylinders use a Bessel-series lateral contribution plus an illuminated end-cap
 contribution. This differs from finite-cylinder modal calculations, which omit the caps.
 Spheroids use adaptive integration over polar and azimuthal coordinates, with illumination
 intervals determined geometrically. Bent cylinders use nested integration over the curved
-surface in `analytical/bent_cylinder.jl`.
+surface.
 
 The quadrature tolerance controls integration error, not physical model error. Check against
 modal or converged numerical methods over the frequency and orientation range of interest.
@@ -45,5 +44,3 @@ The [geometry tutorial](@ref geometry-tutorial) runs a bent-cylinder example. Th
 [frequency tutorial](@ref first-sweep) provides the sphere workflow to adapt for comparisons.
 
 [Jech et al. (2015)](https://doi.org/10.1121/1.4937607) provides canonical cross-model benchmarks.
-The package's finite-frequency surface formulas and normalization should be treated as
-implementation-specific derivations and checked against its regression tests.

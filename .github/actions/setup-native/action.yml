@@ -6,7 +6,9 @@ runs:
     - name: Install CMake and GNU Fortran
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install --yes cmake gfortran make
+        if ! command -v cmake >/dev/null || ! command -v gfortran >/dev/null || ! command -v make >/dev/null; then
+          sudo apt-get update
+          sudo apt-get install --yes cmake gfortran make
+        fi
         cmake --version
         gfortran --version

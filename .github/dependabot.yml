@@ -4,6 +4,8 @@ updates:
     directories:
       - "/"
       - "/docs"
+      - "/test"
+      - "/test/core"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

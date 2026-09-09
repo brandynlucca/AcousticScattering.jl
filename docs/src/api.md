@@ -1,7 +1,6 @@
 # [API Reference](@id api-reference)
 
-The public workflow is geometry → boundary/material → solver → result query. This curated
-reference describes current calls without exposing every internal function. Start with the
+The public workflow is geometry → boundary/material → solver → result query. Start with the
 [tutorial](@ref first-sweep) and check the [support table](@ref solver-selection) before changing
 the model. Numerical inputs use meters, seconds, Hz, and exterior-fluid wavenumber in rad/m.
 
@@ -42,8 +41,7 @@ solution = mfs(body, boundary, wavenumber; kwargs...)
 ```
 
 `kwargs...` above summarizes method-specific keywords. Each method has its own options, so do not pass
-the same options to every method. Unknown choices can produce `ArgumentError` or a lower-level
-`MethodError` on paths whose input validation is still being consolidated.
+the same options to every method. Use the supported combinations in the model guide.
 
 | Function | Returns | Main options |
 |:--|:--|:--|
@@ -92,14 +90,11 @@ surface_mesh = mesh(Sphere(0.01); method = :full, resolution = 0.003)
 
 Each returns `Mesh`. Exactly one of `resolution` or `k` must be supplied. Resolution means
 panel count for axisymmetric methods, edge length in meters for full methods. Full surface
-generation supports sphere and spheroid. Keep `Panel` and quadrature details out of application
-code. Public mesh accessors and access to meshes through solution objects are still being
-consolidated.
+generation supports spheres and spheroids.
 
 ## Sampling and visualization
 
-The numerical sweep helpers `frequency_sweep`, `incidence_angle_sweep`, `bistatic_sweep`, and
-`bistatic_map`, with their result types `FrequencySweep`, `IncidenceAngleSweep`, `BistaticSweep`,
-and `BistaticMap`, are being developed alongside plotting recipes. This documentation pass
-does not freeze their changing contract. The executable tutorials use explicit solver calls
-and CairoMakie, and [the gallery](@ref gallery) tracks the remaining 2D/3D examples.
+The [frequency-sweep tutorial](@ref first-sweep) demonstrates solving across frequencies,
+plotting target strength with CairoMakie, and saving the results as CSV. See
+[Geometry and incidence](@ref geometry-tutorial) for an angle sweep and
+[the gallery](@ref gallery) for the resulting figures.

@@ -20,14 +20,23 @@ jobs:
         with:
           version: "1"
       - uses: julia-actions/cache@v2
-      - name: Build documentation and run examples
+      - name: Install documentation dependencies
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: "0"
         run: |
           julia --project=docs -e '
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
-            Pkg.instantiate()'
-          julia --project=docs test/documentation.jl
-          julia --project=docs docs/make.jl
+            Pkg.instantiate()
+            using Preferences: set_preferences!
+            set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
+              "precompile_workload" => false; force=true)'
+      - name: Precompile documentation dependencies
+        run: julia --project=docs -e 'using Pkg; Pkg.precompile(; strict=true)'
+      - name: Test documentation deployment guard
+        run: julia --project=docs test/documentation.jl
+      - name: Build documentation and run examples
+        run: julia --project=docs docs/make.jl
       - name: Upload documentation preview
         uses: actions/upload-artifact@v4
         with:
@@ -53,22 +62,23 @@ jobs:
       group: documentation-deployment
       cancel-in-progress: false
     steps:
+      - name: Check GitHub Pages configuration
+        uses: actions/configure-pages@v5
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-native
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"
       - uses: julia-actions/cache@v2
-      - name: Check GitHub Pages configuration
-        uses: actions/configure-pages@v5
       - name: Install documentation tools
         env:
           JULIA_PKG_PRECOMPILE_AUTO: "0"
         run: |
-          julia --project=docs -e '
-            using Pkg
-            Pkg.develop(PackageSpec(path=pwd()))
-            Pkg.instantiate()'
+          julia --project="${{ runner.temp }}/docs-deploy" -e '
+            using Pkg, TOML
+            version = TOML.parsefile("docs/Project.toml")["compat"]["Documenter"]
+            Pkg.add(PackageSpec(; name="Documenter", version))'
+      - name: Precompile deployment tools
+        run: julia --project="${{ runner.temp }}/docs-deploy" -e 'using Pkg; Pkg.precompile(; strict=true)'
       - uses: actions/download-artifact@v4
         with:
           name: documentation
@@ -76,7 +86,7 @@ jobs:
       - name: Publish validated documentation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: julia --project=docs docs/deploy.jl
+        run: julia --project="${{ runner.temp }}/docs-deploy" docs/deploy.jl
       - name: Check out versioned documentation
         uses: actions/checkout@v4
         with:

@@ -1,9 +1,6 @@
 # [References](@id references)
 
-References are maintained here as author–year entries with persistent links. Theory pages link
-to the source that supports each literature claim. Equations derived from the implementation
-are labeled as such. Numerical agreement within this package is distinguished from independent
-benchmark evidence.
+These references cover the scattering models and numerical methods discussed in the theory pages.
 
 - Jech, J. M., et al. (2015). *Comparisons among ten models of acoustic backscattering used in
   aquatic ecosystem research*. Journal of the Acoustical Society of America, 138, 3742–3764.
@@ -27,13 +24,7 @@ benchmark evidence.
   Engineering Analysis with Boundary Elements.
   [DOI: 10.1016/S0955-7997(03)00017-1](https://doi.org/10.1016/S0955-7997(03)00017-1).
   [Author-hosted article](https://people.mines.edu/pamartin/wp-content/uploads/sites/254/2024/06/R080_EABE.pdf).
-  General MFS background, not a validation of package-specific source placement.
-
-The source also attributes viscous-elastic scattering to Feuillade and Nero (1998), bent-body
-coherence corrections to Stanton, and the thin-shell formulation to Hayek and Boisvert (2003).
-Complete equation-level citation verification for those branches is pending. The repository's
-`docs/NUMERICAL_METHODS_LITERATURE_MAP.md` is a research inventory, not a list of models
-already implemented in the package.
+  MFS formulations for scattering and radiation problems.
 
 For tooling:
 [Documenter executable blocks](https://documenter.juliadocs.org/stable/man/syntax/),

@@ -18,8 +18,8 @@ oblate when it is smaller. Its surface satisfies
 A finite curvature radius selects bending only in methods that implement it. Its positive
 cap-depth setting selects the smooth-cap MFS construction. It is not a universal shape option.
 
-`Shell(body, thickness)` is the geometric wrapper currently used by structural shell FEM.
-It coexists with `Shelled`, which holds physics. These names are distinct in the current API.
+`Shell(body, thickness)` specifies structural shell geometry. `Shelled` specifies the material
+and interior configuration.
 
 `mesh(body; resolution)` returns `Mesh`. Axisymmetric discretization represents a meridian
 curve that is revolved during integration. It is not a flat 2D obstacle. Full meshes represent

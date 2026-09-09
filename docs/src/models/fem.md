@@ -1,8 +1,7 @@
 # [FEM and shell coupling](@id fem-theory)
 
 The FEM paths discretize acoustic or elastic differential equations and couple them to outgoing
-acoustic fields. Radial and meridian implementations are available. The full 3D volume-FEM file
-is a stub, not an exposed solver.
+acoustic fields. Radial and meridian formulations are available. Full 3D volume FEM is not supported.
 
 ## Radial acoustic FEM and DtN
 
@@ -23,10 +22,9 @@ k\frac{{h_l^{(1)}}'(kR)}{h_l^{(1)}(kR)}u_l(R).
 
 The finite-element weak form follows by multiplying by a test function and integrating by
 parts. Rigid/soft conditions apply at the body. Fluid transmission couples interior and
-exterior fields. This is a package-derived discretization of the same canonical problem
-as the sphere modal series, not a separately published model.
+exterior fields. This discretizes the same boundary-value problem as the sphere modal series.
 
-`engine/radial_fem.jl` supports linear/quadratic elements for applicable rigid/soft paths.
+Radial FEM supports linear/quadratic elements for applicable rigid/soft paths.
 Fluid and elastic variants have their own discretizations and controls. `R > radius` is
 required for an exterior annulus. Moving `R` farther away is not the main accuracy control
 when the modal DtN condition is exact. Check element refinement and modal cutoff separately.
@@ -38,12 +36,11 @@ currently retain target strength only. Complex amplitude is unavailable through 
 
 Meridian FEM discretizes radial/axial dependence and uses azimuthal Fourier modes. For mode
 `m`, cylindrical-coordinate operators contain the term `-m^2 / rho^2`. Regularity on the
-axis and the transformed volume weighting are essential. The sphere, cylinder, and spheroid
-implementations live in their respective `engine/*meridian_fem.jl` files.
+axis and the transformed volume weighting are essential. Meridian FEM supports spheres,
+straight cylinders, and spheroids.
 
 Increase mesh resolution and angular/modal orders separately. Oblique cylinder/spheroid
-incidence requires the corresponding Fourier content. These are package-derived methods
-validated through canonical comparisons in the tests. They do not automatically model bending.
+incidence requires the corresponding Fourier content. These methods do not model bend curvature.
 
 ## Elastic and coupled shell FEM
 
@@ -59,10 +56,7 @@ Isotropic solid displacement satisfies
 
 Normal displacement and traction couple to fluid pressure. Coupled shell implementations combine
 structural finite elements with exterior and, where supported, interior boundary elements.
-They live in `shell_fem.jl`, `shell_fem_general.jl`, `hybrid.jl`, and
-`hybrid_general_shell.jl`.
-
-The current call shape is:
+For example:
 
 ```julia
 body = Shell(Spheroid(0.05, 0.02), 0.001) # thickness in m
@@ -76,11 +70,8 @@ This expensive structural example is illustrative and is not executed in the ord
 build. The four fluid arguments are exterior density/speed followed by interior density/speed.
 The final positional input is exterior wavenumber.
 
-`:thin` uses the Hayek–Boisvert midsurface formulation described in the source and is limited
+`:thin` uses a midsurface shell formulation and is limited
 to axial prolate-spheroid calculations. It supports a no-interior-coupling branch with zero
 interior density. `:general` uses a through-thickness meridian elastic discretization for
 sphere/spheroid shells and requires a fluid interior. It has no dedicated vacuum branch.
 A small positive density is an approximation, not an exact vacuum boundary.
-
-A full equation-by-equation audit of the shell formulations and their literature sources is
-still pending.

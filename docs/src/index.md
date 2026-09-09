@@ -29,7 +29,4 @@ curved-cylinder models, physical-optics surface integrals, axisymmetric and full
 radial and meridian FEM, MFS, and coupled structural shells. Supported materials differ by
 solver and geometry. Creating a material does not guarantee support in every solver.
 
-This is a development package (`0.1.0-DEV`). These pages describe the current source tree.
-Consult the [migration guide](@ref migration) when updating older scripts. Full 3D volume FEM
-is not implemented. KRM is not a public solver, and full 3D BEM does not implement
-Burton–Miller/CHIEF regularization. Additional visualization recipes are under development.
+Full 3D volume FEM and full 3D BEM does not implement Burton–Miller/CHIEF regularization.

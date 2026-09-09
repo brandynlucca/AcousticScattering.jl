@@ -28,8 +28,60 @@ jobs:
           using JuliaFormatter: format
           format(["src", "ext", "test", "docs"]; overwrite = false) ||
               error("Formatting required. See the developer guide for the formatting command.")
+  test-dependencies:
+    name: Test dependencies (Julia ${{ matrix.version }}, ${{ matrix.flavor }})
+    runs-on: ubuntu-latest
+    env:
+      TEST_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1.10", "1"]
+        flavor: [core, plots]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-native
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: tests-${{ matrix.version }}-${{ matrix.flavor }}
+          include-matrix: false
+      - name: Install test dependencies
+        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.activate(ENV["TEST_PROJECT"])
+          Pkg.develop(PackageSpec(; path = pwd()))
+          Pkg.instantiate()
+          using Preferences: set_preferences!
+          set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
+              "precompile_workload" => false; force = true)
+      - name: Precompile test dependencies
+        run: julia --startup-file=no --check-bounds=yes --project="$TEST_PROJECT" -e 'using Pkg; Pkg.precompile(; strict=true)'
+      - name: Save resolved test environment
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-environment-${{ matrix.version }}-${{ matrix.flavor }}
+          path: |
+            ${{ env.TEST_PROJECT }}/Manifest.toml
+            ${{ env.TEST_PROJECT }}/LocalPreferences.toml
+          if-no-files-found: error
+          retention-days: 7
   test:
+    name: test (${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.arch }}, ${{ matrix.group }})
     runs-on: ${{ matrix.os }}
+    needs: [test-dependencies]
+    env:
+      GROUP: ${{ matrix.group }}
+      TEST_PROJECT: ${{ startsWith(matrix.group, 'Plots') && 'test' || 'test/core' }}
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -37,16 +89,26 @@ jobs:
         version: ["1.10", "1"]
         os: [ubuntu-latest]
         arch: [x64]
+        group: [Analytical, RadialFEM, MeridianFEM, Boundary, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3D]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-native
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+        with:
+          cache-name: tests-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
+          include-matrix: false
+      - name: Restore resolved test environment
+        uses: actions/download-artifact@v4
+        with:
+          name: test-environment-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
+          path: ${{ env.TEST_PROJECT }}
+      - name: Ensure cached dependencies are available
+        run: julia --startup-file=no --check-bounds=yes --project="$TEST_PROJECT" -e 'using Pkg; Pkg.instantiate()'
+      - name: Run test group
+        run: julia --startup-file=no --check-bounds=yes --project="$TEST_PROJECT" test/runtests.jl
   install:
     name: Install (Julia ${{ matrix.version }}, ${{ matrix.mode }})
     runs-on: ubuntu-latest

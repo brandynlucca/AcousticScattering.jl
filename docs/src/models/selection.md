@@ -1,8 +1,7 @@
 # [Choosing a solver](@id solver-selection)
 
 Start with the least costly method that supports both your physics and your desired output.
-This table describes current implementations, not every combination accepted by an outer Julia
-method signature. All five public solver families return solution objects.
+The table lists supported combinations. All five solver families return solution objects.
 
 | Geometry and configuration | Modal | Kirchhoff | FEM | BEM | MFS |
 |:--|:--|:--|:--|:--|:--|
@@ -19,9 +18,7 @@ method signature. All five public solver families return solution objects.
 | Structural `Shell` geometry, absolute elastic material | No | No | Coupled thin/general shell | Through coupled FEM | No |
 
 For structural shell FEM, `:thin` supports prolate spheroids at axial incidence. The `:general` method
-supports sphere/spheroid shell geometries and a fluid interior. Unsupported combinations can
-currently fail inside the implementation with a `MethodError`. Do not infer support from a
-successful constructor.
+supports sphere/spheroid shell geometries and a fluid interior.
 
 ## Choosing by question
 

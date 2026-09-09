@@ -23,13 +23,12 @@ A_\ell^{\mathrm{soft}}=-\frac{j_\ell(ka)}{h_\ell^{(1)}(ka)}.
 ```
 
 Fluid coefficients match pressure and density-weighted normal derivatives. Elastic coefficients
-also match displacement and stress. The implementation is in `analytical/sphere_modal.jl`.
+also match displacement and stress.
 Increase `m_max` to test truncation. The keyword uses “m” although the sum here uses
 spherical degree. Highly resonant or extreme-contrast cases can be ill-conditioned.
 
 The [convergence tutorial](@ref convergence-tutorial) compares numerical methods with this
-sphere reference. Historical Jech comparisons and limiting-case tests are in `test/runtests.jl`.
-Agreement at those test points is not a uniform error bound.
+sphere reference. Check convergence over the frequencies and material contrasts of interest.
 
 ## Spheroid
 
@@ -38,17 +37,16 @@ functions. Rigid/soft boundaries decouple appropriate modes. A penetrable sphero
 couples angular degrees because interior and exterior wavenumbers differ.
 
 `FluidFilled(...; coupling = :full)` solves the off-diagonal coupling system.
-`:diagonal` neglects that coupling and changes the model approximation. The implementation in
-`analytical/spheroid_modal.jl` uses SpheroidalWaves. Increase both `m_max` and `n_max`.
+`:diagonal` neglects that coupling and changes the model approximation. Spheroidal wave functions
+are evaluated with SpheroidalWaves. Increase both `m_max` and `n_max`.
 Higher orders can become unreliable when radial functions are poorly conditioned.
 
 [Furusawa (1988)](https://www.jstage.jst.go.jp/article/ast1980/9/1/9_1_13/_article)
-develops the spheroidal fish-target models behind this treatment. The oblate implementation
-and numerical choices must also be checked against the package's current tests.
+develops the prolate spheroidal fish-target models behind this treatment.
 
 ## Finite and bent cylinders
 
-`analytical/cylinder_modal.jl` combines a circular-cylinder coefficient sum with a finite
+The cylinder model combines a circular-cylinder coefficient sum with a finite
 axial coherence factor:
 
 ```math
@@ -58,10 +56,9 @@ f_{\mathrm{bs}}\propto L\,
 ```
 
 This describes the lateral finite-length approximation and omits end-cap scattering.
-It should not be advertised as the exact solution of a closed finite cylinder, particularly
-near end-on incidence. Elastic cylinder coefficients live in `cylinder_elastic_modal.jl`.
+It is not an exact solution for a closed finite cylinder, particularly near end-on incidence.
 
-For curvature radius `rho_c`, `analytical/bent_cylinder.jl` multiplies the straight amplitude
+For curvature radius `rho_c`, the bent-cylinder model multiplies the straight amplitude
 by `L_effective / L`, with
 
 ```math
@@ -73,7 +70,6 @@ z_{\max}=\rho_c\left(1-\cos\frac{L}{2\rho_c}\right).
 ```
 
 This correction applies near broadside and does not account for all effects of curvature.
-Straight-limit and cross-method tests provide regression evidence.
 
 ## Shells and viscosity
 
@@ -83,7 +79,7 @@ using the actual cavity fluid. `:identical_fluid` instead uses the exterior medi
 original inner-boundary terms, ignoring differing cavity contrasts. Choose it only to reproduce
 that restricted formulation. See the Goodman–Stern reference in [References](@ref references).
 
-The viscous-elastic implementation in `analytical/vesm.jl` represents a viscous outer layer,
+The viscous-elastic model represents a viscous outer layer,
 elastic wall, and fluid core. Viscosity introduces frequency-dependent complex wavenumbers.
-Only its monopole is supported. Higher modes have unresolved physical-validation problems.
+Only its monopole is supported.
 Use this model only in its low-frequency, monopole regime.

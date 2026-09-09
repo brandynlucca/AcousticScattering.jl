@@ -1,7 +1,9 @@
 # GeometryBasics is a Makie dependency, not a direct dependency of this package; access its
 # types through Makie's own binding rather than adding a new project dependency for two names.
 const Point3f = Makie.GeometryBasics.Point3f
+const Vec3f = Makie.GeometryBasics.Vec3f
 const TriangleFace = Makie.GeometryBasics.TriangleFace
+const GBMesh = Makie.GeometryBasics.Mesh
 
 function _field_values(field_complex::AbstractArray, field::Symbol)
     field === :pressure_magnitude && return abs.(field_complex)
@@ -44,10 +46,16 @@ end
 
 # --- Native triangulated surfaces: full 3D BEM, Mesh{<:Inti.Quadrature} ---
 
-@recipe(TriMeshPlot, points, faces, values) do scene
-    Attributes(colormap = _MAGNITUDE_COLORMAP, colorrange = nothing)
+@recipe(TriMeshPlot, points, faces, values, qnormals) do scene
+    Attributes(colormap = _MAGNITUDE_COLORMAP, colorrange = nothing,
+        show_edges = false, show_nodes = false, show_normals = false, normal_scale = 1.0)
 end
 
+# `qnormals`, when present, is (quadrature_node_positions, quadrature_node_normal_vectors) — a
+# separate, self-consistent pair at quadrature-node locations, deliberately NOT reusing `points`
+# (mesh vertices): quadrature nodes generally sit inside each face, not at its corners, so pairing
+# a normal with the wrong position would be the same per-vertex/per-face indexing mistake already
+# found and fixed for surface-field coloring, just for normals instead of color.
 function Makie.plot!(plot::TriMeshPlot)
     points, faces, values = plot.points[], plot.faces[], plot.values[]
     if values === nothing
@@ -57,6 +65,14 @@ function Makie.plot!(plot::TriMeshPlot)
                      plot.colorrange[]
         mesh!(plot, points, faces; color = values,
             colormap = plot.colormap, colorrange = colorrange)
+    end
+    plot.show_edges[] && wireframe!(plot, GBMesh(points, faces); color = :black, linewidth = 0.5)
+    plot.show_nodes[] && scatter!(plot, points; color = :black, markersize = 4)
+    qnormals = plot.qnormals[]
+    if plot.show_normals[] && qnormals !== nothing
+        positions, directions = qnormals
+        scale = Float32(plot.normal_scale[])
+        arrows3d!(plot, positions, directions .* scale; color = :red)
     end
     return plot
 end
@@ -77,6 +93,12 @@ function _inti_mesh_points_faces(quad)
         end
     end
     return points, faces
+end
+
+function _inti_mesh_qnormals(quad)
+    positions = [Point3f(Inti.coords(q)...) for q in quad]
+    directions = [Vec3f(Inti.normal(q)...) for q in quad]
+    return positions, directions
 end
 
 # Makie.mesh!'s color array must be per-VERTEX (length(points)), not per-face — confirmed
@@ -163,7 +185,7 @@ function _solution_render(
     points, faces = _inti_mesh_points_faces(quad)
     values = field === nothing ? nothing :
              _inti_mesh_vertex_field(quad, sol.data.p_scat, field)
-    return (:trimesh, points, faces, values)
+    return (:trimesh, points, faces, values, _inti_mesh_qnormals(quad))
 end
 
 function _solution_render(
@@ -209,27 +231,21 @@ end
 
 function _mesh_render(m::AcousticScattering.Mesh{<:Inti.Quadrature})
     points, faces = _inti_mesh_points_faces(m.data)
-    return (:trimesh, points, faces, nothing)
+    return (:trimesh, points, faces, nothing, _inti_mesh_qnormals(m.data))
 end
 
-function _render_solution_plot(kind::Symbol, x, y, z, values; kwargs...)
-    kind === :revolved && return revolvedsurfaceplot(x, y, z, values; kwargs...)
-    error("unreachable")
-end
-function _render_solution_plot(kind::Symbol, a, b, c; kwargs...)
-    kind === :trimesh && return trimeshplot(a, b, c; kwargs...)
+function _render_solution_plot(kind::Symbol, a, b, c, d; kwargs...)
+    kind === :revolved && return revolvedsurfaceplot(a, b, c, d; kwargs...)
+    kind === :trimesh && return trimeshplot(a, b, c, d; kwargs...)
     error("unreachable")
 end
 function _render_solution_plot(kind::Symbol, a, b; kwargs...)
     kind === :points && return pointcloudplot(a, b; kwargs...)
     error("unreachable")
 end
-function _render_solution_plot!(ax, kind::Symbol, x, y, z, values; kwargs...)
-    kind === :revolved && return revolvedsurfaceplot!(ax, x, y, z, values; kwargs...)
-    error("unreachable")
-end
-function _render_solution_plot!(ax, kind::Symbol, a, b, c; kwargs...)
-    kind === :trimesh && return trimeshplot!(ax, a, b, c; kwargs...)
+function _render_solution_plot!(ax, kind::Symbol, a, b, c, d; kwargs...)
+    kind === :revolved && return revolvedsurfaceplot!(ax, a, b, c, d; kwargs...)
+    kind === :trimesh && return trimeshplot!(ax, a, b, c, d; kwargs...)
     error("unreachable")
 end
 function _render_solution_plot!(ax, kind::Symbol, a, b; kwargs...)
