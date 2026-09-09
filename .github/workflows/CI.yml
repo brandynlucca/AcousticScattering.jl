@@ -92,7 +92,7 @@ jobs:
         version: ["1.10", "1"]
         os: [ubuntu-latest]
         arch: [x64]
-        group: [Analytical, RadialFEM, MeridianFEM, Boundary, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3D]
+        group: [Analytical, RadialFEM, MeridianFEM, Boundary, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
