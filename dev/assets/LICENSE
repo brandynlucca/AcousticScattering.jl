@@ -1,0 +1,23 @@
+AcousticScattering.jl logo artwork
+
+This notice applies to logo.svg, favicon.svg and favicon.ico in this directory.
+It does not change the MIT license for the package source code.
+
+The artwork incorporates the Julia dots from Julia logo graphics:
+Copyright (c) 2012-2022 Stefan Karpinski.
+Source: https://github.com/JuliaLang/julia-logo-graphics
+Original license: https://github.com/JuliaLang/julia-logo-graphics/blob/master/LICENSE.md
+
+The dots have been separated into interacting scatterers and combined with acoustic
+wavefronts, decorative pressure-field gradients, a rounded-square background and the
+AcousticScattering.jl name. The favicon is a simplified version of this adaptation.
+No endorsement by the original designer or Julia project is implied.
+
+The adapted artwork is distributed under Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0).
+License: https://creativecommons.org/licenses/by-nc-sa/4.0/
+Legal terms: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+Retain attribution, indicate changes, and share adaptations under the same license.
+Commercial use of the Julia logo or derivatives requires separate permission from
+the original licensor. See the original license for contact information and details.
