@@ -23,8 +23,10 @@ function Makie.plot!(plot::RevolvedSurfacePlot)
     if values === nothing
         surface!(plot, x, y, z; color = fill(RGBAf(0.6, 0.6, 0.6, 1), size(x)))
     else
-        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) : plot.colorrange[]
-        surface!(plot, x, y, z; color = values, colormap = plot.colormap, colorrange = colorrange)
+        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) :
+                     plot.colorrange[]
+        surface!(plot, x, y, z; color = values,
+            colormap = plot.colormap, colorrange = colorrange)
     end
     return plot
 end
@@ -51,8 +53,10 @@ function Makie.plot!(plot::TriMeshPlot)
     if values === nothing
         mesh!(plot, points, faces; color = RGBAf(0.6, 0.6, 0.6, 1))
     else
-        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) : plot.colorrange[]
-        mesh!(plot, points, faces; color = values, colormap = plot.colormap, colorrange = colorrange)
+        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) :
+                     plot.colorrange[]
+        mesh!(plot, points, faces; color = values,
+            colormap = plot.colormap, colorrange = colorrange)
     end
     return plot
 end
@@ -117,7 +121,8 @@ function Makie.plot!(plot::PointCloudPlot)
     if values === nothing
         scatter!(plot, points; color = RGBAf(0.6, 0.6, 0.6, 1), markersize = plot.markersize)
     else
-        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) : plot.colorrange[]
+        colorrange = plot.colorrange[] === nothing ? _default_colorrange(values) :
+                     plot.colorrange[]
         scatter!(plot, points; color = values, colormap = plot.colormap,
             colorrange = colorrange, markersize = plot.markersize)
     end
@@ -136,7 +141,9 @@ const _RevolvableSolution = Union{
 function _solution_render(sol::_RevolvableSolution, field::Union{Nothing, Symbol})
     d = sol.data
     ps = AcousticScattering.panels(d.mesh)
-    x, y, z, values = _revolved_surface_plot_data(ps, field === nothing ? nothing : d.p_scat_modes, field)
+    x, y, z, values = _revolved_surface_plot_data(
+        ps, field === nothing ? nothing :
+            d.p_scat_modes, field)
     return (:revolved, x, y, z, values)
 end
 
@@ -154,7 +161,8 @@ function _solution_render(
         field::Union{Nothing, Symbol})
     quad = sol.data.quad
     points, faces = _inti_mesh_points_faces(quad)
-    values = field === nothing ? nothing : _inti_mesh_vertex_field(quad, sol.data.p_scat, field)
+    values = field === nothing ? nothing :
+             _inti_mesh_vertex_field(quad, sol.data.p_scat, field)
     return (:trimesh, points, faces, values)
 end
 

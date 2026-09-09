@@ -18,8 +18,8 @@ To check normal installation, select the standard mode:
 julia --startup-file=no test/precompile.jl standard
 ```
 
-The single test script creates a temporary project and develops the checkout into it. It resolves
-dependencies without reusing the project's manifest or preferences. Local runs reuse your Julia
+The single test script creates a temporary project and a copy of the package source without
+local manifests or preferences. It rejects local dependency overrides. Local runs reuse your Julia
 depot. CI sets an empty depot for each matrix job and does not restore an installation cache.
 System tools, network settings, and the installed Julia runtime are still used, so this is not
 an isolated operating-system test.

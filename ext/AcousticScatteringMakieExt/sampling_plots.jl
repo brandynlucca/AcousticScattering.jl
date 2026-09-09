@@ -143,7 +143,8 @@ function _solver_dispatcher(solver::Symbol)
     throw(ArgumentError("solver must be :modal, :kirchhoff, :bem, :mfs, or :fem, got $solver"))
 end
 
-function _compute_sweep(body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
+function _compute_sweep(
+        body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
         xs::AbstractVector{<:Real}, ::Val{:frequency}; sound_speed::Real,
         solver::Symbol = :modal, solver_kwargs::NamedTuple = NamedTuple())
     dispatcher = _solver_dispatcher(solver)
@@ -151,7 +152,8 @@ function _compute_sweep(body::AbstractBody, boundary::AcousticScattering.Abstrac
         k -> dispatcher(body, boundary, k; solver_kwargs...), xs, sound_speed)
 end
 
-function _compute_sweep(body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
+function _compute_sweep(
+        body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
         xs::AbstractVector{<:Real}, ::Val{:incidence_angle}; k::Real,
         solver::Symbol = :modal, solver_kwargs::NamedTuple = NamedTuple())
     dispatcher = _solver_dispatcher(solver)
@@ -183,27 +185,32 @@ plot(Spheroid(0.05, 0.02), Rigid(), 0:0.05:pi/2;
     kind=:incidence_angle, k=2pi*38000/1477.4)
 ```
 """
-function Makie.plot(body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
+function Makie.plot(
+        body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
         xs::AbstractVector{<:Real}; kind::Symbol, kwargs...)
     solver_keys = (:sound_speed, :k, :solver, :solver_kwargs)
     solver_kwargs_nt = NamedTuple(k => v for (k, v) in kwargs if k in solver_keys)
     plot_kwargs = NamedTuple(k => v for (k, v) in kwargs if !(k in solver_keys))
     sweep = _compute_sweep(body, boundary, xs, Val(kind); solver_kwargs_nt...)
-    sweep isa AcousticScattering.FrequencySweep && return frequencysweepplot(sweep; plot_kwargs...)
+    sweep isa AcousticScattering.FrequencySweep &&
+        return frequencysweepplot(sweep; plot_kwargs...)
     return incidenceanglesweepplot(sweep; plot_kwargs...)
 end
 
-function Makie.plot!(ax, body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
+function Makie.plot!(
+        ax, body::AbstractBody, boundary::AcousticScattering.AbstractBoundaryCondition,
         xs::AbstractVector{<:Real}; kind::Symbol, kwargs...)
     solver_keys = (:sound_speed, :k, :solver, :solver_kwargs)
     solver_kwargs_nt = NamedTuple(k => v for (k, v) in kwargs if k in solver_keys)
     plot_kwargs = NamedTuple(k => v for (k, v) in kwargs if !(k in solver_keys))
     sweep = _compute_sweep(body, boundary, xs, Val(kind); solver_kwargs_nt...)
-    sweep isa AcousticScattering.FrequencySweep && return frequencysweepplot!(ax, sweep; plot_kwargs...)
+    sweep isa AcousticScattering.FrequencySweep &&
+        return frequencysweepplot!(ax, sweep; plot_kwargs...)
     return incidenceanglesweepplot!(ax, sweep; plot_kwargs...)
 end
 
-function _plot_solution(sol::AbstractSolution, ::Val{:bistatic_polar}; angles, azimuth::Real = 0.0, kwargs...)
+function _plot_solution(sol::AbstractSolution, ::Val{:bistatic_polar};
+        angles, azimuth::Real = 0.0, kwargs...)
     sweep = AcousticScattering.bistatic_sweep(sol, angles; azimuth = azimuth)
     return bistaticsweepplot(sweep; kind = :polar, kwargs...)
 end
@@ -212,7 +219,8 @@ function _plot_solution(
     sweep = AcousticScattering.bistatic_sweep(sol, angles; azimuth = azimuth)
     return bistaticsweepplot(sweep; kind = :cartesian, kwargs...)
 end
-function _plot_solution(sol::AbstractSolution, ::Val{:bistatic_map}; thetas, phis, kwargs...)
+function _plot_solution(
+        sol::AbstractSolution, ::Val{:bistatic_map}; thetas, phis, kwargs...)
     m = AcousticScattering.bistatic_map(sol, thetas, phis)
     return bistaticmapplot(m; kwargs...)
 end
@@ -231,16 +239,19 @@ function _plot_solution(::AbstractSolution, ::Val{K}; kwargs...) where {K}
 end
 
 function _plot_solution!(
-        ax, sol::AbstractSolution, ::Val{:bistatic_polar}; angles, azimuth::Real = 0.0, kwargs...)
+        ax, sol::AbstractSolution, ::Val{:bistatic_polar};
+        angles, azimuth::Real = 0.0, kwargs...)
     sweep = AcousticScattering.bistatic_sweep(sol, angles; azimuth = azimuth)
     return bistaticsweepplot!(ax, sweep; kind = :polar, kwargs...)
 end
 function _plot_solution!(
-        ax, sol::AbstractSolution, ::Val{:bistatic_cartesian}; angles, azimuth::Real = 0.0, kwargs...)
+        ax, sol::AbstractSolution, ::Val{:bistatic_cartesian};
+        angles, azimuth::Real = 0.0, kwargs...)
     sweep = AcousticScattering.bistatic_sweep(sol, angles; azimuth = azimuth)
     return bistaticsweepplot!(ax, sweep; kind = :cartesian, kwargs...)
 end
-function _plot_solution!(ax, sol::AbstractSolution, ::Val{:bistatic_map}; thetas, phis, kwargs...)
+function _plot_solution!(
+        ax, sol::AbstractSolution, ::Val{:bistatic_map}; thetas, phis, kwargs...)
     m = AcousticScattering.bistatic_map(sol, thetas, phis)
     return bistaticmapplot!(ax, m; kwargs...)
 end
@@ -249,7 +260,8 @@ function _plot_solution!(ax, sol::AbstractSolution, ::Val{:mesh}; kwargs...)
     return _render_solution_plot!(ax, render[1], render[2:end]...; kwargs...)
 end
 function _plot_solution!(
-        ax, sol::AbstractSolution, ::Val{:surface_field}; field::Symbol = :pressure_magnitude, kwargs...)
+        ax, sol::AbstractSolution, ::Val{:surface_field};
+        field::Symbol = :pressure_magnitude, kwargs...)
     render = _solution_render(sol, field)
     return _render_solution_plot!(ax, render[1], render[2:end]...; kwargs...)
 end
@@ -281,7 +293,9 @@ plot(sol; kind=:mesh)
 plot(sol; kind=:surface_field, field=:pressure_phase)
 ```
 """
-Makie.plot(sol::AbstractSolution; kind::Symbol, kwargs...) = _plot_solution(sol, Val(kind); kwargs...)
+function Makie.plot(sol::AbstractSolution; kind::Symbol, kwargs...)
+    _plot_solution(sol, Val(kind); kwargs...)
+end
 
 function Makie.plot!(ax, sol::AbstractSolution; kind::Symbol, kwargs...)
     return _plot_solution!(ax, sol, Val(kind); kwargs...)

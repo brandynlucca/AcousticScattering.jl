@@ -52,7 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      JULIA_DEPOT_PATH: ${{ runner.temp }}/install-depot
       JULIA_LOAD_PATH: "@:@stdlib"
       JULIA_PKG_PRECOMPILE_AUTO: "0"
     strategy:
@@ -68,4 +67,6 @@ jobs:
           version: ${{ matrix.version }}
       # No cache: each matrix job uses a fresh Julia depot and the checked-out source.
       - name: Verify isolated installation and precompile preferences
+        env:
+          JULIA_DEPOT_PATH: ${{ runner.temp }}/install-depot
         run: julia --startup-file=no test/precompile.jl ${{ matrix.mode }}
