@@ -468,8 +468,9 @@ function mesh(body::AbstractBody; resolution::Union{Nothing, Real} = nothing,
         k::Union{Nothing, Real} = nothing, method::Symbol = :axisymmetric)
     (resolution === nothing) == (k === nothing) &&
         throw(ArgumentError("mesh(...) needs exactly one of `resolution` or `k`"))
-    body isa Cylinder && _isbent(body) && throw(ArgumentError(
-        "mesh(::Cylinder, ...) has no bent-cylinder implementation (axisymmetric or full) in this package yet"))
+    body isa Cylinder && _isbent(body) &&
+        throw(ArgumentError(
+            "mesh(::Cylinder, ...) has no bent-cylinder implementation (axisymmetric or full) in this package yet"))
     if method === :axisymmetric
         n = resolution === nothing ? _axisymmetric_default_panels(body, k) : Int(resolution)
         return Mesh(_axisymmetric_mesh(body, n), body, method, Float64(n))
@@ -568,7 +569,8 @@ function bem(body::Sphere,
     mesh_outer = sphere_mesh(body.radius, n)
     mesh_inner = sphere_mesh(body.radius * boundary.radius_ratio, n)
     p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh_outer, mesh_inner; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh_outer, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
+    data = _AxisymmetricSurfaceData(
+        mesh_outer, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
@@ -743,7 +745,8 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
                 geometry, material, ext_density, ext_soundspeed,
                 freq_hz; n_eta = n_eta, kwargs...)
             data = _ShellFEMSurfaceData(
-                ps, [p_scat], [dpdn_scat], nothing, nothing, nothing, shell_state, incidence_angle)
+                ps, [p_scat], [dpdn_scat], nothing, nothing,
+                nothing, shell_state, incidence_angle)
             return FEMSolution(s, boundary, k, method, data)
         end
         p_ext, dpdn_ext, ps_ext, p_int, dpdn_int, ps_int,
