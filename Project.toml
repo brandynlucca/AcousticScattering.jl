@@ -1,6 +1,6 @@
 name = "AcousticScattering"
 uuid = "37bc0722-8b3f-41d8-b4ae-17decd3486a9"
-version = "0.1.0-DEV"
+version = "0.1.0"
 authors = ["brandynlucca <brandyn.lucca@gmail.com> and contributors"]
 
 [deps]

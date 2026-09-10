@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use AcousticScattering.jl in your work, please cite this software."
+type: software
+title: AcousticScattering.jl
+version: "0.1.0"
+authors:
+  - family-names: Lucca
+    given-names: Brandyn
+abstract: >-
+  AcousticScattering.jl is a Julia package for modeling acoustic scattering
+  and calculating scattering amplitudes and target strength. It provides
+  modal-series, Kirchhoff, finite-element, boundary-element, and
+  method-of-fundamental-solutions models for supported geometries and
+  material configurations, including spheres, spheroids, and straight and
+  bent cylinders. Optional Makie integration supports visualization of
+  scattering responses, meshes, and acoustic fields.
+repository-code: "https://github.com/brandynlucca/AcousticScattering.jl"
+url: "https://brandynlucca.github.io/AcousticScattering.jl/"
+# Software license. Logo artwork has separate terms in docs/src/assets/LICENSE.
+license: MIT
+keywords:
+  - acoustic scattering
+  - underwater acoustics
+  - target strength
+  - numerical modeling
+  - Julia
