@@ -7,6 +7,8 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
+include("spheroidal_coupling.jl")
+
 @testset "Spheroid modal series (rigid/pressure-release/fluid-filled)" begin
     k = 2pi * 38000.0 / 1477.4
 
