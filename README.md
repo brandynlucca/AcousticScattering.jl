@@ -4,6 +4,8 @@
 
 # AcousticScattering.jl
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776331.svg)](https://doi.org/10.5281/zenodo.22776331)
+
 AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides
 modal-series and Kirchhoff models, boundary-element and finite-element methods, and the
 method of fundamental solutions for calculating scattering amplitude and target strength.
@@ -53,10 +55,10 @@ target_strength(solution) # approximately -49.09 dB re 1 m²
 
 ## Citation
 
-If you use this package in research, cite the software and record the version or commit used:
+If you use this package in research, cite the archived version you used:
 
-> Lucca, B., and contributors. *AcousticScattering.jl* [Computer software].
-> https://github.com/brandynlucca/AcousticScattering.jl
+> Lucca, B., and contributors. (2026). *AcousticScattering.jl* (v0.1.0) [Computer software].
+> Zenodo. https://doi.org/10.5281/zenodo.22776331
 
 Please also cite the relevant model papers listed in the
 [documentation references](docs/src/models/references.md).
