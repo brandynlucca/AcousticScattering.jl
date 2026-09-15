@@ -7,9 +7,7 @@ and calculate rigid-sphere target strength. The current package requires Julia 1
 
 ### Build prerequisites
 
-The registered `SpheroidalWaves` 0.3.0 dependency compiles its Fortran backends during
-installation. Install CMake 3.15 or later, a compatible Fortran compiler, and a build tool
-before running `Pkg.add`. Put them on `PATH` so Julia can find them.
+The registered `SpheroidalWaves` 0.4.1 dependency compiles its Fortran backends during installation. Install CMake 3.15 or later, a compatible Fortran compiler, and a build tool before running `Pkg.add`. Put them on `PATH` so Julia can find them.
 
 - On Ubuntu, install `cmake`, `gfortran`, and `make` with your system package manager.
   The package CI installs these tools explicitly.
@@ -37,11 +35,6 @@ import Pkg
 Pkg.add("AcousticScattering")
 ```
 
-Pkg downloads dependencies and binary artifacts. Gmsh is provided through its Julia dependency,
-so you do not need to launch its graphical interface. Downloads require network access and a
-platform supported by the dependencies' artifacts. Current CI targets Linux. Availability on
-other systems depends on those artifacts too.
-
 For the plotting tutorials, install CairoMakie in the same environment:
 
 ```julia
@@ -53,14 +46,7 @@ calculations.
 
 ## Precompilation: the default
 
-Julia normally precompiles after installation. AcousticScattering additionally runs bent-cylinder
-and spheroid Kirchhoff examples through PrecompileTools to cache compiled code, not scattering
-results. This costs extra precompile time and cache space but reduces later first-call latency.
-The workload does not repeat on every ordinary package load when a usable cache exists.
-
-An earlier Windows/Julia 1.12.1 measurement recorded roughly 130–145 seconds for the package
-precompile including these workloads. This is historical timing on one machine, not a guarantee.
-Dependencies, Julia version, source changes, and cache invalidation affect the cost.
+Julia normally precompiles after installation. AcousticScattering additionally runs bent-cylinder and spheroid Kirchhoff examples through PrecompileTools to cache compiled code, not scattering results. This costs extra precompile time and cache space but reduces later first-call latency. The workload does not repeat on every ordinary package load when a usable cache exists.
 
 ## Opt out before the first precompile
 
@@ -72,14 +58,10 @@ installing**. Merge it into an existing file, preserving any other settings:
 precompile_workload = false
 ```
 
-This disables AcousticScattering's PrecompileTools workload. Normal Julia and dependency
-precompilation still occur. First use of the affected Kirchhoff paths may then spend time
-compiling. PrecompileTools already honors this preference, so no source edit or interactive
-installer prompt is necessary.
+This disables AcousticScattering's PrecompileTools workload. Normal Julia and dependency precompilation still occur. First use of the affected Kirchhoff paths may then spend time compiling. PrecompileTools already honors this preference, so no source edit or interactive installer prompt is necessary.
 [PrecompileTools preference documentation](https://julialang.github.io/PrecompileTools.jl/stable/).
 
-Alternatively, use this Julia-only sequence. It postpones automatic precompilation and sets
-the preference **without importing AcousticScattering**:
+Alternatively, use this Julia-only sequence. It postpones automatic precompilation and sets the preference **without importing AcousticScattering**:
 
 ```julia
 import Pkg
