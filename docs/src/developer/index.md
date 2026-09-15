@@ -41,9 +41,11 @@ for individual test groups and their environments.
 
 ## Reference and source docstrings
 
-The public reference is curated prose. `checkdocs = :none` disables source-docstring coverage
-checking. Doctests, executable examples, and unresolved-reference errors still fail the build.
-A successful website build does not establish source-docstring coverage.
+The public reference is curated prose. `checkdocs = :none` disables Documenter's requirement
+to include every source docstring in a page. A separate check in `docs/make.jl` requires a
+source docstring for every exported binding. The Interfaces test group checks the export set,
+ordinary imports and docstring presence. Doctests, executable examples and unresolved-reference
+errors also fail the build. Presence checks do not replace review of scientific correctness.
 
 Prefer interface descriptions and public accessors over undocumented solution storage.
 When adding a capability, update the support table, relevant theory page, and an executable example.

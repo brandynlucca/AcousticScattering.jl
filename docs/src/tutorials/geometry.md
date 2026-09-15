@@ -57,8 +57,8 @@ bent_kirchhoff = kirchhoff(bent, Rigid(), wavenumber; incidence_angle = pi / 2)
 
 Modal applies a near-broadside Fresnel correction. Kirchhoff integrates the curved illuminated
 surface. Their difference includes model error, especially at this modest frequency.
-Bent-cylinder MFS is a separate 3D solve. BEM rejects bent cylinders. The FEM cylinder path uses
-straight geometry and must not be interpreted as a curved-body calculation.
+Bent-cylinder MFS is a separate 3D solve with `n_s` and `n_phi` source-grid controls.
+BEM, FEM and `mesh` reject unsupported bent-cylinder geometry.
 
 ## Mesh construction
 

@@ -82,12 +82,24 @@ function _bem3d_incidence_direction(incidence_angle::Real, incidence_azimuth::Re
     return SVector(sin(β) * cos(α), sin(β) * sin(α), cos(β))
 end
 
+function _linear_residual(A, x, b)
+    absolute = norm(A * x - b)
+    rhs_norm = norm(b)
+    relative = if iszero(rhs_norm)
+        iszero(absolute) ? 0.0 : Inf
+    else
+        absolute / rhs_norm
+    end
+    return (; absolute_residual = absolute, relative_residual = relative)
+end
+
 """
     solve_full_bem(boundary::Union{Rigid,PressureRelease}, k, quad;
                    incidence_angle=0.0, incidence_azimuth=0.0,
-                   compression=(method=:hmatrix, tol=1e-3),
+                   compression=(method=:hmatrix, tol=1e-5),
                    correction=(method=:dim,),
-                   gmres_kwargs=(reltol=1e-4, restart=150, maxiter=1200))
+                   gmres_kwargs=(reltol=1e-4, restart=150, maxiter=1200),
+                   return_diagnostics=false)
 
 Solve the direct CBIE for a rigid or pressure-release scatterer over the
 full 3D surface `quad` (from [`gmsh_sphere_mesh`](@ref)/
@@ -98,13 +110,15 @@ solved, see the module docstring's derivation and validation).
 
 Returns `(p_scat, dpdn_scat, quad)`, the surface scattered pressure and
 its normal derivative at every quadrature node, and `quad` itself (for
-[`far_field`](@ref)).
+[`far_field`](@ref)). With `return_diagnostics=true`, append a fourth element containing
+convergence history, recomputed linear residuals and solver settings.
 """
 function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
         compression = (method = :hmatrix, tol = 1e-5),
         correction = (method = :dim,),
-        gmres_kwargs = (reltol = 1e-4, restart = 150, maxiter = 1200))
+        gmres_kwargs = (reltol = 1e-4, restart = 150, maxiter = 1200),
+        return_diagnostics::Bool = false)
     d̂ = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
     op = Inti.Helmholtz(; k = k, dim = 3)
     S, D = Inti.single_double_layer(;
@@ -131,13 +145,26 @@ function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
             @warn "solve_full_bem: GMRES did not converge to the requested tolerance (PressureRelease CBIE), result may be inaccurate" iters = hist.iters
     end
 
+    if return_diagnostics
+        x = boundary isa Rigid ? p_scat : dpdn_scat
+        diagnostics = merge(_linear_residual(A, x, rhs),
+            (
+                method = :gmres, converged = hist.isconverged, iterations = hist.iters,
+                residual_history = copy(hist[:resnorm]), unknown_count = n,
+                quadrature_nodes = n, compression = compression, correction = correction,
+                solver_options = merge(
+                    (abstol = 0.0, reltol = sqrt(eps(Float64)),
+                        restart = min(20, n), maxiter = n),
+                    (; gmres_kwargs...))))
+        return p_scat, dpdn_scat, quad, diagnostics
+    end
     return p_scat, dpdn_scat, quad
 end
 
 """
     solve_full_bem(boundary::FluidFilled, k, quad;
                    incidence_angle=0.0, incidence_azimuth=0.0,
-                   correction=(method=:dim,))
+                   correction=(method=:dim,), return_diagnostics=false)
 
 Solve the direct transmission CBIE for a fluid/gas-filled scatterer over
 the full 3D surface `quad`, via a dense `4n×4n` block system (see the
@@ -150,10 +177,12 @@ Returns `(p_scat, dpdn_scat, quad)`, the *exterior scattered* pressure and
 its normal derivative, in the same form [`far_field`](@ref)/
 [`target_strength`](@ref) expect (the interior trace is discarded, matching
 `axisymmetric_bem.jl`'s own `solve_axial(::FluidFilled, ...)` convention).
+With `return_diagnostics=true`, append residuals for the complete coupled system and
+discretization settings. A direct solve has no iterative convergence flag or history.
 """
 function solve_full_bem(boundary::FluidFilled, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
-        correction = (method = :dim,))
+        correction = (method = :dim,), return_diagnostics::Bool = false)
     d̂ = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
     g = boundary.density_contrast
     k_int = k / boundary.soundspeed_contrast
@@ -198,6 +227,14 @@ function solve_full_bem(boundary::FluidFilled, k::Real, quad;
     p_scat = x[(off_p + 1):(off_p + n)]
     dpdn_scat = x[(off_d + 1):(off_d + n)]
 
+    if return_diagnostics
+        diagnostics = merge(_linear_residual(A, x, b),
+            (
+                method = :direct, converged = nothing, iterations = nothing,
+                residual_history = Float64[], unknown_count = ntot, quadrature_nodes = n,
+                compression = (method = :none,), correction = correction, solver_options = (;)))
+        return p_scat, dpdn_scat, quad, diagnostics
+    end
     return p_scat, dpdn_scat, quad
 end
 

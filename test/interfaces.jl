@@ -7,6 +7,8 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
+include("public_api.jl")
+
 @testset "Solution interface contract (every concrete AbstractSolution type)" begin
     a = 0.01
     c_water = 1477.4
@@ -133,6 +135,9 @@ end
         axi_map = AS.bistatic_map(bem_sol, thetas, phis)
         full_map = AS.bistatic_map(full_sol, thetas, phis)
         @test all(abs.(axi_map.target_strength .- full_map.target_strength) .< 0.5)
+        @test diagnostics(full_sol).converged
+        @test scattering_amplitude(full_sol) ≈
+              scattering_amplitude(modal(sphere, Rigid(), k)) rtol = 0.07
     end
 end
 

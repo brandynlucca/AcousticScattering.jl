@@ -83,3 +83,8 @@ The viscous-elastic model represents a viscous outer layer,
 elastic wall, and fluid core. Viscosity introduces frequency-dependent complex wavenumbers.
 Only its monopole is supported.
 Use this model only in its low-frequency, monopole regime.
+
+Validation includes complex transparent-layer limits, a separate pressure-matching reference
+for nonzero bulk loss with zero shear viscosity, and attenuation/passivity checks with shear
+loss. An independently reproduced published benchmark for the complete lossy three-interface
+model is still needed. These checks do not establish higher-mode or arbitrary-frequency validity.

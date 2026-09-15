@@ -16,6 +16,13 @@ using StaticArrays: SVector
 using PrecompileTools: @compile_workload
 
 # Must precede every include below: Spheroid subtypes this directly.
+"""
+    AbstractBody
+
+Supertype of scattering geometries. Construct a [`Sphere`](@ref), [`Spheroid`](@ref),
+[`Cylinder`](@ref) or [`Shell`](@ref), then pass it to a solver with a boundary condition
+and exterior wavenumber. Geometry dimensions are in meters.
+"""
 abstract type AbstractBody end
 
 include("special_functions.jl")
@@ -60,7 +67,7 @@ export AbstractBody, Sphere, Cylinder, Spheroid, Shell
 export AbstractSolution, ModalSolution, KirchhoffSolution, FEMSolution, BEMSolution,
        MFSSolution
 export modal, kirchhoff, fem, bem, mfs
-export target_strength, scattering_amplitude
+export target_strength, scattering_amplitude, diagnostics
 export Mesh, mesh
 
 @compile_workload begin

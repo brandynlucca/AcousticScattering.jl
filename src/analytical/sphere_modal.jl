@@ -9,18 +9,26 @@ abstract type AbstractShellInterior end
 "Material of the shell layer in a [`Shelled`](@ref) boundary condition."
 abstract type AbstractShellMaterial end
 
-"Rigid (fixed, immovable) sphere boundary condition."
+"""
+    Rigid()
+
+Rigid boundary with zero total normal velocity, for supported geometries and solvers.
+"""
 struct Rigid <: AbstractBoundaryCondition end
 
-"Pressure-release (soft) sphere boundary condition."
+"""
+    PressureRelease()
+
+Soft boundary with zero total acoustic pressure, for supported geometries and solvers.
+"""
 struct PressureRelease <: AbstractBoundaryCondition end
 
 """
     FluidFilled(density_contrast, soundspeed_contrast; coupling=:full)
 
-Fluid-filled sphere boundary condition (Anderson 1950). Also covers
-gas-filled spheres: the boundary-value problem is identical, only the
-material contrasts differ.
+Homogeneous fluid transmission boundary condition. The sphere modal solution follows
+Anderson (1950); other supported geometries use their corresponding solver. Gas-filled
+bodies use the same boundary conditions with different material contrasts.
 
 - `density_contrast`: g = ρ_interior / ρ_exterior
 - `soundspeed_contrast`: h = c_interior / c_exterior
@@ -134,7 +142,7 @@ Implements the Goodman & Stern (1962) boundary-matching determinant, with the in
 (`a46`, `a56`) evaluated using the interior fluid's own wavenumber/density (not the exterior
 medium's), which is what radial-displacement and radial-stress continuity at the shell/interior-
 fluid interface actually require. Each mode's coefficient `b_m` is computed as a genuine complex
-determinant ratio `det(A_numerator)/det(A_denominator)`, preserving phase for the coherent modal
+determinant ratio `-det(A_numerator)/det(A_denominator)`, preserving phase for the coherent modal
 sum.
 
 Validated (see test/runtests.jl): the stiff/dense-shell limit recovers (to ~0.003 dB at realistic
@@ -549,7 +557,8 @@ function _modal_coefficient(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer
     A_denominator = copy(A_numerator)
     A_denominator[1:2, 1] = [a11, a21]
 
-    return det(A_numerator) / det(A_denominator)
+    # The incident field moves to the right-hand side with a minus sign.
+    return -det(A_numerator) / det(A_denominator)
 end
 
 # Hickling (1962) resonance form, see SolidElastic's docstring.

@@ -67,3 +67,26 @@ The stored boundary fields enter the package's far-field integral. Axisymmetric 
 observation polar angle and azimuth. Full BEM accepts a unit direction vector. Bent MFS currently
 returns only its supported monostatic query. See [Conventions](@ref conventions) before
 interpreting default angles as backscatter.
+
+## Full-3D solve diagnostics
+
+```@example bem_diagnostics
+using AcousticScattering
+
+solution = bem(Sphere(0.01), Rigid(), 100.0; method = :full, meshsize = 0.01)
+report = diagnostics(solution)
+@assert report.converged
+@assert report.relative_residual < 1e-3
+(iterations = report.iterations, relative_residual = report.relative_residual)
+```
+
+GMRES failure still emits a warning and is retained as `report.converged == false`.
+The residual is recomputed using the assembled operator, including any compression.
+`report.residual_history` contains GMRES's residual estimates, which may differ from the
+recomputed residual, particularly with preconditioning. `solver_options` records the tolerance
+and iteration controls; mesh size, quadrature order and correction/compression settings are
+also retained. Check mesh and quadrature convergence separately from this linear-solve check.
+
+Fluid transmission reports the residual of its complete dense coupled system. It has no
+iterative convergence flag or iteration count, so those fields are `nothing`. Other solver
+families currently return `nothing` from `diagnostics`.

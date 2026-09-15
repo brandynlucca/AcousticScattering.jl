@@ -133,6 +133,11 @@ end
     @test issorted(shell_stiff_diffs, rev = true)
     @test shell_stiff_diffs[end] < 0.01
 
+    # The multi-mode stiff limit must agree in phase as well as target-strength magnitude.
+    stiff_shell = Shelled(ElasticLayer(1000.0, 100.0, 100.0), FluidInterior(0.001, 0.5), 0.9)
+    @test scattering_amplitude(modal(sphere, stiff_shell, k; m_max = 25)) ≈
+          scattering_amplitude(modal(sphere, Rigid(), k; m_max = 25)) rtol = 0.01
+
     shell_trivial_gen = AS.Shelled(
         AS.ElasticLayer(rho_shell / rho_ext, cL_shell / c_ext,
             cT_shell / c_ext; interior_coupling = :generalized),
@@ -164,6 +169,8 @@ end
     @test issorted(solid_stiff_diffs, rev = true)
     @test solid_stiff_diffs[end] < 0.01
 end
+
+include("vesm_validation.jl")
 
 @testset "ViscoelasticShell (VESM, Feuillade & Nero 1998, monopole)" begin
     c1 = 1477.3

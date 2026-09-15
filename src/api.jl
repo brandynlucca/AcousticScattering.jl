@@ -1,15 +1,14 @@
 # Unified, short-named public API. Dispatches to the numerical implementations elsewhere in this
-# package, no numerics live here. Six dispatchers: `modal`, `kirchhoff`, `fem`, `bem`, `mfs`, `shell`.
+# package. Five dispatchers: `modal`, `kirchhoff`, `fem`, `bem`, `mfs`.
 
 # --- Geometry: the `AbstractBody` hierarchy -----------------------------------------
 
 """
     Sphere(radius)
 
-A sphere of the given `radius` [m]. `radius` alone determines its acoustic
-behavior once paired with a boundary condition and wavenumber, incidence
-angle is physically meaningless for a sphere, so methods dispatching on
-`Sphere` never take an `incidence_angle` keyword.
+A sphere of positive `radius` [m]. Monostatic scattering is independent of orientation.
+Sphere `modal` and `kirchhoff` calls do not take `incidence_angle`; numerical BEM/MFS
+solvers accept it to set the incident direction for directional field queries.
 """
 struct Sphere <: AbstractBody
     radius::Float64
@@ -61,12 +60,10 @@ _iscapped(body::Cylinder) = body.endcap_depth > 0
 """
     Shell(body, thickness)
 
-A thin shell of the given `thickness` [m] over the outer surface of
-`body` (a [`Sphere`](@ref) or [`Spheroid`](@ref), the only two currently
-supported by [`shell`](@ref)'s underlying FEM implementations). Replaces
-the previous separate `ProlateShellGeometry` (spheroid-only) and bare
-`outer_radius`/`thickness` scalar pair (sphere-only), which base
-geometry a shell has is now just `typeof(body)`, not a separate argument.
+A structural shell of positive `thickness` [m] over a [`Sphere`](@ref) or
+[`Spheroid`](@ref). Solve with [`fem`](@ref) and a structural [`Shelled`](@ref)
+material. The thickness must be smaller than the base body's characteristic radius;
+unsupported base geometries and invalid thicknesses throw `ArgumentError`.
 """
 struct Shell <: AbstractBody
     body::AbstractBody
@@ -87,6 +84,14 @@ end
 # produced it. Internal `data` shapes are reused across sub-methods (e.g. axisymmetric bem/mfs)
 # purely as an implementation detail; that reuse never surfaces as a shared public type. -----------
 
+"""
+    AbstractSolution
+
+Supertype of results returned by [`modal`](@ref), [`kirchhoff`](@ref), [`fem`](@ref),
+[`bem`](@ref) and [`mfs`](@ref). Query [`target_strength`](@ref),
+[`scattering_amplitude`](@ref) and [`diagnostics`](@ref) where available.
+Construct solutions through their solver rather than their internal storage fields.
+"""
 abstract type AbstractSolution end
 
 # Reusable axisymmetric surface-field data (bem/mfs axisymmetric solves), an internal component
@@ -107,6 +112,7 @@ struct _FullBEMSurfaceData
     dpdn_scat::Vector{ComplexF64}
     incidence_angle::Float64
     incidence_azimuth::Float64
+    diagnostics::NamedTuple
 end
 
 # Non-axisymmetric bent-cylinder MFS surface-field data, `mfs` on a bent `Cylinder` only.
@@ -144,9 +150,9 @@ end
 """
     ModalSolution
 
-Result of [`modal`](@ref): the exact modal-series complex scattering amplitude `f` [m] at the
+Result of [`modal`](@ref): the modal-series complex scattering amplitude `f` [m] at the
 angle(s) `modal` was called with. Post-process with [`target_strength`](@ref) or
-[`form_function`](@ref).
+[`scattering_amplitude`](@ref). Finite-cylinder and bent-cylinder paths include approximations.
 """
 struct ModalSolution <: AbstractSolution
     body::AbstractBody
@@ -160,7 +166,7 @@ end
 
 Result of [`kirchhoff`](@ref): the high-frequency (physical-optics) complex scattering amplitude
 `f` [m] at the angle(s) `kirchhoff` was called with. Post-process with [`target_strength`](@ref) or
-[`form_function`](@ref).
+[`scattering_amplitude`](@ref).
 """
 struct KirchhoffSolution <: AbstractSolution
     body::AbstractBody
@@ -174,11 +180,12 @@ end
 
 Result of [`fem`](@ref): either an already-computed target strength (`method=:radial`/`:meridian`
 on `Sphere`/`Cylinder`/`Spheroid`, today's radial/meridian FEM implementations don't expose
-reusable surface data) or, for a `Shell` body, full exterior/interior surface pressure/normal-
-derivative data plus the shell's own mechanical state (mirroring the elastic-shell/fluid coupling
-solve this folds in). Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` — the
+reusable surface data) or, for a `Shell` body, reusable exterior surface traces. Some shell
+paths also retain interior traces and mechanical state. Post-process with
+[`target_strength`](@ref)`(sol; angle, azimuth)` — the
 `angle`/`azimuth` keywords only affect the `Shell`-body case, which is genuinely bistatic-queryable;
-the scalar case ignores them (the angle was already consumed when `fem` was called).
+the scalar case rejects them with `ArgumentError` (the angle was consumed at solve time).
+Ordinary radial/meridian results do not retain complex amplitude.
 """
 struct FEMSolution{D} <: AbstractSolution
     body::AbstractBody
@@ -225,12 +232,12 @@ end
 """
     modal(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2, kwargs...)
 
-Exact modal-series result, returns a [`ModalSolution`](@ref). Dispatches on `body`'s concrete type,
+Modal-series result, returns a [`ModalSolution`](@ref). Dispatches on `body`'s concrete type,
 `Sphere` (backscatter is angle-independent, so no `incidence_angle`
 keyword), `Spheroid`, or `Cylinder` (straight: plain finite-cylinder
 modal series; bent, i.e. finite `radius_curvature`: automatically applies
 the Fresnel bend-coherence correction, formerly `bcms_target_strength`, see [`Cylinder`](@ref)).
-Post-process with [`target_strength`](@ref)`(sol)` [dB re 1 m²] or [`form_function`](@ref)`(sol)`
+Post-process with [`target_strength`](@ref)`(sol)` [dB re 1 m²] or [`scattering_amplitude`](@ref)`(sol)`
 [m] (the complex scattering amplitude).
 """
 function modal(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
@@ -269,7 +276,7 @@ end
 
 High-frequency (physical-optics) result, returns a [`KirchhoffSolution`](@ref). Same `body`-type
 dispatch and bend-auto-detection as [`modal`](@ref); post-process with [`target_strength`](@ref)`(sol)`
-or [`form_function`](@ref)`(sol)`.
+or [`scattering_amplitude`](@ref)`(sol)`.
 """
 function kirchhoff(body::Sphere, boundary::AbstractBoundaryCondition, k::Real)
     # Same closed form as `kirchhoff_target_strength`, replicated here for the complex amplitude.
@@ -534,6 +541,10 @@ process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 `Cylinder` (finite `radius_curvature`) has no BEM implementation in this
 package (axisymmetric or full) and raises an error rather than silently
 ignoring the curvature, see [`mfs`](@ref) for the bent-cylinder case.
+
+Full BEM accepts `meshsize` [m], quadrature `qorder` (default 4) and `correction` settings.
+Rigid/soft full BEM also accepts `compression` and `gmres_kwargs` named tuples.
+Use [`diagnostics`](@ref) to inspect convergence, residuals and the settings used.
 """
 function bem(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
@@ -602,13 +613,17 @@ end
 function _bem_full(body::Union{Sphere, Spheroid},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        meshsize::Real = bem3d_elements_per_wavelength(k), kwargs...)
-    quad = body isa Sphere ? gmsh_sphere_mesh(body.radius; meshsize = meshsize) :
-           gmsh_spheroid_mesh(body.a, body.b; meshsize = meshsize)
-    p_scat, dpdn_scat, _ = solve_full_bem(
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4, kwargs...)
+    quad = body isa Sphere ?
+           gmsh_sphere_mesh(body.radius; meshsize = meshsize, qorder = qorder) :
+           gmsh_spheroid_mesh(body.a, body.b; meshsize = meshsize, qorder = qorder)
+    p_scat, dpdn_scat, _, diagnostics = solve_full_bem(
         boundary, k, quad; incidence_angle = incidence_angle,
-        incidence_azimuth = incidence_azimuth, kwargs...)
-    data = _FullBEMSurfaceData(quad, p_scat, dpdn_scat, incidence_angle, incidence_azimuth)
+        incidence_azimuth = incidence_azimuth, return_diagnostics = true, kwargs...)
+    diagnostics = merge(diagnostics, (;
+        meshsize = Float64(meshsize), quadrature_order = qorder))
+    data = _FullBEMSurfaceData(quad, p_scat, dpdn_scat, incidence_angle, incidence_azimuth,
+        diagnostics)
     return BEMSolution(body, boundary, k, :full, data)
 end
 function _bem_full(body::Cylinder, boundary, k::Real; kwargs...)
@@ -629,6 +644,10 @@ A `Cylinder` with `endcap_depth > 0` uses the smooth-quarter-spheroid-cap
 mesh instead of flat caps (see [`Cylinder`](@ref)), MFS specifically
 needs this, unlike `bem`/`fem`, since flat caps give a sharp-corner
 normal discontinuity that breaks source placement.
+
+For bent cylinders use `n_s` (default 40) and `n_phi` (default 32) for the axial and
+azimuthal source-grid counts. Both must be integers at least 3. The legacy `n_φ`
+spelling is accepted for compatibility; supplying both spellings throws `ArgumentError`.
 """
 function mfs(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
@@ -686,10 +705,16 @@ function _mfs_oblique(body::AbstractBody, boundary::FluidFilled, k::Real,
 end
 
 function _mfs_bent(body::Cylinder, boundary::Union{Rigid, PressureRelease}, k::Real;
-        incidence_angle::Real = π / 2, offset::Real, n_s::Integer = 40, n_φ::Integer = 32, kwargs...)
+        incidence_angle::Real = π / 2, offset::Real, n_s::Integer = 40,
+        n_phi::Union{Nothing, Integer} = nothing, n_φ::Union{Nothing, Integer} = nothing, kwargs...)
+    n_phi !== nothing && n_φ !== nothing &&
+        throw(ArgumentError("mfs: supply only n_phi, not both n_phi and the legacy n_φ"))
+    azimuth_count = something(n_phi, n_φ, 32)
+    n_s >= 3 || throw(ArgumentError("mfs: n_s must be at least 3"))
+    azimuth_count >= 3 || throw(ArgumentError("mfs: n_phi must be at least 3"))
     p_scat, dpdn_scat, points, normals, areas = solve_bent_cylinder_mfs(
         boundary, k, body.radius, body.length, body.radius_curvature;
-        aspect_angle = incidence_angle, offset = offset, n_s = n_s, n_φ = n_φ, kwargs...)
+        aspect_angle = incidence_angle, offset = offset, n_s = n_s, n_φ = azimuth_count, kwargs...)
     data = _BentMFSSurfaceData(p_scat, dpdn_scat, points, normals, areas, incidence_angle)
     return MFSSolution(body, boundary, k, data)
 end
@@ -780,6 +805,61 @@ end
 # --- `target_strength`/`scattering_amplitude` on `AbstractSolution`s -----------------------
 # `scattering_amplitude` is the solution-level replacement for the low-level, unexported
 # `form_function(boundary, k, ...)` family: the complex amplitude [m], pre-dB-conversion.
+
+"""
+    scattering_amplitude(solution; kwargs...)
+
+Return the complex far-field scattering amplitude in meters. Axisymmetric BEM/MFS and
+structural shell FEM accept observation `angle` and `azimuth` [rad] in body coordinates;
+their defaults are backscatter, `angle = pi - incidence_angle`, `azimuth = pi`.
+Full BEM accepts a unit-vector `direction`, defaulting to the negative incident direction.
+Bent MFS returns backscatter only. Modal/Kirchhoff observation is fixed at solve time and
+post-processing keywords throw `ArgumentError`. Ordinary radial/meridian FEM retains only
+target strength, so requesting its complex amplitude also throws `ArgumentError`.
+
+# Examples
+```julia
+solution = modal(Sphere(0.01), Rigid(), 100.0)
+amplitude = scattering_amplitude(solution)
+```
+"""
+function scattering_amplitude end
+
+"""
+    target_strength(solution::AbstractSolution; kwargs...)
+
+Return target strength in dB re 1 m². Where complex amplitude is retained, this is
+`20 * log10(abs(scattering_amplitude(solution; kwargs...)))`, with the same observation
+keywords and backscatter defaults. Ordinary radial/meridian FEM returns its stored scalar
+and rejects observation keywords with `ArgumentError`.
+"""
+target_strength
+
+"""
+    diagnostics(solution)
+
+Return a named tuple of linear-solve diagnostics for full-3D BEM, or `nothing` when the
+solver does not retain diagnostics. `nothing` does not imply convergence.
+
+Fields include `method`, `converged`, `iterations`, `absolute_residual`,
+`relative_residual`, `residual_history`, `unknown_count`, `quadrature_nodes`, `meshsize`,
+`quadrature_order`, `compression`, `correction` and `solver_options`. Residuals are recomputed against the
+assembled (possibly compressed) linear system; relative residual is `norm(A*x-b)/norm(b)`.
+For zero right-hand sides it is zero only for a zero residual, and `Inf` otherwise.
+GMRES history contains residual estimates in the solver's norm (preconditioned when a left
+preconditioner is supplied). Direct transmission solves have no iteration history or
+iterative convergence flag (`iterations = converged = nothing`).
+Linear residuals do not measure geometry, quadrature, conditioning or physical-model error.
+
+# Examples
+```julia
+solution = bem(Sphere(0.01), Rigid(), 100.0; method = :full, meshsize = 0.01)
+report = diagnostics(solution)
+report.converged
+```
+"""
+diagnostics(::AbstractSolution) = nothing
+diagnostics(sol::BEMSolution{_FullBEMSurfaceData}) = sol.data.diagnostics
 
 # `modal`/`kirchhoff` bake the observation angle in at solve time (a formula re-evaluation, not
 # reusable surface state), so these take no keywords — rejected explicitly with a message pointing

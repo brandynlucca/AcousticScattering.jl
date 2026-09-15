@@ -1,6 +1,13 @@
 using Documenter
 using AcousticScattering
 
+# Keep curated prose while requiring a source docstring for every exported binding.
+for name in names(AcousticScattering)
+    name === :AcousticScattering && continue
+    haskey(Base.Docs.meta(AcousticScattering), Base.Docs.Binding(AcousticScattering, name)) ||
+        error("Exported name AcousticScattering.$name has no source docstring")
+end
+
 DocMeta.setdocmeta!(AcousticScattering, :DocTestSetup, :(using AcousticScattering);
     recursive = true)
 

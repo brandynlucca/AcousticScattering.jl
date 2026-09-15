@@ -76,9 +76,10 @@ wave propagates along `d`, and monostatic observation is along `-d`.
 
 Thus axial incidence has `beta = 0`, while broadside has `beta = pi / 2`.
 For incidence in the x–z plane, axisymmetric backscatter requires observation
-`angle = pi - beta, azimuth = pi`. Its default `angle = pi, azimuth = 0`
-only gives backscatter for axial incidence. Full BEM's default observation and bent-cylinder
-MFS's result already use the negative incident direction.
+`angle = pi - beta, azimuth = pi`. These are the default observation angles for axisymmetric
+BEM/MFS and structural shell FEM. Full BEM's default observation and bent-cylinder MFS's
+result also use the negative incident direction. Explicit `angle`/`azimuth` values remain
+body-coordinate directions.
 
 The bent-cylinder implementation uses its own bend-plane convention,
 `direction = (cos(beta), 0, sin(beta))`. Do not transfer Cartesian vectors between that

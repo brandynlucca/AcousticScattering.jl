@@ -173,7 +173,8 @@ function _modal_coefficient(bc::_VESMShell, m::Integer, k::Real, a::Real)
     A_denominator = copy(A_numerator)
     A_denominator[1:2, 1] = [a11, a21]
 
-    return det(A_numerator) / det(A_denominator)
+    # The replacement column contains the incident field, while the forcing is its negative.
+    return -det(A_numerator) / det(A_denominator)
 end
 
 """

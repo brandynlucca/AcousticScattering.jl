@@ -49,7 +49,7 @@ the same options to every method. Use the supported combinations in the model gu
 | `kirchhoff` | `KirchhoffSolution` | `incidence_angle` for nonspherical bodies |
 | `fem` | `FEMSolution` | `method`, discretization controls. Sphere radial defaults to `:radial` |
 | `bem` | `BEMSolution` | `method = :axisymmetric` or `:full`, incidence, `n` or `meshsize` respectively |
-| `mfs` | `MFSSolution` | Incidence, `offset`, axisymmetric `n`, modal cutoff. The bent path has source-grid controls |
+| `mfs` | `MFSSolution` | Incidence, `offset`, axisymmetric `n`, modal cutoff; bent-cylinder `n_s`, `n_phi` |
 
 Nonspherical incidence defaults to broadside (`pi / 2`). Sphere modal/Kirchhoff does not take
 `incidence_angle`. Axisymmetric numerical solvers on a sphere can still choose an incident axis.
@@ -72,13 +72,29 @@ not by depending on concrete data fields or internal type parameters.
 | Bent MFS | Backscatter | Complex meters | No general direction query |
 | Structural shell FEM | Directional dB | Complex meters | `angle`, `azimuth` |
 
-Axisymmetric observation defaults are fixed body coordinates, not incidence-relative
-backscatter. Follow [Conventions](@ref conventions). Ordinary FEM does not retain the phase
+Axisymmetric BEM/MFS and structural shell FEM default to backscatter:
+`angle = pi - incidence_angle, azimuth = pi`. Explicit observation angles are measured in
+fixed body coordinates. Follow [Conventions](@ref conventions). Ordinary FEM does not retain the phase
 needed to reconstruct amplitude from target strength alone.
 
 `target_strength(amplitude::Number)` also converts an amplitude using `20 * log10(abs(amplitude))`.
 Do not pass an already logarithmic target strength to that overload. For cross section, use
 `abs2(scattering_amplitude(solution))` when the amplitude is available.
+
+## Solver diagnostics
+
+`diagnostics(solution)` returns a named tuple for full-3D BEM and `nothing` for
+solvers that do not yet retain diagnostics. A missing report is not a successful-convergence flag.
+
+For rigid/soft full BEM, inspect `converged`, `iterations`, `relative_residual` and
+`residual_history`. The report also retains mesh size, quadrature order/node count, system
+size, compression/correction settings and solver options. Transmission uses a direct solve:
+its residual covers the complete coupled system, while `converged` and `iterations` are
+`nothing` and its history is empty. Residuals measure the assembled linear system, not
+discretization accuracy or physical-model validity. See the [BEM guide](@ref boundary-theory).
+
+For a bent cylinder, `mfs(...; n_s = 40, n_phi = 32)` controls the source grid. Counts must
+be at least 3. The legacy `n_φ` spelling is accepted, but passing both spellings is an error.
 
 ## Mesh construction
 
