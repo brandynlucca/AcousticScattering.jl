@@ -63,5 +63,4 @@ Please also cite the relevant model papers listed in the
 
 ## License
 
-[MIT](LICENSE) for the package. The [logo artwork](docs/src/assets/LICENSE) incorporates
-Julia's dots and is licensed separately under CC BY-NC-SA 4.0.
+[GPL](LICENSE) for the package. The [logo artwork](docs/src/assets/LICENSE) incorporates Julia's dots and is licensed separately under CC BY-NC-SA 4.0.
