@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="700"
+     viewBox="0 0 700 700" role="img" aria-labelledby="title description">
+  <title id="title">AcousticScattering.jl logo</title>
+  <desc id="description">Three Julia-colored scatterers surrounded by a soft illustrative
+    blue and coral pressure-field pattern. Planar wavefronts propagate upward from the
+    package name. This decorative field is not a numerical simulation.</desc>
+  <metadata>
+    Julia dots adapted from Julia logo graphics, copyright 2012-2022 Stefan Karpinski.
+    Source: https://github.com/JuliaLang/julia-logo-graphics
+    Artwork license: https://creativecommons.org/licenses/by-nc-sa/4.0/
+    Adaptation: circles separated into scatterers with wavefronts, pressure-field
+    gradients, a rounded badge and the AcousticScattering.jl wordmark. See the adjacent LICENSE.
+  </metadata>
+  <defs>
+    <clipPath id="badge-clip">
+      <rect x="12" y="12" width="676" height="676" rx="100"/>
+    </clipPath>
+    <radialGradient id="field-envelope">
+      <stop offset="0" stop-color="white"/>
+      <stop offset="0.62" stop-color="white"/>
+      <stop offset="1" stop-color="black"/>
+    </radialGradient>
+    <mask id="field-mask" maskUnits="userSpaceOnUse" x="12" y="12"
+          width="676" height="676">
+      <ellipse cx="350" cy="247" rx="319" ry="223" fill="url(#field-envelope)"/>
+    </mask>
+    <radialGradient id="cool-pressure">
+      <stop offset="0" stop-color="#65D6EB" stop-opacity="0"/>
+      <stop offset="0.24" stop-color="#65D6EB" stop-opacity="0.08"/>
+      <stop offset="0.34" stop-color="#65D6EB" stop-opacity="0.35"/>
+      <stop offset="0.43" stop-color="#65D6EB" stop-opacity="0.04"/>
+      <stop offset="0.53" stop-color="#F09586" stop-opacity="0.30"/>
+      <stop offset="0.63" stop-color="#F09586" stop-opacity="0.03"/>
+      <stop offset="0.73" stop-color="#65D6EB" stop-opacity="0.26"/>
+      <stop offset="0.84" stop-color="#65D6EB" stop-opacity="0.04"/>
+      <stop offset="0.92" stop-color="#F09586" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#F09586" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="warm-pressure">
+      <stop offset="0" stop-color="#F09586" stop-opacity="0"/>
+      <stop offset="0.24" stop-color="#F09586" stop-opacity="0.08"/>
+      <stop offset="0.34" stop-color="#F09586" stop-opacity="0.33"/>
+      <stop offset="0.43" stop-color="#F09586" stop-opacity="0.04"/>
+      <stop offset="0.53" stop-color="#65D6EB" stop-opacity="0.30"/>
+      <stop offset="0.63" stop-color="#65D6EB" stop-opacity="0.03"/>
+      <stop offset="0.73" stop-color="#F09586" stop-opacity="0.24"/>
+      <stop offset="0.84" stop-color="#F09586" stop-opacity="0.04"/>
+      <stop offset="0.92" stop-color="#65D6EB" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#65D6EB" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect id="badge" x="12" y="12" width="676" height="676" rx="100"
+        fill="#10283F"/>
+  <g id="illustrative-pressure-field" clip-path="url(#badge-clip)"
+     mask="url(#field-mask)" opacity="0.9">
+    <g transform="translate(-157.5 -186.2) scale(1.45)">
+      <circle cx="350" cy="220" r="148" fill="url(#cool-pressure)"/>
+      <circle cx="265" cy="370" r="148" fill="url(#warm-pressure)"/>
+      <circle cx="435" cy="370" r="148" fill="url(#cool-pressure)"/>
+    </g>
+  </g>
+  <g transform="translate(-157.5 -186.2) scale(1.45)">
+    <g fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <g id="green-scattered-wavefronts" stroke="#389826">
+        <path d="M 394 264 A 62.225 62.225 0 0 1 306 264"/>
+        <path d="M 406 276 A 79.196 79.196 0 0 1 294 276"/>
+      </g>
+      <g id="red-scattered-wavefronts" stroke="#CB3C33">
+        <path d="M 284 313 A 60.083 60.083 0 0 1 319 344"/>
+        <path d="M 289 298 A 75.895 75.895 0 0 1 333 337"/>
+      </g>
+      <g id="purple-scattered-wavefronts" stroke="#9558B2">
+        <path d="M 386 335 A 60.216 60.216 0 0 0 386 405"/>
+        <path d="M 373 326 A 76.026 76.026 0 0 0 373 414"/>
+      </g>
+    </g>
+    <g id="julia-scatterers">
+      <circle cx="350" cy="220" r="42" fill="#389826"/>
+      <circle cx="265" cy="370" r="42" fill="#CB3C33"/>
+      <circle cx="435" cy="370" r="42" fill="#9558B2"/>
+    </g>
+  </g>
+  <g id="incident-planar-wavefronts" fill="none" stroke="#E3EDF5"
+     stroke-width="7" stroke-linecap="round">
+    <path d="M 132 455 H 568"/>
+    <path d="M 132 483 H 568"/>
+    <path d="M 132 511 H 568"/>
+  </g>
+  <g id="propagation-from-wordmark" fill="none" stroke="#F5F8FC"
+     stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 350 562 V 427"/>
+    <path d="M 337 441 L 350 427 L 363 441"/>
+  </g>
+  <text id="wordmark" x="350" y="608" text-anchor="middle" fill="#F5F8FC"
+        font-family="Inter, Segoe UI, Arial, sans-serif" font-size="62"
+        font-weight="600" letter-spacing="-1.5" textLength="550" lengthAdjust="spacingAndGlyphs">AcousticScattering.jl</text>
+</svg>
