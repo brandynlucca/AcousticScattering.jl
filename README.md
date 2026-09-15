@@ -12,14 +12,15 @@ method of fundamental solutions for calculating scattering amplitude and target 
 
 Supported geometries include spheres, spheroids, straight and bent cylinders, and shells.
 Material options include rigid, pressure-release, fluid-filled, and elastic configurations.
-Support varies by solver. See the [model guide](docs/src/models/selection.md) for available
-combinations and limitations.
+Support varies by solver. See the
+[model guide](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/selection/)
+for available combinations and limitations.
 
 ## Installation
 
 Requires Julia 1.10 or later, CMake, and a Fortran toolchain. See the
-[build prerequisites](docs/src/getting_started/index.md#build-prerequisites) for details.
-Install the development version from GitHub:
+[build prerequisites](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/#build-prerequisites)
+for details. Install the development version from GitHub:
 
 ```julia
 import Pkg
@@ -27,7 +28,7 @@ Pkg.add(url = "https://github.com/brandynlucca/AcousticScattering.jl")
 ```
 
 Installation runs an optional precompile workload to reduce first-call latency.
-[Getting Started](docs/src/getting_started/index.md#opt-out-before-the-first-precompile)
+[Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/#opt-out-before-the-first-precompile)
 explains how to disable it before installation.
 
 ## Example
@@ -47,11 +48,16 @@ target_strength(solution) # approximately -49.09 dB re 1 m²
 
 ## Documentation
 
-- [Getting Started](docs/src/getting_started/index.md): installation and your first calculation.
-- [First frequency sweep](docs/src/tutorials/index.md): plot target strength and save the data.
-- [Models and theory](docs/src/models/index.md): conventions, assumptions, and solver selection.
-- [API reference](docs/src/api.md): geometry, materials, solvers, and result queries.
-- [Visualization gallery](docs/src/gallery/index.md): figures with links to their examples.
+- [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/):
+  installation and your first calculation.
+- [First frequency sweep](https://brandynlucca.github.io/AcousticScattering.jl/stable/tutorials/):
+  plot target strength and save the data.
+- [Models and theory](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/):
+  conventions, assumptions, and solver selection.
+- [API reference](https://brandynlucca.github.io/AcousticScattering.jl/stable/api/):
+  geometry, materials, solvers, and result queries.
+- [Visualization gallery](https://brandynlucca.github.io/AcousticScattering.jl/stable/gallery/):
+  figures with links to their examples.
 
 ## Citation
 
@@ -61,7 +67,7 @@ If you use this package in research, cite the archived version you used:
 > Zenodo. https://doi.org/10.5281/zenodo.22776331
 
 Please also cite the relevant model papers listed in the
-[documentation references](docs/src/models/references.md).
+[documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
 
 ## License
 
