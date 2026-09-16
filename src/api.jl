@@ -23,21 +23,23 @@ end
 
 A finite circular cylinder of the given `radius` and `length` [m].
 
-- `radius_curvature` [m]: `Inf` (default) is a straight cylinder; a finite
-  value uniformly bends it into an arc of that radius of curvature (in the
-  plane of incidence, see [`modal`](@ref)/[`kirchhoff`](@ref)/[`mfs`](@ref)
-  for how each method family responds to this). Bending near-broadside is
-  well-supported (`modal`, `kirchhoff`); `mfs` supports any angle via a
-  genuinely different, non-axisymmetric solve; `bem` has no bent-cylinder
-  implementation at all yet and raises an error rather than silently
-  ignoring the curvature.
+- `radius_curvature` [m]: `Inf` (default) is straight. Full BEM fixes the bend in
+  the `xy` plane, with midpoint at the origin and midpoint tangent along `+x`.
+  The centerline is `(R*sin(s/R), R*(1-cos(s/R)), 0)`, `s ∈ [-length/2,length/2]`.
+  Incidence varies independently of this geometry. `modal` uses a near-broadside
+  correction; `kirchhoff` and `mfs(body, ...)` describe the lateral surface without
+  caps. These bent approximations measure incidence from the chord in the bend plane.
+  Use `bem(...; method=:full)` or `mfs(mesh(...; method=:full), ...)` for closed surfaces.
 - `endcap_depth` [m]: `0.0` (default) uses flat end caps; a positive value
-  caps the cylinder with quarter-prolate-spheroid domes of that depth
+  caps the cylinder with half-spheroid domes of that depth
   instead, matching the cylinder's radius at the join so the surface
-  normal stays continuous there. Only [`mfs`](@ref) uses this (flat caps
-  give a sharp-corner normal discontinuity that breaks the method of
-  fundamental solutions specifically); `bem`/`fem` on a `Cylinder` always
-  use the flat-cap mesh regardless of this field.
+  normal stays continuous there. Each dome extends beyond the cylindrical side's
+  length along its endpoint tangent. Full BEM and straight-cylinder MFS honor this
+  field; axisymmetric BEM and FEM use flat ends. Normal-offset MFS requires smooth
+  ends for reliable source placement.
+
+Full meshing requires `radius_curvature > radius`, an arc shorter than a full circle,
+and nonintersecting ends. Unresolved curved-element validation raises `ArgumentError`.
 """
 struct Cylinder <: AbstractBody
     radius::Float64
@@ -60,9 +62,10 @@ _iscapped(body::Cylinder) = body.endcap_depth > 0
 """
     Shell(body, thickness)
 
-A structural shell of positive `thickness` [m] over a [`Sphere`](@ref) or
-[`Spheroid`](@ref). Solve with [`fem`](@ref) and a structural [`Shelled`](@ref)
-material. The thickness must be smaller than the base body's characteristic radius;
+A structural shell of positive `thickness` [m] inside the outer surface of a
+[`Sphere`](@ref) or [`Spheroid`](@ref). For a prolate spheroid, thickness is measured
+at the equator and the inner surface is confocal. Solve with [`fem`](@ref) and a
+structural [`Shelled`](@ref) material. The thickness must be smaller than the body's radius;
 unsupported base geometries and invalid thicknesses throw `ArgumentError`.
 """
 struct Shell <: AbstractBody
@@ -103,6 +106,7 @@ struct _AxisymmetricSurfaceData
     p_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     dpdn_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     incidence_angle::Float64
+    diagnostics::NamedTuple
 end
 
 # Full 3D (non-axisymmetric) BEM surface-field data, `bem(...; method=:full)` only.
@@ -123,12 +127,14 @@ struct _BentMFSSurfaceData
     normals::Vector{NTuple{3, Float64}}
     areas::Vector{Float64}
     incidence_angle::Float64
+    diagnostics::NamedTuple
 end
 
 # A `fem` result that's already a fully-computed target strength (today's radial/meridian FEM
 # implementations return only the final scalar, not reusable surface data).
 struct _ScalarFEMData
     ts::Float64
+    diagnostics::NamedTuple
 end
 
 # A `fem` result on a `Shell` body: exterior (and, for a fluid-filled interior, interior) surface
@@ -145,6 +151,7 @@ struct _ShellFEMSurfaceData
     dpdn_int_modes::Union{Nothing, Vector{Vector{ComplexF64}}}
     shell_state::Any
     incidence_angle::Float64
+    diagnostics::NamedTuple
 end
 
 """
@@ -199,7 +206,8 @@ end
     BEMSolution
 
 Result of [`bem`](@ref): axisymmetric (`method=:axisymmetric`, `Sphere`/`Spheroid`/straight
-`Cylinder`) or full 3D (`method=:full`, `Sphere`/`Spheroid` only) boundary-element surface data.
+`Cylinder`) or full 3D (`method=:full`) boundary-element surface data, including supplied
+closed surfaces and coupled fluid regions.
 Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 [`target_strength`](@ref)`(sol; direction)` (full 3D).
 """
@@ -214,11 +222,10 @@ end
 """
     MFSSolution
 
-Result of [`mfs`](@ref): axisymmetric (`Sphere`/`Spheroid`/straight `Cylinder`) or non-axisymmetric
-(bent `Cylinder`, a genuinely different 3D point-source solve, not a correction on the axisymmetric
-one) method-of-fundamental-solutions surface data. Post-process with
-[`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or [`target_strength`](@ref)`(sol)`
-(bent).
+Result of [`mfs`](@ref). Axisymmetric body solves use
+[`target_strength`](@ref)`(sol; angle, azimuth)`. Full closed-surface solves use
+`target_strength(sol; direction)`; the default is backscatter. The lateral-only bent-body
+overload returns a monostatic result, evaluated with `target_strength(sol)`.
 """
 struct MFSSolution{D} <: AbstractSolution
     body::AbstractBody
@@ -339,17 +346,24 @@ elastic-shell/fluid-coupling case (`method=:thin`/`:general`).
 """
 function fem(body::Sphere, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :radial, R::Real = 1.2body.radius, adaptive::Bool = false, kwargs...)
+    reports = _SolveReports()
     if method === :radial
         ts = adaptive ?
-             radial_fem_target_strength_adaptive(boundary, k, body.radius, R; kwargs...) :
-             radial_fem_target_strength(boundary, k, body.radius, R; kwargs...)
-        return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+             radial_fem_target_strength_adaptive(
+            boundary, k, body.radius, R; solve_reports = reports, kwargs...) :
+             radial_fem_target_strength(
+            boundary, k, body.radius, R; solve_reports = reports, kwargs...)
+        report = _summarize_solves(reports; method, solver_options = (;
+            R, adaptive, kwargs...))
+        return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
     end
     if method === :meridian
         adaptive &&
             throw(ArgumentError("fem(::Sphere, ...; method=:meridian) has no adaptive variant"))
-        ts = meridian_fem_target_strength(boundary, k, body.radius, R; kwargs...)
-        return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+        ts = meridian_fem_target_strength(
+            boundary, k, body.radius, R; solve_reports = reports, kwargs...)
+        report = _summarize_solves(reports; method, solver_options = (; R, kwargs...))
+        return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
     end
     throw(ArgumentError("fem(::Sphere, ...) supports method=:radial or :meridian, got $method"))
 end
@@ -358,11 +372,14 @@ function fem(
         body::Sphere, boundary::SolidElastic, k::Real; method::Symbol = :radial, kwargs...)
     method === :radial ||
         throw(ArgumentError("fem(::Sphere, ::SolidElastic, ...) only supports method=:radial"))
-    ts = solid_elastic_sphere_radial_fem_target_strength(k, body.radius;
+    reports = _SolveReports()
+    ts = solid_elastic_sphere_radial_fem_target_strength(
+        k, body.radius; solve_reports = reports,
         density_contrast = boundary.density_contrast,
         speed_longitudinal_contrast = boundary.speed_longitudinal_contrast,
         speed_transversal_contrast = boundary.speed_transversal_contrast, kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+    report = _summarize_solves(reports; method, solver_options = (; kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 function fem(
@@ -370,14 +387,17 @@ function fem(
         k::Real; method::Symbol = :radial, kwargs...)
     method === :radial ||
         throw(ArgumentError("fem(::Sphere, ::Shelled{ElasticLayer,FluidInterior}, ...) only supports method=:radial"))
-    ts = elastic_shell_sphere_radial_fem_target_strength(k, body.radius;
+    reports = _SolveReports()
+    ts = elastic_shell_sphere_radial_fem_target_strength(
+        k, body.radius; solve_reports = reports,
         density_shell_contrast = boundary.material.density_contrast,
         speed_longitudinal_contrast = boundary.material.speed_longitudinal_contrast,
         speed_transversal_contrast = boundary.material.speed_transversal_contrast,
         radius_ratio = boundary.radius_ratio,
         density_interior_contrast = boundary.interior.density_contrast,
         soundspeed_interior_contrast = boundary.interior.soundspeed_contrast, kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+    report = _summarize_solves(reports; method, solver_options = (; kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 function fem(body::Sphere,
@@ -386,8 +406,11 @@ function fem(body::Sphere,
         k::Real; method::Symbol = :radial, kwargs...)
     method === :radial ||
         throw(ArgumentError("fem(::Sphere, ::Shelled{FluidLayer}, ...) only supports method=:radial"))
-    ts = fluid_shell_sphere_radial_fem_target_strength(boundary, k, body.radius; kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+    reports = _SolveReports()
+    ts = fluid_shell_sphere_radial_fem_target_strength(boundary, k, body.radius;
+        solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method, solver_options = (; kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 function fem(body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
@@ -397,9 +420,13 @@ function fem(body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled
         "fem(::Cylinder, ...) has no bent-cylinder implementation in this package yet"))
     method === :meridian ||
         throw(ArgumentError("fem(::Cylinder, ::Union{Rigid,PressureRelease,FluidFilled}, ...) only supports method=:meridian"))
+    reports = _SolveReports()
     ts = cylinder_meridian_fem_target_strength(
-        boundary, k, body.radius, body.length, R, incidence_angle; m_max = m_max, kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+        boundary, k, body.radius, body.length, R, incidence_angle;
+        m_max, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method, solver_options = (;
+        R, incidence_angle, m_max, kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 function fem(body::Cylinder,
@@ -409,9 +436,13 @@ function fem(body::Cylinder,
         "fem(::Cylinder, ...) has no bent-cylinder implementation in this package yet"))
     method === :radial ||
         throw(ArgumentError("fem(::Cylinder, ::Union{SolidElastic,Shelled{ElasticLayer,FluidInterior}}, ...) only supports method=:radial"))
+    reports = _SolveReports()
     ts = elastic_cylinder_radial_fem_target_strength(
-        boundary, k, body.radius, body.length; aspect_angle = incidence_angle, kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+        boundary, k, body.radius, body.length; aspect_angle = incidence_angle,
+        solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method, solver_options = (;
+        incidence_angle, kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
@@ -420,9 +451,12 @@ function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled
         m_max::Integer = _default_mode_count(k * max(body.a, body.b)), kwargs...)
     method === :meridian ||
         throw(ArgumentError("fem(::Spheroid, ...) only supports method=:meridian"))
+    reports = _SolveReports()
     ts = spheroid_meridian_fem_target_strength(
-        boundary, k, body.a, body.b, R, incidence_angle; m_max = m_max, kwargs...)
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts))
+        boundary, k, body.a, body.b, R, incidence_angle; m_max, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method, solver_options = (;
+        R, incidence_angle, m_max, kwargs...))
+    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
 end
 
 # --- Shared geometry helpers (bem/mfs) --------------------------------------
@@ -447,6 +481,8 @@ _axisymmetric_mesh(body::Cylinder, n::Integer) = cylinder_mesh(body.radius, body
 A discretized surface mesh, returned by [`mesh`](@ref) — the single public mesh type, whether the
 underlying representation is an axisymmetric meridian curve (`method=:axisymmetric`) or a full 3D
 triangulated surface (`method=:full`); a result's type never depends on which one produced it.
+For supplied surfaces, `body` stores nodal coordinates, connectivity, labels, units, orientation
+and provenance; `resolution` is the maximum corner-edge length in metres.
 `body`/`method`/`resolution` record what `mesh(...)` was actually called with (`resolution` is
 always the concrete value used, even when derived from `k` rather than passed directly) — the
 dimension, coordinate system, and element type are already fully determined by `method` together
@@ -462,33 +498,42 @@ struct Mesh{D}
 end
 
 """
-    mesh(body::AbstractBody; resolution=nothing, k=nothing, method=:axisymmetric)
+    mesh(body::AbstractBody; resolution=nothing, k=nothing, method=:axisymmetric,
+         qorder=4, mesh_order=2)
 
 Build a [`Mesh`](@ref) for `body`, consolidating `sphere_mesh`/`spheroid_mesh`/`cylinder_mesh`
-(`method=:axisymmetric`, default) and `gmsh_sphere_mesh`/`gmsh_spheroid_mesh` (`method=:full`,
-`Sphere`/`Spheroid` only) behind one name and one return type, the same construction `bem`/`mfs` do
+(`method=:axisymmetric`, default) and closed surface meshes (`method=:full`,
+`Sphere`/`Spheroid`/`Cylinder`) behind one name and one return type, the same construction `bem`/`mfs` do
 internally. Exactly one of `resolution` or `k` must be given: `resolution` sets panel count
 (`:axisymmetric`) or target element edge length [m] (`:full`) directly; `k` [1/m] derives a
 wavenumber-appropriate default via [`bem_panel_count`](@ref)/`bem3d_elements_per_wavelength`.
+For full surfaces, `mesh_order` (1, 2 or 3) controls triangle geometry and `qorder` controls
+quadrature. Supplied surfaces use `mesh(path)`, `mesh(generate)` or `mesh(nodes, triangles)`.
 """
 function mesh(body::AbstractBody; resolution::Union{Nothing, Real} = nothing,
-        k::Union{Nothing, Real} = nothing, method::Symbol = :axisymmetric)
+        k::Union{Nothing, Real} = nothing, method::Symbol = :axisymmetric,
+        qorder::Integer = 4, mesh_order::Integer = 2)
     (resolution === nothing) == (k === nothing) &&
         throw(ArgumentError("mesh(...) needs exactly one of `resolution` or `k`"))
-    body isa Cylinder && _isbent(body) &&
-        throw(ArgumentError(
-            "mesh(::Cylinder, ...) has no bent-cylinder implementation (axisymmetric or full) in this package yet"))
     if method === :axisymmetric
+        body isa Cylinder && _isbent(body) &&
+            throw(ArgumentError(
+                "a bent Cylinder requires mesh(...; method=:full)"))
         n = resolution === nothing ? _axisymmetric_default_panels(body, k) : Int(resolution)
         return Mesh(_axisymmetric_mesh(body, n), body, method, Float64(n))
     end
     if method === :full
-        body isa Union{Sphere, Spheroid} ||
+        body isa Union{Sphere, Spheroid, Cylinder} ||
             throw(ArgumentError("mesh(...; method=:full) has no mesh generator for $(typeof(body)) in this package yet"))
         meshsize = resolution === nothing ? bem3d_elements_per_wavelength(k) :
                    Float64(resolution)
-        quad = body isa Sphere ? gmsh_sphere_mesh(body.radius; meshsize = meshsize) :
-               gmsh_spheroid_mesh(body.a, body.b; meshsize = meshsize)
+        if body isa Cylinder
+            surface = _cylinder_full_mesh(body; meshsize, qorder, mesh_order)
+            return Mesh(surface.data, body, method, meshsize)
+        end
+        quad = body isa Sphere ?
+               gmsh_sphere_mesh(body.radius; meshsize, qorder, mesh_order) :
+               gmsh_spheroid_mesh(body.a, body.b; meshsize, qorder, mesh_order)
         return Mesh(quad, body, method, meshsize)
     end
     throw(ArgumentError("mesh(...) supports method=:axisymmetric or :full, got $method"))
@@ -497,8 +542,8 @@ end
 """
     coordinates(mesh::Mesh)
 
-Element midpoint/quadrature-node positions of `mesh`, `(rho, z)` tuples for `method=:axisymmetric`,
-3-vectors for `method=:full`.
+Element midpoint/quadrature-node positions of `mesh`: `(rho, x)` radial/axial tuples
+for `method=:axisymmetric`, Cartesian `(x,y,z)` 3-vectors for `method=:full`.
 """
 coordinates(m::Mesh{MeridianMesh}) = [(p.rhom, p.zm) for p in panels(m.data)]
 coordinates(m::Mesh{<:Inti.Quadrature}) = [q.coords for q in m.data]
@@ -535,15 +580,20 @@ element_count(m::Mesh{<:Inti.Quadrature}) = length(m.data)
 
 Boundary-element solve, returns a [`BEMSolution`](@ref)
 (`method=:axisymmetric`, `Sphere`/`Spheroid`/straight `Cylinder`, or
-`method=:full`, `Sphere`/`Spheroid` only). Post-
+`method=:full`, generated `Sphere`/`Spheroid`/`Cylinder` or a supplied `Mesh`). Post-
 process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 [`target_strength`](@ref)`(sol; direction)` (full 3D). A bent
-`Cylinder` (finite `radius_curvature`) has no BEM implementation in this
-package (axisymmetric or full) and raises an error rather than silently
-ignoring the curvature, see [`mfs`](@ref) for the bent-cylinder case.
+`Cylinder` (finite `radius_curvature`) requires `method=:full`, including both end caps.
+Full cylinder geometry honors `endcap_depth`; the axisymmetric route uses flat caps.
 
-Full BEM accepts `meshsize` [m], quadrature `qorder` (default 4) and `correction` settings.
-Rigid/soft full BEM also accepts `compression` and `gmres_kwargs` named tuples.
+Full BEM accepts `meshsize` [m], geometry `mesh_order` (1, 2 or 3, default 2),
+quadrature `qorder` (default 4) and `correction` settings.
+Rigid/soft full BEM uses `formulation=:burton_miller` by default; `:cbie` selects
+the conventional equation, which can be singular at fictitious interior frequencies.
+It also accepts `compression` and `gmres_kwargs` named tuples.
+Fluid full BEM defaults to `formulation=:muller` with a dense two-trace solve;
+`:cbie` selects the four-trace system. `equilibrate=true` scales the matrix before
+factorization. `condition_limit=512` bounds the optional SVD condition-number calculation.
 Use [`diagnostics`](@ref) to inspect convergence, residuals and the settings used.
 """
 function bem(body::Union{Sphere, Spheroid, Cylinder},
@@ -559,7 +609,7 @@ function bem(body::Union{Sphere, Spheroid, Cylinder},
         throw(ArgumentError("bem(...) supports method=:axisymmetric or :full, got $method"))
     body isa Cylinder && _isbent(body) &&
         throw(ArgumentError(
-            "bem(::Cylinder, ...) has no bent-cylinder implementation (axisymmetric or full) in this package yet"))
+            "a bent Cylinder requires bem(...; method=:full)"))
     mesh = _axisymmetric_mesh(body, n)
     iszero(incidence_angle) && return _bem_axial(body, boundary, k, mesh; kwargs...)
     return _bem_oblique(body, boundary, k, mesh, incidence_angle; m_max = m_max, kwargs...)
@@ -579,23 +629,37 @@ function bem(body::Sphere,
         n::Integer = _axisymmetric_default_panels(body, k), kwargs...)
     mesh_outer = sphere_mesh(body.radius, n)
     mesh_inner = sphere_mesh(body.radius * boundary.radius_ratio, n)
-    p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh_outer, mesh_inner; kwargs...)
+    reports = _SolveReports()
+    p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh_outer, mesh_inner;
+        solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric, solver_options = (;
+        n, kwargs...))
     data = _AxisymmetricSurfaceData(
-        mesh_outer, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
+        mesh_outer, [p_scat], [dpdn_scat], nothing, nothing, 0.0, report)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
 function _bem_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
         k::Real, mesh::MeridianMesh; kwargs...)
-    p_scat, dpdn_scat, _ = solve_axial(boundary, k, mesh; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
+    reports = _SolveReports()
+    p_scat, dpdn_scat, _ = solve_axial(
+        boundary, k, mesh; solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(mesh), incidence_angle = 0.0, kwargs...))
+    data = _AxisymmetricSurfaceData(
+        mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0, report)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
 function _bem_axial(
         body::AbstractBody, boundary::FluidFilled, k::Real, mesh::MeridianMesh; kwargs...)
-    p_scat, dpdn_scat, _, p_int, dpdn_int = solve_axial(boundary, k, mesh; kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0)
+    reports = _SolveReports()
+    p_scat, dpdn_scat, _, p_int, dpdn_int = solve_axial(
+        boundary, k, mesh; solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(mesh), incidence_angle = 0.0, kwargs...))
+    data = _AxisymmetricSurfaceData(
+        mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0, report)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
@@ -603,32 +667,45 @@ function _bem_oblique(
         body::AbstractBody, boundary::Union{Rigid, PressureRelease, FluidFilled},
         k::Real, mesh::MeridianMesh,
         incidence_angle::Real; m_max::Integer, kwargs...)
+    reports = _SolveReports()
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique(
-        boundary, k, mesh, incidence_angle; m_max = m_max, kwargs...)
+        boundary, k, mesh, incidence_angle; m_max, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(mesh), incidence_angle, m_max, kwargs...))
     data = _AxisymmetricSurfaceData(
-        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle, report)
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
 function _bem_full(body::Union{Sphere, Spheroid},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4, kwargs...)
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, kwargs...)
     quad = body isa Sphere ?
-           gmsh_sphere_mesh(body.radius; meshsize = meshsize, qorder = qorder) :
-           gmsh_spheroid_mesh(body.a, body.b; meshsize = meshsize, qorder = qorder)
+           gmsh_sphere_mesh(body.radius; meshsize, qorder, mesh_order) :
+           gmsh_spheroid_mesh(body.a, body.b; meshsize, qorder, mesh_order)
     p_scat, dpdn_scat, _, diagnostics = solve_full_bem(
         boundary, k, quad; incidence_angle = incidence_angle,
         incidence_azimuth = incidence_azimuth, return_diagnostics = true, kwargs...)
     diagnostics = merge(diagnostics, (;
-        meshsize = Float64(meshsize), quadrature_order = qorder))
+        meshsize = Float64(meshsize), quadrature_order = qorder, mesh_order))
     data = _FullBEMSurfaceData(quad, p_scat, dpdn_scat, incidence_angle, incidence_azimuth,
         diagnostics)
-    return BEMSolution(body, boundary, k, :full, data)
+    return BEMSolution(body, boundary, Float64(k), :full, data)
 end
-function _bem_full(body::Cylinder, boundary, k::Real; kwargs...)
-    throw(ArgumentError(
-        "bem(::Cylinder, ...; method=:full) has no full-3D mesh generator for Cylinder in this package yet"))
+function _bem_full(
+        body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, kwargs...)
+    surface = _cylinder_full_mesh(body; meshsize, qorder, mesh_order)
+    solution = bem(surface, boundary, k; kwargs...)
+    d = solution.data
+    report = merge(d.diagnostics, (;
+        meshsize = Float64(meshsize), mesh_order, quadrature_order = qorder))
+    data = _FullBEMSurfaceData(d.quad, d.p_scat, d.dpdn_scat,
+        d.incidence_angle, d.incidence_azimuth, report)
+    return BEMSolution(body, boundary, Float64(k), :full, data)
 end
 
 # --- `mfs`: axisymmetric and bent-cylinder method of fundamental solutions --
@@ -637,89 +714,139 @@ end
     mfs(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2, offset=0.3*characteristic_radius, kwargs...)
 
 Method-of-fundamental-solutions solve, returns an [`MFSSolution`](@ref),
-axisymmetric for `Sphere`/`Spheroid`/straight `Cylinder`, or the genuinely
-non-axisymmetric 3D point-source solve for a bent `Cylinder` (finite
-`radius_curvature`, not a correction on the axisymmetric one).
-A `Cylinder` with `endcap_depth > 0` uses the smooth-quarter-spheroid-cap
+axisymmetric for `Sphere`/`Spheroid`/straight `Cylinder`, or a lateral-only
+3D point-source solve for a bent `Cylinder` (finite `radius_curvature`).
+The bent-body overload omits end caps. Use `mfs(mesh(body; method=:full, ...), ...)`
+for closed-surface conditions and general observation directions.
+A straight `Cylinder` with `endcap_depth > 0` uses the smooth-half-spheroid-cap
 mesh instead of flat caps (see [`Cylinder`](@ref)), MFS specifically
-needs this, unlike `bem`/`fem`, since flat caps give a sharp-corner
+needs this, since flat caps give a sharp-corner
 normal discontinuity that breaks source placement.
 
 For bent cylinders use `n_s` (default 40) and `n_phi` (default 32) for the axial and
 azimuthal source-grid counts. Both must be integers at least 3. The legacy `n_φ`
 spelling is accepted for compatibility; supplying both spellings throws `ArgumentError`.
+
+`oversampling` is an integer at least one (default 1). It multiplies the
+collocation panel budget while keeping the source grid fixed; bent cylinders multiply
+both collocation grid dimensions. Values above one give a least-squares solve.
+[`diagnostics`](@ref) includes residuals at independent boundary points and singular-value
+estimates of conditioning and rank. These checks require additional assembly and an SVD.
+`condition_limit=512` bounds the number of unknowns for the SVD; larger systems report
+`conditioning=:not_computed` and `nothing` for condition/rank fields. Raise the limit
+to request an SVD for larger systems, or set it to zero to skip that calculation.
 """
 function mfs(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
         incidence_angle::Real = π / 2, offset::Real = 0.3_characteristic_radius(body),
         n::Integer = _axisymmetric_default_panels(body, k),
-        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)), kwargs...)
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        oversampling::Integer = 1, condition_limit::Integer = 512, kwargs...)
+    oversampling >= 1 || throw(ArgumentError("mfs: oversampling must be at least 1"))
+    condition_limit >= 0 || throw(ArgumentError("mfs: condition_limit must be nonnegative"))
     if body isa Cylinder && _isbent(body)
         return _mfs_bent(body, boundary, k; incidence_angle = incidence_angle,
-            offset = offset, kwargs...)
+            offset = offset, oversampling = oversampling, condition_limit, kwargs...)
     end
-    mesh = (body isa Cylinder && _iscapped(body)) ?
-           cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, n) :
-           _axisymmetric_mesh(body, n)
+    source_mesh = (body isa Cylinder && _iscapped(body)) ?
+                  cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, n) :
+                  _axisymmetric_mesh(body, n)
+    mesh = oversampling == 1 ? source_mesh :
+           (body isa Cylinder && _iscapped(body)) ?
+           cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, oversampling *
+                                                                                        n) :
+           _axisymmetric_mesh(body, oversampling * n)
     iszero(incidence_angle) &&
-        return _mfs_axial(body, boundary, k, mesh; offset = offset, kwargs...)
+        return _mfs_axial(
+            body, boundary, k, mesh; offset, source_mesh,
+            oversampling, condition_limit, kwargs...)
     return _mfs_oblique(
-        body, boundary, k, mesh, incidence_angle; offset = offset, m_max = m_max, kwargs...)
+        body, boundary, k, mesh, incidence_angle; offset,
+        m_max, source_mesh, oversampling, condition_limit, kwargs...)
 end
 
 function _mfs_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
-        k::Real, mesh::MeridianMesh; offset::Real, kwargs...)
-    p_scat, dpdn_scat, _ = solve_axial_mfs(boundary, k, mesh; offset = offset, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0)
+        k::Real, mesh::MeridianMesh; offset::Real, source_mesh = mesh, oversampling = 1, kwargs...)
+    reports = _SolveReports()
+    p_scat, dpdn_scat, _ = solve_axial_mfs(boundary, k, mesh;
+        offset, source_mesh, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(source_mesh), oversampling,
+            offset, incidence_angle = 0.0, kwargs...))
+    data = _AxisymmetricSurfaceData(
+        mesh, [p_scat], [dpdn_scat], nothing, nothing, 0.0, report)
     return MFSSolution(body, boundary, k, data)
 end
 
 function _mfs_axial(
         body::AbstractBody, boundary::FluidFilled, k::Real, mesh::MeridianMesh; offset::Real,
-        offset_ext::Real = offset, offset_int::Real = offset, kwargs...)
+        offset_ext::Real = offset, offset_int::Real = offset,
+        source_mesh = mesh, oversampling = 1, kwargs...)
+    reports = _SolveReports()
     p_scat, dpdn_scat, _, p_int, dpdn_int = solve_axial_mfs(
-        boundary, k, mesh; offset_ext = offset_ext, offset_int = offset_int, kwargs...)
-    data = _AxisymmetricSurfaceData(mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0)
+        boundary, k, mesh; offset_ext, offset_int, source_mesh, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(source_mesh), oversampling, offset_ext, offset_int,
+            incidence_angle = 0.0, kwargs...))
+    data = _AxisymmetricSurfaceData(
+        mesh, [p_scat], [dpdn_scat], [p_int], [dpdn_int], 0.0, report)
     return MFSSolution(body, boundary, k, data)
 end
 
 function _mfs_oblique(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
         k::Real, mesh::MeridianMesh, incidence_angle::Real;
-        offset::Real, m_max::Integer, kwargs...)
+        offset::Real, m_max::Integer, source_mesh = mesh, oversampling = 1, kwargs...)
+    reports = _SolveReports()
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique_mfs(
-        boundary, k, mesh, incidence_angle; m_max = m_max, offset = offset, kwargs...)
+        boundary, k, mesh, incidence_angle; m_max, offset,
+        source_mesh, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(source_mesh), oversampling,
+            offset, incidence_angle, m_max, kwargs...))
     data = _AxisymmetricSurfaceData(
-        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle, report)
     return MFSSolution(body, boundary, k, data)
 end
 
 function _mfs_oblique(body::AbstractBody, boundary::FluidFilled, k::Real,
         mesh::MeridianMesh, incidence_angle::Real;
-        offset::Real, m_max::Integer, offset_ext::Real = offset, offset_int::Real = offset, kwargs...)
+        offset::Real, m_max::Integer, offset_ext::Real = offset, offset_int::Real = offset,
+        source_mesh = mesh, oversampling = 1, kwargs...)
+    reports = _SolveReports()
     p_scat_modes, dpdn_scat_modes, _ = solve_oblique_mfs(
         boundary, k, mesh, incidence_angle;
-        m_max = m_max, offset_ext = offset_ext, offset_int = offset_int, kwargs...)
+        m_max, offset_ext, offset_int, source_mesh, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :axisymmetric,
+        solver_options = (; n = npanels(source_mesh), oversampling, offset_ext, offset_int,
+            incidence_angle, m_max, kwargs...))
     data = _AxisymmetricSurfaceData(
-        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle)
+        mesh, p_scat_modes, dpdn_scat_modes, nothing, nothing, incidence_angle, report)
     return MFSSolution(body, boundary, k, data)
 end
 
 function _mfs_bent(body::Cylinder, boundary::Union{Rigid, PressureRelease}, k::Real;
         incidence_angle::Real = π / 2, offset::Real, n_s::Integer = 40,
-        n_phi::Union{Nothing, Integer} = nothing, n_φ::Union{Nothing, Integer} = nothing, kwargs...)
+        n_phi::Union{Nothing, Integer} = nothing, n_φ::Union{Nothing, Integer} = nothing,
+        oversampling::Integer = 1, kwargs...)
     n_phi !== nothing && n_φ !== nothing &&
         throw(ArgumentError("mfs: supply only n_phi, not both n_phi and the legacy n_φ"))
     azimuth_count = something(n_phi, n_φ, 32)
     n_s >= 3 || throw(ArgumentError("mfs: n_s must be at least 3"))
     azimuth_count >= 3 || throw(ArgumentError("mfs: n_phi must be at least 3"))
+    reports = _SolveReports()
     p_scat, dpdn_scat, points, normals, areas = solve_bent_cylinder_mfs(
         boundary, k, body.radius, body.length, body.radius_curvature;
-        aspect_angle = incidence_angle, offset = offset, n_s = n_s, n_φ = azimuth_count, kwargs...)
-    data = _BentMFSSurfaceData(p_scat, dpdn_scat, points, normals, areas, incidence_angle)
+        aspect_angle = incidence_angle, offset = offset, n_s = n_s, n_φ = azimuth_count,
+        oversampling, solve_reports = reports, kwargs...)
+    report = _summarize_solves(reports; method = :bent,
+        solver_options = (;
+            n_s, n_phi = azimuth_count, offset, incidence_angle, oversampling, kwargs...))
+    data = _BentMFSSurfaceData(
+        p_scat, dpdn_scat, points, normals, areas, incidence_angle, report)
     return MFSSolution(body, boundary, k, data)
 end
 
-# --- `fem` on a `Shell` body: thin (Hayek & Boisvert) and general shell-fluid coupling -----
+# --- `fem` on a `Shell` body: thin and general shell-fluid coupling -----
 
 function _prolate_shell_geometry(s::Shell)
     s.body isa Spheroid ||
@@ -737,14 +864,12 @@ Elastic-shell/fluid coupling, returns a [`FEMSolution`](@ref); post-process with
 own medium is the exterior fluid; `ext_density`/`ext_soundspeed` are that
 fluid's absolute density [kg/m³] and sound speed [m/s] (not contrasts, to
 match the underlying frequency-domain solve), `int_density`/
-`int_soundspeed` the interior's, pass `int_density=0` for a vacuum/air-
-backed shell (no interior coupling).
+`int_soundspeed` the interior's. With `method=:thin`, pass `int_density=0`
+for a vacuum-backed shell (no interior coupling).
 
-`method=:thin`, Hayek & Boisvert 1D midsurface theory. Only
+`method=:thin`, the axisymmetric reduction of Hayek & Boisvert's (2003) midsurface theory. Only
 `shell.body isa Spheroid` (prolate) is supported, and only axial
-incidence (`incidence_angle` must be `0.0`) since the theory has no
-`m > 0` degrees of freedom at all, not a missing feature, a hard
-theoretical limit.
+incidence (`incidence_angle` must be `0.0`). This reduction retains only `m = 0`.
 
 `method=:general` (default), full through-thickness 2D solid-elasticity
 shell FEM, general incidence, `shell.body isa Union{Sphere,Spheroid}`,
@@ -757,48 +882,61 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
         int_density::Real, int_soundspeed::Real, k::Real;
         method::Symbol = :general, incidence_angle::Real = π / 2,
         m_max::Integer = _default_mode_count(k * _characteristic_radius(s.body)),
-        n_eta::Integer = 65, n_t::Integer = 3, kwargs...)
+        n_eta::Integer = 65, n_t::Integer = 3,
+        pole_offset::Real = method === :thin ? 1e-4 : 1e-3, kwargs...)
     material = boundary.material
     freq_hz = k * ext_soundspeed / (2π)
+    reports = _SolveReports()
+    options = (; incidence_angle, m_max = method === :thin ? 0 : m_max,
+        n_eta, n_t, pole_offset, kwargs...)
     if method === :thin
         iszero(incidence_angle) || throw(ArgumentError(
-            "fem(::Shell, ...; method=:thin) only supports axial incidence (Hayek & Boisvert has no m>0 " *
-            "degrees of freedom), use method=:general for oblique incidence"))
+            "fem(::Shell, ...; method=:thin) only supports axial incidence (the axisymmetric " *
+            "reduction retains m=0), use method=:general for oblique incidence"))
         geometry = _prolate_shell_geometry(s)
         if iszero(int_density)
             p_scat, dpdn_scat, ps, shell_state, _ = solve_shell_fluid_coupled(
                 geometry, material, ext_density, ext_soundspeed,
-                freq_hz; n_eta = n_eta, kwargs...)
+                freq_hz; n_eta, pole_offset, solve_reports = reports, kwargs...)
+            report = _summarize_solves(reports; method, solver_options = options)
             data = _ShellFEMSurfaceData(
                 ps, [p_scat], [dpdn_scat], nothing, nothing,
-                nothing, shell_state, incidence_angle)
+                nothing, shell_state, incidence_angle, report)
             return FEMSolution(s, boundary, k, method, data)
         end
         p_ext, dpdn_ext, ps_ext, p_int, dpdn_int, ps_int,
         shell_state, _ = solve_shell_fluid_filled_coupled(
             geometry, material, ext_density, ext_soundspeed, int_density,
-            int_soundspeed, freq_hz; n_eta = n_eta, kwargs...)
+            int_soundspeed, freq_hz; n_eta, pole_offset, solve_reports = reports, kwargs...)
+        report = _summarize_solves(reports; method, solver_options = options)
         data = _ShellFEMSurfaceData(
-            ps_ext, [p_ext], [dpdn_ext], ps_int, [p_int], [dpdn_int], shell_state, incidence_angle)
+            ps_ext, [p_ext], [dpdn_ext], ps_int, [p_int],
+            [dpdn_int], shell_state, incidence_angle, report)
         return FEMSolution(s, boundary, k, method, data)
     end
     method === :general ||
         throw(ArgumentError("fem(::Shell, ...) supports method=:thin or :general, got $method"))
+    int_density > 0 || throw(ArgumentError(
+        "fem(::Shell, ...; method=:general) requires positive interior density"))
     p_scat_modes, dpdn_scat_modes, ps = if s.body isa Spheroid
         solve_general_shell_fluid_filled_coupled(
             _prolate_shell_geometry(s), material.density,
             material.youngs_modulus, material.poisson,
             ext_density, ext_soundspeed, int_density, int_soundspeed, freq_hz,
-            incidence_angle; m_max = m_max, n_eta = n_eta, n_t = n_t, kwargs...)
+            incidence_angle; m_max = m_max, n_eta = n_eta, n_t = n_t,
+            pole_offset = pole_offset, solve_reports = reports, kwargs...)
     else
-        mesh = build_structured_spherical_shell(s.body.radius, s.thickness, n_eta, n_t)
+        mesh = build_structured_spherical_shell(s.body.radius, s.thickness, n_eta, n_t;
+            pole_offset = pole_offset)
         solve_general_shell_fluid_filled_coupled(
             mesh, material.density, material.youngs_modulus, material.poisson,
             ext_density, ext_soundspeed, int_density, int_soundspeed,
-            freq_hz, incidence_angle; m_max = m_max, kwargs...)
+            freq_hz, incidence_angle; m_max = m_max, solve_reports = reports, kwargs...)
     end
+    report = _summarize_solves(reports; method, solver_options = options)
     data = _ShellFEMSurfaceData(
-        ps, p_scat_modes, dpdn_scat_modes, nothing, nothing, nothing, nothing, incidence_angle)
+        ps, p_scat_modes, dpdn_scat_modes, nothing, nothing,
+        nothing, nothing, incidence_angle, report)
     return FEMSolution(s, boundary, k, method, data)
 end
 
@@ -813,6 +951,8 @@ Return the complex far-field scattering amplitude in meters. Axisymmetric BEM/MF
 structural shell FEM accept observation `angle` and `azimuth` [rad] in body coordinates;
 their defaults are backscatter, `angle = pi - incidence_angle`, `azimuth = pi`.
 Full BEM accepts a unit-vector `direction`, defaulting to the negative incident direction.
+Cartesian body length is x, width is y and height/depth is z. Polar angles are from +x;
+azimuth is from +y toward +z, so `(angle,azimuth)=(pi/2,0)` points along +y.
 Bent MFS returns backscatter only. Modal/Kirchhoff observation is fixed at solve time and
 post-processing keywords throw `ArgumentError`. Ordinary radial/meridian FEM retains only
 target strength, so requesting its complex amplitude also throws `ArgumentError`.
@@ -838,18 +978,34 @@ target_strength
 """
     diagnostics(solution)
 
-Return a named tuple of linear-solve diagnostics for full-3D BEM, or `nothing` when the
-solver does not retain diagnostics. `nothing` does not imply convergence.
+Return a named tuple of diagnostics for BEM, MFS and FEM. Modal and Kirchhoff
+solutions return `nothing`; a missing report does not imply convergence.
 
-Fields include `method`, `converged`, `iterations`, `absolute_residual`,
+Full-3D BEM fields include `method`, `converged`, `iterations`, `absolute_residual`,
 `relative_residual`, `residual_history`, `unknown_count`, `quadrature_nodes`, `meshsize`,
 `quadrature_order`, `compression`, `correction` and `solver_options`. Residuals are recomputed against the
 assembled (possibly compressed) linear system; relative residual is `norm(A*x-b)/norm(b)`.
 For zero right-hand sides it is zero only for a zero residual, and `Inf` otherwise.
 GMRES history contains residual estimates in the solver's norm (preconditioned when a left
-preconditioner is supplied). Direct transmission solves have no iteration history or
+preconditioner is supplied). Direct solves have no iteration history or
 iterative convergence flag (`iterations = converged = nothing`).
 Linear residuals do not measure geometry, quadrature, conditioning or physical-model error.
+
+Axisymmetric BEM, MFS and FEM retain per-system reports in `systems`, with mode,
+matrix dimensions, residuals and numerical controls. Summary residuals and dimensions
+are the maxima over those systems, including every adaptive refinement. `solver_options`
+retains public solve settings; per-system fields describe the actual discretizations.
+Adaptive radial FEM reports `refinement = (converged, change_db, target_tol, n_elements)`;
+this tests successive target strengths, not accuracy against an independent solution.
+
+MFS systems also retain source offsets/counts, `condition_number`, `numerical_rank`,
+`rank_tolerance` and a `boundary_residual` measured away from the collocation points.
+Axisymmetric checks use quarter-panel points on the same piecewise-linear geometry;
+they do not measure geometric error. Transmission includes separate `pressure_residual`
+and `velocity_residual` checks because the joint system mixes equation units. Source
+counts include both source sets for transmission. Bent-cylinder checks cover its
+lateral surface. Conditioning and rank refer to the unscaled collocation matrix;
+they are `nothing` when its unknown count exceeds `condition_limit` (see [`mfs`](@ref)).
 
 # Examples
 ```julia
@@ -859,7 +1015,7 @@ report.converged
 ```
 """
 diagnostics(::AbstractSolution) = nothing
-diagnostics(sol::BEMSolution{_FullBEMSurfaceData}) = sol.data.diagnostics
+diagnostics(sol::Union{BEMSolution, MFSSolution, FEMSolution}) = sol.data.diagnostics
 
 # `modal`/`kirchhoff` bake the observation angle in at solve time (a formula re-evaluation, not
 # reusable surface state), so these take no keywords — rejected explicitly with a message pointing
@@ -969,7 +1125,7 @@ end
 function scattering_amplitude(sol::MFSSolution{_BentMFSSurfaceData})
     d = sol.data
     β = d.incidence_angle
-    q̂ = (-cos(β), 0.0, -sin(β))
+    q̂ = (-cos(β), -sin(β), 0.0)
     f = zero(ComplexF64)
     for i in eachindex(d.points)
         f += (im * sol.k * _dot3(q̂, d.normals[i]) * d.p_scat[i] + d.dpdn_scat[i]) *

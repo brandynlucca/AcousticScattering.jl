@@ -3,12 +3,14 @@
 
 # (value, deriv) at both boundaries for the outer-anchored (=1 at outer, =0 at inner) and
 # inner-anchored (=0 at outer, =1 at inner) shell bases.
-function _fluid_shell_basis_value_deriv(mode::Integer, x_inner::Real, x_outer::Real, n_elements::Integer)
+function _fluid_shell_basis_value_deriv(
+        mode::Integer, x_inner::Real, x_outer::Real, n_elements::Integer;
+        solve_reports = nothing)
     nodes = collect(range(x_inner, x_outer; length = n_elements + 1))
     dl, d = _elastic_radial_mode_matrix(nodes, mode)
     n_node = n_elements + 1
-    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0)
-    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0)
+    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0; solve_reports, mode)
+    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0; solve_reports, mode)
     return (
         outer_at_outer = (outer_vals[end], _boundary_derivative(nodes, outer_vals, :outer)),
         outer_at_inner = (outer_vals[1], _boundary_derivative(nodes, outer_vals, :inner)),
@@ -20,23 +22,25 @@ end
 # FluidLayer/VacuumInterior: p(b)=0 forces the inner-anchored basis's coefficient to exactly zero,
 # leaving a single shell unknown (the outer-anchored basis), a 2-unknown (bₙ, shell coefficient) system.
 function _raw_bn_radial_fem(
-        bc::Shelled{FluidLayer, VacuumInterior}, mode::Integer, k::Real, a::Real, n_elements::Integer)
+        bc::Shelled{FluidLayer, VacuumInterior}, mode::Integer, k::Real, a::Real, n_elements::Integer;
+        solve_reports = nothing)
     x1a = k * a
     k2 = k / bc.material.soundspeed_contrast
     x2a, x2b = k2 * a, k2 * a * bc.radius_ratio
     gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
 
-    v_out, d_out = _fluid_shell_basis_value_deriv(mode, x2b, x2a, n_elements).outer_at_outer
+    v_out, d_out = _fluid_shell_basis_value_deriv(mode, x2b, x2a, n_elements; solve_reports).outer_at_outer
 
     M = ComplexF64[hs(mode, x1a) -v_out
                    hsd(mode, x1a) -d_out/gh_shell]
     rhs = ComplexF64[-js(mode, x1a), -jsd(mode, x1a)]
-    return (M \ rhs)[1]
+    return _solve_reported(M, rhs, solve_reports; mode, component = :interface)[1]
 end
 
 # FluidLayer/FluidInterior: shell needs both basis coefficients, a 4-unknown, 4-equation system per mode.
 function _raw_bn_radial_fem(
-        bc::Shelled{FluidLayer, FluidInterior}, mode::Integer, k::Real, a::Real, n_elements::Integer)
+        bc::Shelled{FluidLayer, FluidInterior}, mode::Integer, k::Real, a::Real, n_elements::Integer;
+        solve_reports = nothing)
     x1a = k * a
     k2 = k / bc.material.soundspeed_contrast
     x2a, x2b = k2 * a, k2 * a * bc.radius_ratio
@@ -45,7 +49,7 @@ function _raw_bn_radial_fem(
     gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
     gh_int = bc.interior.density_contrast * bc.interior.soundspeed_contrast
 
-    basis = _fluid_shell_basis_value_deriv(mode, x2b, x2a, n_elements)
+    basis = _fluid_shell_basis_value_deriv(mode, x2b, x2a, n_elements; solve_reports)
     v_int, d_int = js(mode, x3b), jsd(mode, x3b)
 
     M = zeros(ComplexF64, 4, 4)
@@ -65,7 +69,7 @@ function _raw_bn_radial_fem(
     basis.inner_at_inner[2] / gh_shell
     M[4, 4] = -d_int / gh_int
 
-    return (M \ rhs)[1]
+    return _solve_reported(M, rhs, solve_reports; mode, component = :interface)[1]
 end
 
 """
@@ -83,10 +87,10 @@ function fluid_shell_sphere_radial_fem_target_strength(
         boundary::Union{
             Shelled{FluidLayer, VacuumInterior}, Shelled{FluidLayer, FluidInterior}}, k::Real, a::Real;
         n_elements::Integer = 320,
-        m_max::Integer = _default_mode_count(k * a))
+        m_max::Integer = _default_mode_count(k * a), solve_reports = nothing)
     total = zero(ComplexF64)
     for m in 0:m_max
-        Am = _raw_bn_radial_fem(boundary, m, k, a, n_elements)
+        Am = _raw_bn_radial_fem(boundary, m, k, a, n_elements; solve_reports)
         total += (2m + 1) * legendre_p(m, -1.0) * Am
     end
     f = -im / k * total

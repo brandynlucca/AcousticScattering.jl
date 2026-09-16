@@ -172,7 +172,7 @@ end
 
 include("vesm_validation.jl")
 
-@testset "ViscoelasticShell (VESM, Feuillade & Nero 1998, monopole)" begin
+@testset "ViscoelasticShell (VESM, monopole)" begin
     c1 = 1477.3
     k = 2pi * 2000.0 / c1
     rho_core, c_core = 1.24 / 1026.8, 345.0 / 1477.3
@@ -379,25 +379,25 @@ end
     ts_ka = AS.target_strength(AS.kirchhoff(sphere, AS.Rigid(), k_high))
     @test ts_modal ≈ ts_ka atol = 0.05
 
-    c_francis = 1477.3
-    francis_kirchhoff_cases = [
+    reference_soundspeed = 1477.3
+    sphere_reference_cases = [
         (12.0, -52.12), (14.0, -50.87), (16.0, -49.81), (18.0, -48.91), (20.0, -48.13)
     ]
-    for (freq_khz, ts_expected) in francis_kirchhoff_cases
-        k = 2pi * freq_khz * 1000 / c_francis
+    for (freq_khz, ts_expected) in sphere_reference_cases
+        k = 2pi * freq_khz * 1000 / reference_soundspeed
         @test AS.target_strength(AS.kirchhoff(sphere, AS.Rigid(), k)) ≈ ts_expected atol = 0.01
     end
 end
 
 @testset "Finite-cylinder Kirchhoff high-frequency baseline" begin
     radius, length = 0.01, 0.07
-    c_francis = 1477.3
-    k = 2pi * 38000.0 / c_francis
+    reference_soundspeed = 1477.3
+    k = 2pi * 38000.0 / reference_soundspeed
     cyl = AS.Cylinder(radius, length)
-    francis_kirchhoff_cylinder_cases = [
+    cylinder_reference_cases = [
         (8.0, -42.07), (28.0, -44.47), (48.0, -45.97), (68.0, -44.66), (88.0, -31.29)
     ]
-    for (angle_deg, ts_expected) in francis_kirchhoff_cylinder_cases
+    for (angle_deg, ts_expected) in cylinder_reference_cases
         ts = AS.target_strength(AS.kirchhoff(cyl, AS.Rigid(), k; incidence_angle = deg2rad(angle_deg)))
         @test ts ≈ ts_expected atol = 0.01
     end
@@ -455,16 +455,16 @@ end
     @test AS.target_strength(AS.kirchhoff(body, AS.Rigid(), k; incidence_angle = 0.0)) ≈
           AS.target_strength(AS.kirchhoff_form_function(AS.Rigid(), R1, R2)) atol = 0.05
 
-    body_francis = AS.Spheroid(0.07, 0.01)
-    c_francis = 1477.3
-    k_francis = 2pi * 38000.0 / c_francis
-    francis_kirchhoff_spheroid_cases = [
+    reference_body = AS.Spheroid(0.07, 0.01)
+    reference_soundspeed = 1477.3
+    reference_wavenumber = 2pi * 38000.0 / reference_soundspeed
+    spheroid_reference_cases = [
         (0.0, -62.67), (8.0, -62.8), (28.0, -62.21), (48.0, -55.61), (68.0, -46.49), (
             88.0, -28.15)
     ]
-    for (angle_deg, ts_expected) in francis_kirchhoff_spheroid_cases
+    for (angle_deg, ts_expected) in spheroid_reference_cases
         ts = AS.target_strength(AS.kirchhoff(
-            body_francis, AS.Rigid(), k_francis; incidence_angle = deg2rad(angle_deg)))
+            reference_body, AS.Rigid(), reference_wavenumber; incidence_angle = deg2rad(angle_deg)))
         @test ts ≈ ts_expected atol = 0.01
     end
 end

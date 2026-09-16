@@ -5,7 +5,8 @@
         :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
         :Shell, :AbstractSolution, :ModalSolution, :KirchhoffSolution, :FEMSolution,
         :BEMSolution, :MFSSolution, :modal, :kirchhoff, :fem, :bem, :mfs,
-        :target_strength, :scattering_amplitude, :diagnostics, :Mesh, :mesh))
+        :target_strength, :scattering_amplitude, :diagnostics, :Mesh, :mesh,
+        :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
     @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
     for name in expected
         @test isdefined(@__MODULE__, name)
@@ -51,6 +52,9 @@ end
     @test d.unknown_count == d.quadrature_nodes == length(solution.data.quad)
     @test d.meshsize == 0.004
     @test d.quadrature_order == 4
+    @test d.mesh_order == 2
+    @test d.formulation == :burton_miller
+    @test d.coupling == im / k
     @test d.compression == (method = :none,)
     @test d.correction == (method = :dim,)
     @test d.solver_options.reltol == options.reltol
@@ -74,7 +78,10 @@ end
     @test direct.iterations === nothing
     @test isempty(direct.residual_history)
     @test direct.relative_residual < 1e-10
-    @test direct.unknown_count == 4 * direct.quadrature_nodes
+    @test direct.unknown_count == 2 * direct.quadrature_nodes
+    @test direct.formulation == :muller
+    @test direct.equilibrate
+    @test direct.scaled_relative_residual < 1e-10
     @test direct.compression == (method = :none,)
 
     # Preserve the established low-level tuple when diagnostics are not requested.

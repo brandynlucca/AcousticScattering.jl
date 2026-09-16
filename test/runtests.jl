@@ -1,7 +1,11 @@
 using SafeTestsets: @safetestset
 
-const TEST_GROUPS = ("Analytical", "RadialFEM", "MeridianFEM", "Boundary", "Spheroidal",
-    "Oblique", "Interfaces", "Plots1D", "Plots2D", "Plots3DModels", "Plots3DFull")
+const TEST_GROUPS = (
+    "Analytical", "RadialFEM", "MeridianFEM", "Boundary", "FullBEM",
+    "CylinderBEM", "RegionBEM", "Spheroidal",
+    "RegionShapes", "FishBEM", "LowFrequencyRegions", "GasResonance",
+    "CoupledResonance", "Oblique", "Interfaces", "Plots1D",
+    "Plots2D", "Plots3DModels", "Plots3DFull")
 const TEST_GROUP = get(ENV, "GROUP", isempty(ARGS) ? "All" : only(ARGS))
 TEST_GROUP in ("All", "Core", TEST_GROUPS...) ||
     throw(ArgumentError("Unknown test group: $TEST_GROUP. Choose All, Core, or $(join(TEST_GROUPS, ", "))."))
@@ -22,6 +26,35 @@ if TEST_GROUP in ("All", "Core", "Boundary")
     @time @safetestset "Boundary" include("boundary.jl")
 end
 
+if TEST_GROUP in ("All", "Core", "FullBEM")
+    @time @safetestset "FullBEM" include("full_bem.jl")
+end
+
+if TEST_GROUP in ("All", "Core", "CylinderBEM")
+    @time @safetestset "CylinderBEM" include("cylinder_surface.jl")
+end
+
+if TEST_GROUP in ("All", "Core", "RegionBEM")
+    @time @safetestset "RegionBEM" include("region_bem.jl")
+end
+
+if TEST_GROUP in ("All", "Core", "RegionShapes")
+    @time @safetestset "RegionShapes" include("region_shapes.jl")
+end
+
+if TEST_GROUP in ("All", "Core", "FishBEM")
+    @time @safetestset "FishBEM" include("fish_bem.jl")
+end
+if TEST_GROUP in ("All", "Core", "LowFrequencyRegions")
+    @time @safetestset "LowFrequencyRegions" include("low_frequency_regions.jl")
+end
+if TEST_GROUP in ("All", "Core", "GasResonance")
+    @time @safetestset "GasResonance" include("gas_resonance.jl")
+end
+if TEST_GROUP in ("All", "Core", "CoupledResonance")
+    @time @safetestset "CoupledResonance" include("coupled_resonance.jl")
+end
+
 if TEST_GROUP in ("All", "Core", "Spheroidal")
     @time @safetestset "Spheroidal" include("spheroidal.jl")
 end
@@ -32,6 +65,7 @@ end
 
 if TEST_GROUP in ("All", "Core", "Interfaces")
     @time @safetestset "Interfaces" include("interfaces.jl")
+    @time @safetestset "BodyCoordinates" include("body_coordinates.jl")
 end
 
 if TEST_GROUP in ("All", "Plots1D")

@@ -19,12 +19,13 @@ quadratic (3-node) Lagrangian elements.
 """
 function radial_fem_coefficient(
         boundary::Union{Rigid, PressureRelease}, l::Integer, k::Real, a::Real, R::Real;
-        n_elements::Integer = 200, order::Integer = 1)
+        n_elements::Integer = 200, order::Integer = 1, solve_reports = nothing)
     if order == 1
-        return _radial_fem_coefficient_linear(boundary, l, k, a, R; n_elements = n_elements)
+        return _radial_fem_coefficient_linear(
+            boundary, l, k, a, R; n_elements, solve_reports)
     elseif order == 2
         return _radial_fem_coefficient_quadratic(
-            boundary, l, k, a, R; n_elements = n_elements)
+            boundary, l, k, a, R; n_elements, solve_reports)
     else
         throw(ArgumentError("order must be 1 or 2, got $order"))
     end
@@ -32,7 +33,7 @@ end
 
 function _radial_fem_coefficient_linear(
         boundary::Union{Rigid, PressureRelease}, l::Integer,
-        k::Real, a::Real, R::Real; n_elements::Integer = 200)
+        k::Real, a::Real, R::Real; n_elements::Integer = 200, solve_reports = nothing)
     r = collect(range(a, R; length = n_elements + 1))
     n = length(r)
 
@@ -86,7 +87,7 @@ function _radial_fem_coefficient_linear(
         b[1] = p_a
     end
 
-    p = K \ b
+    p = _solve_reported(K, b, solve_reports; mode = l, n_elements, order = 1, R)
     return p[n] / hs(l, k * R)
 end
 
@@ -100,7 +101,7 @@ const _GQ4 = (
 
 function _radial_fem_coefficient_quadratic(
         boundary::Union{Rigid, PressureRelease}, l::Integer,
-        k::Real, a::Real, R::Real; n_elements::Integer = 200)
+        k::Real, a::Real, R::Real; n_elements::Integer = 200, solve_reports = nothing)
     r_corner = collect(range(a, R; length = n_elements + 1))
     n = 2 * n_elements + 1  # corner + midside nodes
 
@@ -151,7 +152,7 @@ function _radial_fem_coefficient_quadratic(
         b[1] = p_a
     end
 
-    p = K \ b
+    p = _solve_reported(K, b, solve_reports; mode = l, n_elements, order = 2, R)
     return p[n] / hs(l, k * R)
 end
 
@@ -174,11 +175,12 @@ modal series, see the validation in test/runtests.jl).
 """
 function radial_fem_target_strength(
         boundary::Union{Rigid, PressureRelease}, k::Real, a::Real, R::Real;
-        m_max::Integer = _default_mode_count(k * a), n_elements::Integer = 200, order::Integer = 1)
+        m_max::Integer = _default_mode_count(k * a), n_elements::Integer = 200, order::Integer = 1,
+        solve_reports = nothing)
     total = zero(ComplexF64)
     for l in 0:m_max
         Bl = radial_fem_coefficient(
-            boundary, l, k, a, R; n_elements = n_elements, order = order)
+            boundary, l, k, a, R; n_elements, order, solve_reports)
         total += Bl * (-im)^l * legendre_p(l, -1.0)
     end
     f = -im / k * total
@@ -232,7 +234,7 @@ as the single-domain method.
 """
 function radial_fem_coefficient(
         boundary::FluidFilled, l::Integer, k::Real, a::Real, R::Real;
-        n_elements_int::Integer = 100, n_elements_ext::Integer = 100)
+        n_elements_int::Integer = 100, n_elements_ext::Integer = 100, solve_reports = nothing)
     g = boundary.density_contrast
     h = boundary.soundspeed_contrast
     k_int = k / h
@@ -283,7 +285,7 @@ function radial_fem_coefficient(
     A[row, i_fe] = -1.0
     bvec[row] = a^2 * dpdn_inc_l
 
-    x = A \ bvec
+    x = _solve_reported(A, bvec, solve_reports; mode = l, n_elements_int, n_elements_ext, R)
     p_scat_ext_a = x[off_pe + n_e]
     return p_scat_ext_a / hs(l, k * R)
 end
@@ -297,11 +299,11 @@ method.
 """
 function radial_fem_target_strength(boundary::FluidFilled, k::Real, a::Real, R::Real;
         m_max::Integer = _default_mode_count(k * a),
-        n_elements_int::Integer = 100, n_elements_ext::Integer = 100)
+        n_elements_int::Integer = 100, n_elements_ext::Integer = 100, solve_reports = nothing)
     total = zero(ComplexF64)
     for l in 0:m_max
         Bl = radial_fem_coefficient(boundary, l, k, a, R; n_elements_int = n_elements_int,
-            n_elements_ext = n_elements_ext)
+            n_elements_ext = n_elements_ext, solve_reports = solve_reports)
         total += Bl * (-im)^l * legendre_p(l, -1.0)
     end
     f = -im / k * total
@@ -323,18 +325,24 @@ function radial_fem_target_strength_adaptive(
         boundary::FluidFilled, k::Real, a::Real, R::Real;
         target_tol::Real = 0.01, n_elements_start::Integer = 50,
         max_n_elements::Integer = 4000,
-        m_max::Integer = _default_mode_count(k * a))
+        m_max::Integer = _default_mode_count(k * a), solve_reports = nothing)
     n = n_elements_start
+    change_db = nothing
     ts_prev = radial_fem_target_strength(
-        boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n)
+        boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n, solve_reports)
     while n < max_n_elements
         n = min(max_n_elements, 2n)
         ts_new = radial_fem_target_strength(
-            boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n)
-        abs(ts_new - ts_prev) < target_tol && return ts_new
+            boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n, solve_reports)
+        change_db = abs(ts_new - ts_prev)
+        if change_db < target_tol
+            _record_refinement!(solve_reports, true, change_db, target_tol, n)
+            return ts_new
+        end
         ts_prev = ts_new
         n == max_n_elements && break
     end
+    _record_refinement!(solve_reports, false, change_db, target_tol, n)
     @warn "radial_fem_target_strength_adaptive (FluidFilled) did not converge to target_tol=$target_tol dB within max_n_elements=$max_n_elements (ka=$(k*a)), returning the finest solve tried"
     return ts_prev
 end
@@ -355,18 +363,24 @@ function radial_fem_target_strength_adaptive(
         boundary::Union{Rigid, PressureRelease}, k::Real, a::Real, R::Real;
         target_tol::Real = 0.01, n_elements_start::Integer = 100,
         max_n_elements::Integer = 8000,
-        m_max::Integer = _default_mode_count(k * a), order::Integer = 1)
+        m_max::Integer = _default_mode_count(k * a), order::Integer = 1, solve_reports = nothing)
     n = n_elements_start
+    change_db = nothing
     ts_prev = radial_fem_target_strength(
-        boundary, k, a, R; m_max = m_max, n_elements = n, order = order)
+        boundary, k, a, R; m_max = m_max, n_elements = n, order = order, solve_reports)
     while n < max_n_elements
         n = min(max_n_elements, 2n)
         ts_new = radial_fem_target_strength(
-            boundary, k, a, R; m_max = m_max, n_elements = n, order = order)
-        abs(ts_new - ts_prev) < target_tol && return ts_new
+            boundary, k, a, R; m_max = m_max, n_elements = n, order = order, solve_reports)
+        change_db = abs(ts_new - ts_prev)
+        if change_db < target_tol
+            _record_refinement!(solve_reports, true, change_db, target_tol, n)
+            return ts_new
+        end
         ts_prev = ts_new
         n == max_n_elements && break
     end
+    _record_refinement!(solve_reports, false, change_db, target_tol, n)
     @warn "radial_fem_target_strength_adaptive did not converge to target_tol=$target_tol dB within max_n_elements=$max_n_elements (ka=$(k*a)), returning the finest solve tried"
     return ts_prev
 end

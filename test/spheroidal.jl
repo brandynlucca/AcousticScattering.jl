@@ -67,7 +67,7 @@ include("spheroidal_coupling.jl")
         @test diffs[3] < 0.1
     end
 
-    @testset "fluid-filled full off-diagonal coupling (Furusawa Eq. 4)" begin
+    @testset "fluid-filled full off-diagonal coupling" begin
         q = 3.0
         xi0 = 1.05
         a = q * xi0
@@ -114,7 +114,7 @@ include("spheroidal_coupling.jl")
         end
     end
 
-    @testset "fluid-filled full coupling: quad-precision special functions (Jech et al. 2015)" begin
+    @testset "fluid-filled full coupling: quad-precision special functions" begin
         c_med, rho_med = 1477.3, 1026.8
         rho_ws, c_ws = 1028.9, 1480.3
         body_ws = AS.Spheroid(0.07, 0.01)

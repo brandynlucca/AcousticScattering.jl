@@ -30,7 +30,7 @@ BLAS.set_num_threads(1)
     @test ts_2d_pr ≈ ts_modal_pr atol = 0.05
 end
 
-@testset "Spheroid meridian FEM (Rigid, vs Jech et al. 2015 benchmark)" begin
+@testset "Spheroid meridian FEM (Rigid, independent benchmark)" begin
     a_major, b_minor = 0.07, 0.01
     c_water = 1477.3
     k = 2pi * 38000.0 / c_water

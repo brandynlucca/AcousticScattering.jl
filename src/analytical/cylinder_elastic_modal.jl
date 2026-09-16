@@ -1,5 +1,5 @@
 # Elastic cylindrical shell and solid elastic cylinder modal coefficients (ECMS), reusing
-# ElasticLayer/SolidElastic from sphere_modal.jl. Stanton (1988) / Doolittle & Überall (1966).
+# ElasticLayer/SolidElastic from sphere_modal.jl.
 
 function _elastic_cylinder_shell_matrix(
         m::Integer, ω::Real, ρ_shell::Real, cL::Real, cT::Real,

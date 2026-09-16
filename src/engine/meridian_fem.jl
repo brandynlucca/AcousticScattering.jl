@@ -36,7 +36,7 @@ preamble).
 function meridian_fem_target_strength(
         boundary::Union{Rigid, PressureRelease}, k::Real, a::Real, R::Real;
         n_r::Integer = 40, n_theta::Integer = 60,
-        l_max::Integer = _default_mode_count(k * R))
+        l_max::Integer = _default_mode_count(k * R), solve_reports = nothing)
     nr1 = n_r + 1
     nt1 = n_theta + 1
     N = nr1 * nt1
@@ -136,7 +136,7 @@ function meridian_fem_target_strength(
         end
     end
 
-    p = K \ b
+    p = _solve_reported(K, b, solve_reports; mode = 0, n_r, n_theta, l_max, R)
 
     # Far field: project the r=R trace onto Legendre modes (reusing Q),
     # then the same Rayleigh-expansion far-field sum as radial_fem.jl.

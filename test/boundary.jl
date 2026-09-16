@@ -73,26 +73,10 @@ end
     a = 0.01
     c_water = 1477.4
 
-    mesh = AS.sphere_mesh(a, 10)
-    ps = AS.panels(mesh)
-    n = length(ps)
+    mesh = AS.sphere_mesh(a, 48)
     k_static = 1e-6
-    row_sums = Vector{ComplexF64}(undef, n)
-    for i in 1:n
-        xρ, xz = ps[i].rhom, ps[i].zm
-        total = zero(ComplexF64)
-        for j in 1:n
-            pj = ps[j]
-            integrand = s -> begin
-                ρ2, z2 = AS._panel_point(pj, s)
-                AS._azimuthal_dGdn(k_static, xρ, xz, ρ2, z2, pj.nrho, pj.nz) * ρ2 * pj.L
-            end
-            total += i == j ? AS.quadgk(integrand, 0.0, 0.5, 1.0; rtol = 1e-6)[1] :
-                     AS.quadgk(integrand, 0.0, 1.0; rtol = 1e-6)[1]
-        end
-        row_sums[i] = total
-    end
-    @test all(rs -> isapprox(rs, -0.5 + 0im; atol = 1e-4), row_sums)
+    K, _, _ = AS.assemble_cbie_operators(mesh, k_static; rtol = 1e-8)
+    @test maximum(abs.(sum(K; dims = 2) .+ 0.5)) < 1e-7
 
     freq = 38000.0
     k = 2pi * freq / c_water

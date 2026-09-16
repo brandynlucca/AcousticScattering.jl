@@ -1,12 +1,12 @@
 # Prolate/oblate spheroidal modal series, built on SpheroidalWaves.jl. Liquid-filled (also covers
-# gas-filled) spheroids support `coupling=:diagonal` (Furusawa 1988 Eq. 5) or `:full` (Eq. 4, default).
+# gas-filled) spheroids support `coupling=:diagonal` or `:full` (default).
 
 using QuadGK: gauss
 
 """
     Spheroid(a, b)
 
-Spheroid of revolution with semi-axis `a` [m] along the axis of symmetry
+Spheroid of revolution with semi-axis `a` [m] along the x axis of symmetry
 and equatorial semi-axis `b` [m]. Prolate if `a > b`, oblate if `a < b`.
 """
 struct Spheroid <: AbstractBody

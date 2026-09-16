@@ -1,5 +1,4 @@
-# Hayek & Boisvert (2003) axisymmetric nontorsional elastic-shell dynamic-stiffness operator for
-# a confocal prolate spheroidal shell, displacement triplet [u, w, β_η] at each meridional node.
+# Axisymmetric thin-shell dynamic stiffness.
 
 """
     ProlateShellGeometry(semimajor_length, semiminor_length, shell_thickness)
@@ -79,8 +78,9 @@ end
 """
     finite_difference_matrices(eta)
 
-Second-order-accurate first- and second-derivative matrices `(D1, D2)` on
-a uniform 1-D grid (one-sided differences at both endpoints).
+Fourth-order-accurate first- and second-derivative matrices `(D1, D2)` on
+a uniform 1-D grid (one-sided differences near both endpoints).
+The minimum five-node grid uses second-order differences.
 """
 function finite_difference_matrices(eta::AbstractVector{<:Real})
     n = length(eta)
@@ -89,17 +89,32 @@ function finite_difference_matrices(eta::AbstractVector{<:Real})
 
     d1 = zeros(n, n)
     d2 = zeros(n, n)
-    for i in 2:(n - 1)
-        d1[i, i - 1] = -0.5 / step
-        d1[i, i + 1] = 0.5 / step
-        d2[i, i - 1] = 1.0 / step^2
-        d2[i, i] = -2.0 / step^2
-        d2[i, i + 1] = 1.0 / step^2
+    if n == 5
+        for i in 2:(n - 1)
+            d1[i, i - 1] = -0.5 / step
+            d1[i, i + 1] = 0.5 / step
+            d2[i, i - 1] = 1.0 / step^2
+            d2[i, i] = -2.0 / step^2
+            d2[i, i + 1] = 1.0 / step^2
+        end
+        d1[1, 1:3] = [-3.0, 4.0, -1.0] ./ (2step)
+        d1[n, (n - 2):n] = [1.0, -4.0, 3.0] ./ (2step)
+        d2[1, 1:4] = [2.0, -5.0, 4.0, -1.0] ./ step^2
+        d2[n, (n - 3):n] = [-1.0, 4.0, -5.0, 2.0] ./ step^2
+    else
+        for i in 3:(n - 2)
+            d1[i, (i - 2):(i + 2)] = [1.0, -8.0, 0.0, 8.0, -1.0] ./ (12step)
+            d2[i, (i - 2):(i + 2)] = [-1.0, 16.0, -30.0, 16.0, -1.0] ./ (12step^2)
+        end
+        d1[1, 1:5] = [-25.0, 48.0, -36.0, 16.0, -3.0] ./ (12step)
+        d1[2, 1:5] = [-3.0, -10.0, 18.0, -6.0, 1.0] ./ (12step)
+        d2[1, 1:6] = [45.0, -154.0, 214.0, -156.0, 61.0, -10.0] ./ (12step^2)
+        d2[2, 1:6] = [10.0, -15.0, -4.0, 14.0, -6.0, 1.0] ./ (12step^2)
+        d1[n, (n - 4):n] = -reverse(d1[1, 1:5])
+        d1[n - 1, (n - 4):n] = -reverse(d1[2, 1:5])
+        d2[n, (n - 5):n] = reverse(d2[1, 1:6])
+        d2[n - 1, (n - 5):n] = reverse(d2[2, 1:6])
     end
-    d1[1, 1:3] = [-3.0, 4.0, -1.0] ./ (2step)
-    d1[n, (n - 2):n] = [1.0, -4.0, 3.0] ./ (2step)
-    d2[1, 1:4] = [2.0, -5.0, 4.0, -1.0] ./ step^2
-    d2[n, (n - 3):n] = [-1.0, 4.0, -5.0, 2.0] ./ step^2
     return d1, d2
 end
 
@@ -127,13 +142,13 @@ end
     ShellSystem
 
 Assembled shell-only axisymmetric dynamic system: `eta` (grid), the 9
-stiffness blocks and 5 mass blocks (each `n_eta × n_eta`, keyed the same
-way as the Python prototype: `:K_uu`, `:K_uw`, `:K_u_beta`, `:K_wu`,
+stiffness blocks and 5 mass blocks (each `n_eta × n_eta`, keyed as
+`:K_uu`, `:K_uw`, `:K_u_beta`, `:K_wu`,
 `:K_ww`, `:K_w_beta`, `:K_beta_u`, `:K_beta_w`, `:K_beta_beta` and
 `:M_uu`, `:M_u_beta`, `:M_ww`, `:M_beta_u`, `:M_beta_beta`), the assembled
 `(3n_eta) × (3n_eta)` `dynamic_matrix` (stiffness + `ω̂² *` mass, DOF order
-`[u; w; β]`), the surface-load scale factors, and the nondimensional
-frequency `ω̂`.
+`[u; w; l*β]`, with dimensional displacements and midsurface half-length `l`),
+the surface-load scale factors, and the nondimensional frequency `ω̂`.
 """
 struct ShellSystem
     eta::Vector{Float64}
@@ -148,7 +163,7 @@ end
 """
     assemble_shell_system(geometry, material, frequency_hz; n_eta=129, pole_offset=1e-4)
 
-Assemble the Hayek & Boisvert axisymmetric nontorsional shell dynamic-
+Assemble the Hayek & Boisvert (2003) axisymmetric nontorsional shell dynamic-
 stiffness system for a confocal prolate spheroidal shell at `frequency_hz`
 [Hz], on a uniform meridional grid of `n_eta` nodes.
 """
@@ -170,7 +185,12 @@ function assemble_shell_system(
 
     sqrtA, sqrtB, sqrtC = sqrt.(A), sqrt.(B), sqrt.(C)
 
-    K_uu = _shell_fd_block(D1, D2,
+    # Differentiate the pole factor sqrt(1-eta^2) analytically for tangential fields.
+    D1_tangent = sqrtB .* D1 ./ transpose(sqrtB) - Diagonal(eta ./ B)
+    D2_tangent = sqrtB .* D2 ./ transpose(sqrtB) .-
+                 2 .* (eta ./ sqrtB) .* D1 ./ transpose(sqrtB) - Diagonal(1 ./ B .^ 2)
+
+    K_uu = _shell_fd_block(D1_tangent, D2_tangent,
         D .* B .- eps .* a^4 .* B .^ 2 .* D ./ C .^ 3,
         -eta .* D .* (1.0 .+ D .^ 2) .-
         eps .* a^4 .* B .* D .* eta .* (3.0 .- 7.0 .* D .^ 2) ./ C .^ 3,
@@ -180,19 +200,20 @@ function assemble_shell_system(
 
     K_uw = _shell_fd_block(D1, D2,
         nothing,
-        -a .* D .* sqrtB ./ sqrtC .* ((1.0 + F * kappa) .* D .^ 2 .+ nu) .-
+        # Omit (A3)'s extra D to preserve the adjoint of (A11) and rigid translation.
+        a .* sqrtB ./ sqrtC .* ((1.0 + F * kappa) .* D .^ 2 .+ nu) .-
         eps .* a^5 .* A .* B .^ 1.5 .* (1.0 + F * kappa * gamma) ./ C .^ 4.5,
         a .* eta .* sqrtB .* (4.0 .* A .+ B) ./ C .^ 2.5 .+
         eps .* a^5 .* A .* sqrtB .* eta .*
         (1.0 ./ A .^ 2 .- 6.0 ./ C .^ 2 .+ 9.0 .* A ./ C .^ 3) ./ C .^ 2.5)
 
-    K_u_beta = _shell_fd_block(D1, D2,
+    K_u_beta = _shell_fd_block(D1_tangent, D2_tangent,
         eps .* a^2 .* B .^ 2 ./ C .^ 2,
         -4.0 .* eps .* a^2 .* eta .* A .* B ./ C .^ 3,
         F * kappa .* D .^ 2 .+
-        eps .* (a^2 .* eta .^ 2 ./ C .^ 2 .- F * gamma * kappa * a^4 .* B ./ C .^ 4))
+        eps .* (a^2 .* eta .^ 2 ./ C .^ 2 .- F * gamma * kappa * a^4 .* A .* B ./ C .^ 4))
 
-    K_wu = _shell_fd_block(D1, D2,
+    K_wu = _shell_fd_block(D1_tangent, D2_tangent,
         nothing,
         -a .* sqrtB .* (A .* (1.0 + F * kappa) .+ nu .* C) ./ C .^ 1.5 .+
         eps .* a^5 .* A .* B .^ 1.5 .* (1.0 + F * kappa * gamma) ./ C .^ 4.5,
@@ -210,7 +231,7 @@ function assemble_shell_system(
         -a^2 .* D .* (1.0 .+ D .^ 4 .+ 2.0 * nu .* D .^ 2) ./ A .+
         eps .* a^6 .* D .^ 3 .* B ./ C .* (1.0 ./ C .^ 3 .- 1.0 ./ A .^ 3))
 
-    K_w_beta = _shell_fd_block(D1, D2,
+    K_w_beta = _shell_fd_block(D1_tangent, D2_tangent,
         nothing,
         F * kappa .* sqrt.(A .* B) ./ a .-
         eps * a^3 .* sqrt.(A .* B) .* B .* (F * kappa * gamma + 1.0) ./ C .^ 3,
@@ -219,7 +240,7 @@ function assemble_shell_system(
         (1.0 .+ 3.0 * F * kappa * gamma .* D .^ 2 .* (1.0 .- 2.0 .* D .^ 2)) ./
         (C .^ 2 .* sqrtA))
 
-    K_beta_u = _shell_fd_block(D1, D2,
+    K_beta_u = _shell_fd_block(D1_tangent, D2_tangent,
         eps .* a^2 .* B .^ 2 ./ C .^ 2,
         -4.0 .* eps .* a^2 .* A .* B .* eta ./ C .^ 3,
         F * kappa .* D .^ 2 .+
@@ -232,13 +253,14 @@ function assemble_shell_system(
         eps * a^3 .* sqrtB .* eta .* C .*
         (-1.0 .+ 3.0 .* D .^ 2 .* (1.0 .- 2.0 .* D .^ 2)) ./ (C .^ 3 .* sqrtA))
 
-    K_beta_beta = _shell_fd_block(D1, D2,
-        eps .* D .* B .^ 2,
+    K_beta_beta = _shell_fd_block(D1_tangent, D2_tangent,
+        eps .* D .* B,
         -eps .* D .* eta .* (1.0 .+ D .^ 2),
         -F * kappa .* D .* C ./ a^2 .+
-        eps .* D .* (eta .^ 2 ./ B .- a^2 ./ C .+ F * kappa * gamma * a^2 .* B ./ C .^ 2))
+        eps .* D .*
+        (-eta .^ 2 ./ B .- nu * a^2 ./ C .+ F * kappa * gamma * a^2 .* B ./ C .^ 2))
 
-    M_uu = 1.0 .+ eps * a^4 ./ C .^ 2
+    M_uu = sqrtA .* sqrtC ./ a^2 .* (1.0 .+ eps * a^4 ./ C .^ 2)
     M_u_beta = eps .* (1.0 .+ D .^ 2)
     M_ww = sqrtA .* sqrtC ./ a^2 .* (1.0 .+ eps * a^4 ./ C .^ 2)
     M_beta_u = M_u_beta
@@ -254,7 +276,7 @@ function assemble_shell_system(
 
     load_scale_q = @. -(1.0 - nu^2) * geometry.semimajor_mid^2 * sqrt(A * C) /
                       (material.youngs_modulus * geometry.shell_thickness * a^2)
-    load_scale_m = @. -(1.0 - nu^2) * sqrt(A * C) /
+    load_scale_m = @. -(1.0 - nu^2) * geometry.semimajor_mid * sqrt(A * C) /
                       (material.youngs_modulus * geometry.shell_thickness * a^2)
 
     structural_blocks = Dict(:K_uu => K_uu, :K_uw => K_uw, :K_u_beta => K_u_beta,

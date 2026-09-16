@@ -8,6 +8,8 @@ const AS = AcousticScattering
 BLAS.set_num_threads(1)
 
 include("public_api.jl")
+include("diagnostics.jl")
+include("workflow.jl")
 
 @testset "Solution interface contract (every concrete AbstractSolution type)" begin
     a = 0.01
@@ -155,9 +157,9 @@ end
         @test size(surf.x) == size(surf.y) == size(surf.z) == size(surf.field) ==
               (36, length(ps))
         @test all(
-            hypot(surf.x[i, j], surf.y[i, j]) ≈ ps[j].rhom
+            hypot(surf.y[i, j], surf.z[i, j]) ≈ ps[j].rhom
         for i in 1:36, j in eachindex(ps))
-        @test all(surf.z[i, j] == ps[j].zm for i in 1:36, j in eachindex(ps))
+        @test all(surf.x[i, j] == ps[j].zm for i in 1:36, j in eachindex(ps))
     end
 
     @testset "axisymmetric (m=0-only) field is constant across azimuth" begin

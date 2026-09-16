@@ -54,13 +54,21 @@ end
 # theta=0/pi poles are azimuth-independent, so a marker there is always valid.
 function _incidence_markers(sweep)
     β = sweep.incidence_angle
-    az = mod(sweep.azimuth, 2π)
+    az = mod(sweep.azimuth - sweep.incidence_azimuth, 2π)
     pole = isapprox(β, 0.0; atol = 1e-9) || isapprox(β, π; atol = 1e-9)
     near(a, b) = isapprox(mod(a - b, 2π), 0.0; atol = 1e-6) ||
                  isapprox(mod(a - b, 2π), 2π; atol = 1e-6)
     thetas, labels = Float64[], String[]
-    (pole || near(az, 0.0)) && (push!(thetas, β); push!(labels, "Forward"))
-    (pole || near(az, π)) && (push!(thetas, π - β); push!(labels, "Backscatter"))
+    (pole || near(az, 0.0) || near(az, π)) || return thetas, labels
+    lo, hi = extrema(sweep.angles)
+    forward = atan(sin(β) * cos(az), cos(β))
+    for (theta, label) in ((forward, "Forward"), (forward + π, "Backscatter"))
+        candidate = theta + 2π * ceil((lo - theta - 1e-9) / (2π))
+        if lo - 1e-9 <= candidate <= hi + 1e-9
+            push!(thetas, candidate)
+            push!(labels, label)
+        end
+    end
     return thetas, labels
 end
 function Makie.plot!(plot::BistaticSweepPlot)
@@ -297,6 +305,12 @@ that geometry by `field` (`:pressure_magnitude`, `:pressure_phase`, `:pressure_r
 `:pressure_imag`, default `:pressure_magnitude`) where the solution has real surface field data,
 and errors naming the actual gap otherwise (e.g. a radial/meridian `fem(...)` result never
 computed a surface field, only a scalar target strength).
+
+For coupled fluid-region BEM, `interfaces` selects surface indices and
+`interface_colors` sets geometry colours. Surface fields are total interface pressure.
+`cutaway=(normal=(0, 1, 0), offset=0)` retains `normal ⋅ x ≤ offset` on exterior-adjacent
+surfaces, leaving internal interfaces whole. Field colours share `colorrange`/`colormap`.
+Display uses corner triangles and vertex-averaged complex pressure; the solve is unchanged.
 
 # Examples
 ```julia

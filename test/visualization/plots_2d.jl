@@ -65,6 +65,18 @@ BLAS.set_num_threads(1)
         @test fap isa Makie.FigureAxisPlot
     end
 
+    @testset "Rotated observation-plane markers" begin
+        ext = Base.get_extension(AS, :AcousticScatteringMakieExt)
+        sweep = AS.BistaticSweep([0.0, 2pi], 0.4, [-20.0, -20.0],
+            pi / 3, 0.4, nothing, ["Scattered field"])
+        angles, labels = ext._incidence_markers(sweep)
+        @test angles ≈ [pi / 3, 4pi / 3]
+        @test labels == ["Forward", "Backscatter"]
+        missed = AS.BistaticSweep([0.0, 2pi], 0.0, [-20.0, -20.0],
+            pi / 3, 0.4, nothing, ["Scattered field"])
+        @test isempty(first(ext._incidence_markers(missed)))
+    end
+
     @testset "unsupported kind errors clearly" begin
         @test_throws ArgumentError plot(bem_sol; kind = :bogus, angles = 0:0.2:(2pi))
     end
