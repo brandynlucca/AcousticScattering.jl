@@ -74,7 +74,8 @@ function _fluid_layer_operators(
         op, target, source, correction; derivative = false, regular = true)
     bounds = _fluid_quadrature_size(source)
     center, radius = bounds.center, bounds.radius
-    eligible = regular && correction.method === :dim && _fluid_regular_range(op.k, bounds) &&
+    eligible = regular && correction.method === :dim &&
+               _fluid_regular_range(op.k, bounds) &&
                op.k*maximum(q -> norm(q.coords-center), target) <= 2
     eligible || return Inti.single_double_layer(; op, target, source, derivative,
         compression = (method = :none,), correction)

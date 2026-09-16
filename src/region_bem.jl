@@ -171,7 +171,9 @@ function bem(
     region_sizes = map(0:count) do region
         boundaries = [j for j in 1:count if j == region || parents[j] == region]
         combined = _fluid_quadrature_size(Iterators.flatten(quads[boundaries]))
-        (; radius = max(combined.radius, maximum(source_sizes[j].radius for j in boundaries)),
+        (;
+            radius = max(combined.radius, maximum(source_sizes[j].radius
+            for j in boundaries)),
             rms = max(combined.rms, maximum(source_sizes[j].rms for j in boundaries)))
     end
     offsets = cumsum([0; length.(quads)])
@@ -196,7 +198,8 @@ function bem(
         for region in (i, parents[i])
             density = densities[region + 1]
             op = Inti.Helmholtz(; k = k / speeds[region + 1], dim = 3)
-            regular = formulation === :muller && _fluid_regular_range(op.k, region_sizes[region + 1])
+            regular = formulation === :muller &&
+                      _fluid_regular_range(op.k, region_sizes[region + 1])
             equations = region == i ? rows .+ n : rows
             if formulation === :cbie
                 A[equations, rows] .+= 0.5 .*
