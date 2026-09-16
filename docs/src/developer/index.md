@@ -9,7 +9,7 @@ From the repository root:
 
 ```sh
 julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-julia --project=docs docs/make.jl
+julia --depwarn=error --project=docs docs/make.jl
 ```
 
 The HTML site is written to `docs/build/index.html`. The generated CSV and PNG files live

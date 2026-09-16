@@ -1,5 +1,7 @@
 using Documenter
 using AcousticScattering
+# Initialize plotting extensions before Documenter evaluates example blocks.
+using CairoMakie
 
 # Keep curated prose while requiring a source docstring for every exported binding.
 for name in names(AcousticScattering)
@@ -39,6 +41,8 @@ makedocs(
             "Your first frequency sweep" => "tutorials/index.md",
             "Materials and shells" => "tutorials/materials.md",
             "Geometry and incidence" => "tutorials/geometry.md",
+            "Closed bent cylinders" => "tutorials/bent_cylinder.md",
+            "A fish and swimbladder" => "tutorials/fish.md",
             "Numerical convergence" => "tutorials/convergence.md",
             "Performance" => "tutorials/performance.md"
         ],

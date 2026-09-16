@@ -43,4 +43,4 @@ errors. Neither removes the formulation's irregular-frequency limitations.
 For oblique axisymmetric incidence `beta` in the x–z plane, query backscatter with
 `target_strength(solution; angle = pi - beta, azimuth = pi)`, or simply
 `target_strength(solution)`: the defaults follow the antipodal incident direction.
-An explicitly supplied `angle = pi` points along negative z.
+An explicitly supplied `angle = pi` points along negative x.

@@ -7,6 +7,7 @@ and [incidence-angle sweep](@ref geometry-tutorial).
 ## Define the spheroid
 
 Use a rigid prolate spheroid with 2 cm axial and 1 cm equatorial semi-axes in water.
+Its long axis is x; y and z span the circular cross-section.
 The frequency is 38 kHz, and incidence is 45° from the symmetry axis at zero azimuth.
 The BEM calculation uses 24 meridian panels and Fourier modes 0 through 4. These are
 small visualization settings. Increase both to check numerical convergence.
