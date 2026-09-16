@@ -17,7 +17,7 @@ abstract: >-
 repository-code: "https://github.com/brandynlucca/AcousticScattering.jl"
 url: "https://brandynlucca.github.io/AcousticScattering.jl/"
 # Software license. Logo artwork has separate terms in docs/src/assets/LICENSE.
-license: MIT
+license: GPL-3.0-only
 keywords:
   - acoustic scattering
   - underwater acoustics
