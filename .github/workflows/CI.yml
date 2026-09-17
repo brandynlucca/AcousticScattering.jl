@@ -98,7 +98,7 @@ jobs:
         # Julia 1.10 is both the minimum supported series and current LTS (2026-09-09).
         version: ["1.10", "1"]
         os: [ubuntu-latest, macos-latest, windows-latest]
-        group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
+        group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, NearPressure, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
