@@ -21,9 +21,14 @@ BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
     sweep = frequency_sweep(solve, [100.0, 200.0], 1500.0)
     @test sweep.amplitudes == scattering_amplitude.(solve.(sweep.k))
     @test sweep.target_strength == target_strength.(sweep.amplitudes)
-    scalar = frequency_sweep(k -> fem(Sphere(0.1), Rigid(), k), [100.0], 1500.0)
+    radial = frequency_sweep(k -> fem(Sphere(0.1), Rigid(), k), [100.0], 1500.0)
+    @test radial.amplitudes[1] ==
+          scattering_amplitude(fem(Sphere(0.1), Rigid(), only(radial.k)))
+    scalar_solve = k -> fem(Sphere(0.1), Rigid(), k;
+        method = :meridian, n_r = 3, n_theta = 8, l_max = 3)
+    scalar = frequency_sweep(scalar_solve, [100.0], 1500.0)
     @test scalar.amplitudes === nothing
-    @test scalar.target_strength[1] == target_strength(fem(Sphere(0.1), Rigid(), 2pi / 15))
+    @test scalar.target_strength[1] == target_strength(scalar_solve(only(scalar.k)))
     @test_throws ArgumentError frequency_sweep(solve, Float64[], 1500.0)
     @test_throws ArgumentError frequency_sweep(solve, [100.0], 0.0)
 

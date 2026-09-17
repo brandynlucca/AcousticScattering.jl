@@ -5,7 +5,7 @@
         :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
         :Shell, :AbstractSolution, :ModalSolution, :KirchhoffSolution, :FEMSolution,
         :BEMSolution, :MFSSolution, :modal, :kirchhoff, :fem, :bem, :mfs,
-        :target_strength, :scattering_amplitude, :diagnostics, :Mesh, :mesh,
+        :target_strength, :scattering_amplitude, :pressure, :diagnostics, :Mesh, :mesh,
         :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
     @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
     for name in expected

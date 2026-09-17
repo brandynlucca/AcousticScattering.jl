@@ -7,6 +7,9 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
+include("radial_fem_complex.jl")
+include("layered_radial_fem_complex.jl")
+
 @testset "radial FEM (sphere)" begin
     c_water = 1477.4
     a = 0.01

@@ -7,6 +7,7 @@
     @testset "Material contrasts and irregular frequencies" begin
         for (g, h, k) in ((0.0012, 0.23, 1.0), (0.01, 0.5, 1.0),
             (1.05, 1.02, 1.0), (1000.0, 2.0, 1.0), (1e6, 2.0, 1.0),
+            (1.04, 1.04, 1.5), (1.04, 1.04, 1.6),
             (0.0012, 0.23, 2.0815759778181), (1000.0, 2.0, Float64(pi)))
             boundary = FluidFilled(g, h)
             solution = bem(Sphere(1.0), boundary, k; method = :full,

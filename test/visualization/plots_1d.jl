@@ -55,7 +55,20 @@ BLAS.set_num_threads(1)
         rendered = plot!(axis, sweep; quantity = :phase)
         @test rendered isa Makie.AbstractPlot
         @test rendered.sweep[].amplitudes == sweep.amplitudes
-        scalar = frequency_sweep(k -> fem(sphere, Rigid(), k), [20000.0], c_water)
+        radial = frequency_sweep(k -> fem(sphere, Rigid(), k), [20000.0], c_water)
+        @test plot(radial; quantity = :phase) isa Figure
+        for boundary in (SolidElastic(2.7, 4.0, 2.0),
+            Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8),
+            Shelled(FluidLayer(1.04, 1.04), VacuumInterior(), 0.8))
+            layered = frequency_sweep(k -> fem(sphere, boundary, k; n_elements = 32),
+                [12000.0, 38000.0], c_water)
+            @test plot(layered; quantity = :phase) isa Figure
+        end
+        scalar = frequency_sweep(
+            k -> fem(sphere, Rigid(), k;
+                method = :meridian, n_r = 3, n_theta = 8, l_max = 3),
+            [20000.0],
+            c_water)
         @test plot(scalar; quantity = :target_strength) isa Figure
         @test_throws ArgumentError plot(scalar; quantity = :phase)
         @test_throws ArgumentError plot(sweep; quantity = :unknown)

@@ -2,7 +2,7 @@ using SafeTestsets: @safetestset
 
 const TEST_GROUPS = (
     "Analytical", "RadialFEM", "MeridianFEM", "Boundary", "FullBEM",
-    "CylinderBEM", "RegionBEM", "Spheroidal",
+    "CylinderBEM", "RegionBEM", "NearPressure", "Spheroidal",
     "RegionShapes", "FishBEM", "LowFrequencyRegions", "GasResonance",
     "CoupledResonance", "Oblique", "Interfaces", "Plots1D",
     "Plots2D", "Plots3DModels", "Plots3DFull")
@@ -16,6 +16,8 @@ end
 
 if TEST_GROUP in ("All", "Core", "RadialFEM")
     @time @safetestset "RadialFEM" include("radial_fem.jl")
+    @time @safetestset "Pressure" include("pressure.jl")
+    @time @safetestset "Layered pressure" include("layered_pressure.jl")
 end
 
 if TEST_GROUP in ("All", "Core", "MeridianFEM")
@@ -28,14 +30,26 @@ end
 
 if TEST_GROUP in ("All", "Core", "FullBEM")
     @time @safetestset "FullBEM" include("full_bem.jl")
+    @time @safetestset "Boundary pressure" include("boundary_pressure.jl")
+    @time @safetestset "Axisymmetric pressure" include("axisymmetric_pressure.jl")
+    @time @safetestset "BoundaryAngleSweeps" include("boundary_angle_sweeps.jl")
 end
 
 if TEST_GROUP in ("All", "Core", "CylinderBEM")
     @time @safetestset "CylinderBEM" include("cylinder_surface.jl")
+    @time @safetestset "Cylinder pressure" include("cylinder_pressure.jl")
+    @time @safetestset "Surface pressure" include("surface_pressure.jl")
 end
 
 if TEST_GROUP in ("All", "Core", "RegionBEM")
     @time @safetestset "RegionBEM" include("region_bem.jl")
+    @time @safetestset "Region pressure" include("region_pressure.jl")
+    @time @safetestset "AngleSweeps" include("angle_sweeps.jl")
+end
+
+if TEST_GROUP in ("All", "Core", "NearPressure")
+    @time @safetestset "Near-interface pressure" include("near_interface_pressure.jl")
+    @time @safetestset "Rim pressure" include("rim_pressure.jl")
 end
 
 if TEST_GROUP in ("All", "Core", "RegionShapes")

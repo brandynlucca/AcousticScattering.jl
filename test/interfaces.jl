@@ -29,18 +29,17 @@ include("workflow.jl")
         end
     end
 
-    @testset "scattering_amplitude: available for 4 of 5, explicit error for the scalar-FEM case" begin
-        for sol in (modal_sol, kirch_sol, bem_sol, mfs_sol)
+    @testset "Complex amplitude and scalar-only FEM fallback" begin
+        for sol in (modal_sol, kirch_sol, fem_sol, bem_sol, mfs_sol)
             @test AS.scattering_amplitude(sol) isa Complex
         end
-        @test_throws ArgumentError AS.scattering_amplitude(fem_sol)
+        scalar = AS.fem(sphere, AS.Rigid(), k;
+            method = :meridian, n_r = 3, n_theta = 8, l_max = 3)
+        @test_throws ArgumentError AS.scattering_amplitude(scalar)
     end
 
     @testset "angle/azimuth keywords: supported where a real bistatic query exists, explicit error otherwise" begin
-        # modal/kirchhoff/scalar-fem: no reusable surface state, angle already baked in at solve
-        # time — must error, not silently ignore the keyword (a real bug caught this session:
-        # target_strength(fem_sol; angle=0.3) used to silently return the unchanged backscatter
-        # value instead of erroring or actually honoring the angle).
+        # These result paths reject unsupported observation queries.
         @test_throws ArgumentError AS.target_strength(modal_sol; angle = 0.3)
         @test_throws ArgumentError AS.scattering_amplitude(modal_sol; angle = 0.3)
         @test_throws ArgumentError AS.target_strength(kirch_sol; angle = 0.3)

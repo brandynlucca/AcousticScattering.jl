@@ -11,6 +11,31 @@ function fish_surfaces(; resolution = 0.5, qorder = 5)
             rotation = (axis = (0, 0, 1), angle = deg2rad(10)), options...)]
 end
 
+@testset "Fluid quadrature transitions" begin
+    materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
+    directions = ([0.0, -1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
+    samples = Matrix{ComplexF64}[]
+    for (resolution, qorder) in ((0.5, 5), (0.45, 5), (0.5, 7))
+        surfaces = fish_surfaces(; resolution, qorder)
+        @info "Quadrature transition discretization" resolution qorder
+        solutions = (bem(surfaces, materials, 2pi * 1850 / 1477.4; incidence_angle = pi/2),
+            bem(surfaces, materials, 2pi * 2000 / 1477.4; incidence_angle = pi/2),
+            bem(surfaces[1], materials[1], 2pi * 2300 / 1477.4; incidence_angle = pi/2))
+        push!(samples,
+            [scattering_amplitude(solution; direction)
+             for direction in directions, solution in solutions])
+    end
+    for refined in samples[2:3]
+        db = maximum(abs.(target_strength.(refined) - target_strength.(first(samples))))
+        errors = abs.(refined - first(samples)) ./ abs.(refined)
+        relative = maximum(errors)
+        @test db < 0.1
+        @test relative < 0.01
+        frequency = (1850, 2000, 2300)[argmax(errors)[2]]
+        @info "Quadrature transition refinement" maximum_db=db maximum_complex=relative frequency
+    end
+end
+
 @testset "Synthetic fish and displaced bladder" begin
     materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
     cases = ((1500.0, 90.0), (2250.0, 60.0), (2250.0, 90.0),
@@ -32,6 +57,22 @@ end
                 (n, direction) in enumerate(directions)
 
                 amplitudes[3(j - 1) + n, m] = scattering_amplitude(solution; direction)
+            end
+            if (resolution, qorder, frequency, degrees) == (0.5, 5, 2250.0, 90.0)
+                for (m, geometry, material) in ((1, surfaces, materials),
+                    (2, surfaces[1], materials[1]))
+                    pressure = bem(geometry, material, k;
+                        incidence_angle = beta, formulation = :cbie)
+                    reference = [scattering_amplitude(pressure; direction)
+                                 for direction in directions]
+                    response = amplitudes[(3j - 2):3j, m]
+                    db = maximum(abs.(target_strength.(response) -
+                                      target_strength.(reference)))
+                    relative = maximum(abs.(response - reference) ./ abs.(reference))
+                    @test db < 0.1
+                    @test relative < 0.01
+                    @info "Fish formulation comparison" model=(:coupled, :flesh)[m] maximum_db=db maximum_complex=relative
+                end
             end
             @test diagnostics(first(solutions)).scaled_relative_residual < 1e-10
         end
