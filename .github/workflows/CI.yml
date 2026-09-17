@@ -162,4 +162,4 @@ jobs:
         run: |
           empty!(ARGS)
           push!(ARGS, "${{ matrix.mode }}")
-          include("test/precompile.jl")
+          include(joinpath(ENV["GITHUB_WORKSPACE"], "test", "precompile.jl"))
