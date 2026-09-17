@@ -31,8 +31,9 @@ supports sphere and prolate-spheroid shell geometries and a fluid interior.
 - Use FEM or BEM when checking analytical reductions, geometry discretization, or interface
   coupling. Compare against a canonical case first.
 - Use MFS when source placement is well controlled and its supported geometry suits the problem.
-- Use BEM surface results for repeated observation-angle queries. Ordinary radial/meridian FEM
-  currently retains only target strength.
+- Use BEM surface results for repeated observation-angle queries. Supported radial FEM spheres
+  also provide complex backscatter; cylinder radial and meridian FEM paths retain target
+  strength only.
 
 Finite-cylinder modal and radial reductions are not exact closed-finite-cylinder solutions.
 FEM's cylinder routes do not model bend curvature. `endcap_depth` affects full-3D cylinder

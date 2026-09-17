@@ -29,8 +29,53 @@ Fluid and elastic variants have their own discretizations and controls. `R > rad
 required for an exterior annulus. Moving `R` farther away is not the main accuracy control
 when the modal DtN condition is exact. Check element refinement and modal cutoff separately.
 
-See [Numerical convergence](@ref convergence-tutorial). Ordinary radial and meridian solutions
-currently retain target strength only. Complex amplitude is unavailable through those results.
+## Complex radial sphere results
+
+For `Sphere` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` or supported
+`Shelled` boundaries, radial FEM supports
+`scattering_amplitude(solution)` in complex meters and `target_strength(solution)` in dB re 1 m².
+Both return backscatter without observation keywords. The result retains radial coefficients
+and pressure fields: exterior **scattered** pressure and, for a fluid interior, interior
+**total** pressure, normalized to unit incident pressure. Their complex phase follows the
+time convention in [Conventions](@ref conventions). Fluid shells retain total pressure
+profiles. Elastic solids and shells retain longitudinal and shear displacement potentials;
+their fluid interiors retain regular pressure coefficients. The elastic potentials are
+scaled by `rho_ext * omega^2 / p_inc` and are dimensionless, rather than displacements in meters.
+
+Elastic shells support fluid interiors. `interior_coupling=:identical_fluid` uses the
+exterior fluid's properties in the cavity; the default `:generalized` uses the specified
+interior properties. Fluid shells support fluid or vacuum interiors. These layered paths
+use `n_elements` for the shell mesh and do not support `adaptive=true`.
+
+Frequency sweeps retain these complex amplitudes for phase plotting:
+
+```@example radial_phase
+using AcousticScattering
+using CairoMakie: plot, save
+
+boundary = Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8)
+spectrum = frequency_sweep(
+    k -> fem(Sphere(0.01), boundary, k; n_elements=640),
+    12000.0:2000.0:80000.0, 1500.0)
+figure = plot(spectrum; quantity=:phase)
+save("radial_phase.svg", figure) # hide
+nothing # hide
+```
+
+![](radial_phase.svg)
+
+Adaptive refinement uses successive target-strength changes in dB. Check complex-amplitude
+refinement separately when phase matters; a small magnitude change alone does not bound
+phase error. See [Numerical convergence](@ref convergence-tutorial). Cylinder radial and
+meridian FEM results retain target strength only.
+
+For supported radial spheres, `pressure(solution, points)`
+samples complex acoustic pressure normalized to the incident amplitude. It accepts one
+Cartesian point or an array of points, including fluid shells and fluid cavities. See
+[Pressure at Cartesian points](@ref pressure-evaluation) for field selection, coordinates
+and interface limits. `field=:shell` samples a fluid wall; `field=:interior` samples its
+fluid cavity. Elastic material has no acoustic pressure field. Elastic stress/displacement
+evaluation and radial sphere surface-field plotting are unavailable.
 
 ## Meridian acoustic FEM
 

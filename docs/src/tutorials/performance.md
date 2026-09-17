@@ -18,6 +18,21 @@ measured tuning choice. Do not assume more threads always improve performance.
 
 ## Accuracy and memory controls
 
+For fluid/gas full-3D BEM at a fixed frequency, pass meshes directly to
+`incidence_angle_sweep(surface, material, k, angles)` or
+`incidence_angle_sweep(surfaces, materials, k, angles; parents)`.
+These forms assemble and factorize once, then solve each incident forcing using that
+factorization. The callback form executes its callback at every angle.
+Add `components=true` to the multiple-interface form to compare coupled and isolated
+responses. Each system is sampled separately, and the result retains only amplitudes
+and strengths. Changing frequency, material, mesh or numerical options requires a new
+call and assembly. See [the fish tutorial](@ref fish-tutorial) for an example.
+
+The single-mesh overload also accepts `Rigid()` and `PressureRelease()`. It reuses
+assembled operators and their compression, while each angle starts a fresh GMRES
+iteration with the supplied `gmres_kwargs`. See [closed bent cylinders](@ref bent-cylinder-tutorial)
+for a complete example. These iterative solves do not use a dense LU factorization.
+
 | Method | Controls | Cost or limitation |
 |:--|:--|:--|
 | Sphere modal | `m_max` | Series convergence near resonances |

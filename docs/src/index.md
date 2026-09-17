@@ -27,6 +27,19 @@ Start with [Getting Started](@ref getting-started), then follow
 [Choosing a solver](@ref solver-selection) lists supported combinations. The
 [API Reference](@ref api-reference) describes current calls.
 
+## Try an application
+
+For a quick look at the package's capabilities, open the
+[Visualization Gallery](@ref gallery): pressure maps, 3D geometry, resonances and
+angular patterns, with short Julia examples.
+
+| Question | Tutorial |
+|:--|:--|
+| How does an elastic reference target differ from a rigid sphere? | [Reference-target models](@ref reference-target-tutorial) |
+| Where is a gas bubble's scattering resonance? | [Gas-bubble resonance](@ref bubble-resonance-tutorial) |
+| How does a coating affect scattering and internal pressure? | [Coated particles](@ref coated-particle-tutorial) |
+
+
 ## Scope and maturity
 
 Implemented methods include sphere/spheroid series, finite-cylinder approximations,
@@ -34,4 +47,5 @@ curved-cylinder models, physical-optics surface integrals, axisymmetric and full
 radial and meridian FEM, MFS, and coupled structural shells. Supported materials differ by
 solver and geometry. Creating a material does not guarantee support in every solver.
 
-Full 3D volume FEM and full 3D BEM does not implement Burton–Miller/CHIEF regularization.
+Full 3D volume FEM is unavailable. See [BEM and MFS](@ref boundary-theory) for
+boundary-element formulations and irregular-frequency treatment.

@@ -69,8 +69,9 @@ not exact closed-cylinder benchmarks away from broadside. See
 
 ## Frequency, incidence and bistatic patterns
 
-Reuse the geometry for each frequency or incidence solve. A bistatic map reuses an existing
-solution and changes only the observation direction.
+Frequency sweeps reuse the geometry. At fixed frequency, mesh-based incidence sweeps also
+reuse the assembled boundary operators and their compression. Each incidence gets a fresh
+GMRES solve. A bistatic map reuses an existing solution and changes only the observation direction.
 
 ```@example bent_surface
 sound_speed = 1500.0
@@ -78,8 +79,8 @@ frequencies = collect(range(18000.0, 30000.0; length = 5))
 spectrum = AS.frequency_sweep(k -> bem(surface, Rigid(), k;
     incidence_angle = beta, incidence_azimuth = alpha, options...), frequencies, sound_speed)
 angles = deg2rad.([30.0, 45.0, 60.0, 75.0, 90.0])
-aspect = AS.incidence_angle_sweep(angle -> bem(surface, Rigid(), 100.0;
-    incidence_angle = angle, incidence_azimuth = alpha, options...), angles)
+aspect = AS.incidence_angle_sweep(surface, Rigid(), 100.0, angles;
+    incidence_azimuth = alpha, options...)
 figure = Figure(; size = (1000, 400))
 frequency_axis = Axis(figure[1, 1]; xlabel = "Frequency (kHz)", ylabel = "TS (dB re 1 m²)")
 lines!(frequency_axis, spectrum.frequencies ./ 1000, spectrum.target_strength)

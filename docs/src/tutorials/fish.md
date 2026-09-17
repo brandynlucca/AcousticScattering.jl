@@ -79,7 +79,8 @@ compare(k; beta=pi/2) = components(
     labels=["flesh", "bladder"])
 
 spectrum = frequency_sweep(compare, [1500.0,2250.0,3000.0], sound_speed)
-aspect = incidence_angle_sweep(beta -> compare(k; beta), deg2rad.([60,90,120]))
+aspect = incidence_angle_sweep(surfaces, materials, k, deg2rad.([60,90,120]);
+    parents=[0,1], components=true, labels=["flesh", "bladder"])
 pattern = bistatic_sweep(components(solution; labels=["flesh", "bladder"]),
     range(0,2pi; length=121))
 comparison = plot(spectrum, aspect, pattern)
@@ -93,6 +94,10 @@ Each sweep stores `amplitudes`, `target_strength` and `labels`. Rows are samples
 columns are coupled, isolated flesh, isolated bladder and coherent sum. Single-model
 sweeps instead contain vectors. Plot saved results with `plot(spectrum; quantity=:phase)`
 or `:target_strength`, `:magnitude`, `:real` or `:imag` without solving again.
+
+The mesh-based incidence sweep assembles and factorizes each fixed-frequency system
+once for all angles. It samples the coupled and isolated systems separately to limit
+matrix storage; only the resulting amplitudes and strengths are retained.
 
 Frequency and incidence sweeps measure backscatter, opposite each incident direction.
 Incidence polar angles are measured from `+x` with azimuth zero. The observation cut
