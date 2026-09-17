@@ -201,9 +201,8 @@ function _solution_render(
         sol::Union{AcousticScattering.ModalSolution, AcousticScattering.KirchhoffSolution},
         field::Union{Nothing, Symbol})
     field === nothing || throw(ArgumentError(
-        "plot(::$(nameof(typeof(sol))); kind=:surface_field) has no surface field data (this " *
-        "solution stores a single far-field amplitude, not a surface field) — use kind=:mesh " *
-        "for the body shape only."))
+        "plot(::$(nameof(typeof(sol))); kind=:surface_field) cannot plot a surface field; " *
+        "use kind=:mesh for the body shape."))
     m = AcousticScattering.mesh(sol.body; k = sol.k)
     return _mesh_render(m)
 end
@@ -218,6 +217,14 @@ function _solution_render(
         "body/boundary for a solution with surface field data."))
     m = AcousticScattering.mesh(sol.body; k = sol.k)
     return _mesh_render(m)
+end
+
+function _solution_render(
+        sol::AcousticScattering.FEMSolution{AcousticScattering._RadialFEMData},
+        field::Union{Nothing, Symbol})
+    field === nothing || throw(ArgumentError(
+        "Surface-field plotting is not available for radial sphere FEM. Use kind=:mesh."))
+    return _mesh_render(AcousticScattering.mesh(sol.body; k = sol.k))
 end
 
 function _mesh_render(m::AcousticScattering.Mesh{AcousticScattering.MeridianMesh})

@@ -303,8 +303,7 @@ Plot a view of an already-solved `sol`. `kind=:bistatic_polar`/`:bistatic_cartes
 k=sol.k)` when the solution itself carries no reusable surface mesh); `kind=:surface_field` colors
 that geometry by `field` (`:pressure_magnitude`, `:pressure_phase`, `:pressure_real`, or
 `:pressure_imag`, default `:pressure_magnitude`) where the solution has real surface field data,
-and errors naming the actual gap otherwise (e.g. a radial/meridian `fem(...)` result never
-computed a surface field, only a scalar target strength).
+and errors otherwise. Radial/meridian `fem(...)` results do not support surface-field plotting.
 
 For coupled fluid-region BEM, `interfaces` selects surface indices and
 `interface_colors` sets geometry colours. Surface fields are total interface pressure.
