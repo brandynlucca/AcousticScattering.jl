@@ -162,14 +162,8 @@ Unlike the sphere/spheroid meridian, this one has two genuine sharp
 corners (ρ=radius, z=±length/2, where a flat cap meets the cylindrical
 side at a right angle, a discontinuous surface normal). The surface
 pressure/velocity has a local corner singularity there (a well-known
-feature of Helmholtz BIEs at a wedge), which a *uniform* panel spacing
-within each segment resolves only algebraically slowly, confirmed
-directly: a weakly-scattering (near-total-cancellation) cylinder's BEM
-`target_strength` at oblique incidence sat 1.3-1.7 dB from the reference
-value at both 48 and 68 panels remained essentially unchanged after
-doubling total panels 112, ruling out plain under-resolution (which
-would keep shrinking) and pointing at a fixed local feature the uniform
-mesh never targets. Each segment's nodes are therefore placed at
+feature of Helmholtz BIEs at a wedge), which uniform panel spacing
+resolves only algebraically slowly. Each segment's nodes are placed at
 `t = clustering(u)`, `u` uniform, rather than `t` uniform, using a cosine
 map that clusters panels toward whichever segment endpoint(s) sit at a
 sharp corner, the cap segments cluster toward their outer rim (the

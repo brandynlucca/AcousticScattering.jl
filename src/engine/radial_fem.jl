@@ -16,22 +16,32 @@ the outer boundary condition is an *exact* DtN closure, accuracy is
 controlled by `n_elements` (mesh resolution) and `order`, not by how far
 out `R` is. `order=1` uses linear (2-node) elements; `order=2` uses
 quadratic (3-node) Lagrangian elements.
+
+For `FluidFilled`, use `n_elements_int=100` and `n_elements_ext=100` to
+control the linear meshes on `[0,a]` and `[a,R]`. The interface enforces
+pressure and normal-velocity continuity. The coefficient convention is unchanged.
 """
 function radial_fem_coefficient(
+        boundary::Union{Rigid, PressureRelease, FluidFilled}, l::Integer,
+        k::Real, a::Real, R::Real; kwargs...)
+    return _radial_fem_mode(boundary, l, k, a, R; kwargs...).coefficient
+end
+
+function _radial_fem_mode(
         boundary::Union{Rigid, PressureRelease}, l::Integer, k::Real, a::Real, R::Real;
         n_elements::Integer = 200, order::Integer = 1, solve_reports = nothing)
     if order == 1
-        return _radial_fem_coefficient_linear(
+        return _radial_fem_mode_linear(
             boundary, l, k, a, R; n_elements, solve_reports)
     elseif order == 2
-        return _radial_fem_coefficient_quadratic(
+        return _radial_fem_mode_quadratic(
             boundary, l, k, a, R; n_elements, solve_reports)
     else
         throw(ArgumentError("order must be 1 or 2, got $order"))
     end
 end
 
-function _radial_fem_coefficient_linear(
+function _radial_fem_mode_linear(
         boundary::Union{Rigid, PressureRelease}, l::Integer,
         k::Real, a::Real, R::Real; n_elements::Integer = 200, solve_reports = nothing)
     r = collect(range(a, R; length = n_elements + 1))
@@ -88,7 +98,8 @@ function _radial_fem_coefficient_linear(
     end
 
     p = _solve_reported(K, b, solve_reports; mode = l, n_elements, order = 1, R)
-    return p[n] / hs(l, k * R)
+    return (; coefficient = p[n] / hs(l, k * R), order = 1,
+        exterior = (; radii = r, pressure = p), interior = nothing)
 end
 
 # 4-point Gauss-Legendre on [-1,1], exact for the quadratic-element mass matrix below.
@@ -99,7 +110,7 @@ const _GQ4 = (
     (0.8611363115940526, 0.3478548451374538)
 )
 
-function _radial_fem_coefficient_quadratic(
+function _radial_fem_mode_quadratic(
         boundary::Union{Rigid, PressureRelease}, l::Integer,
         k::Real, a::Real, R::Real; n_elements::Integer = 200, solve_reports = nothing)
     r_corner = collect(range(a, R; length = n_elements + 1))
@@ -153,38 +164,38 @@ function _radial_fem_coefficient_quadratic(
     end
 
     p = _solve_reported(K, b, solve_reports; mode = l, n_elements, order = 2, R)
-    return p[n] / hs(l, k * R)
+    return (; coefficient = p[n] / hs(l, k * R), order = 2,
+        exterior = (; radii = collect(range(a, R; length = n)), pressure = p),
+        interior = nothing)
 end
 
 """
     radial_fem_target_strength(boundary, k, a, R; m_max=default, n_elements=200)
 
-Backscatter target strength [dB re 1 m²] of a rigid or pressure-release
-sphere, computed via [`radial_fem_coefficient`](@ref) mode by mode instead
-of the analytical modal series, see the module preamble for why this is a
-genuinely independent numerical method (exact DtN truncation, ordinary FEM
-discretization error only), not just a re-implementation.
-
-Far-field sum in terms of `radial_fem_coefficient`'s `Bₗ` convention:
-asymptotically `hₗ(kr) ~ (-i)^{l+1} e^{ikr}/(kr)`, so matching
-`p_scat ~ f(θ)e^{ikr}/r` gives `f(θ) = -i/k · Σₗ Bₗ(-i)ˡ Pₗ(cosθ)`, *not*
-`sphere_modal.jl`'s `Σₗ(2l+1)Pₗ(cosθ)Aₗ` form directly, since `Bₗ` already
-carries the `(2l+1)iˡ` factor that convention keeps separate (double-
-counting it here was an early bug, caught before trusting this against the
-modal series, see the validation in test/runtests.jl).
+Backscatter target strength [dB re 1 m²] of an acoustic sphere, computed
+from radial finite-element solutions with an exact modal DtN boundary.
+The Rayleigh coefficients give `f(θ) = -i/k · Σₗ Bₗ(-i)ˡ Pₗ(cosθ)`;
+backscatter uses `θ = π`.
 """
 function radial_fem_target_strength(
-        boundary::Union{Rigid, PressureRelease}, k::Real, a::Real, R::Real;
-        m_max::Integer = _default_mode_count(k * a), n_elements::Integer = 200, order::Integer = 1,
-        solve_reports = nothing)
+        boundary::Union{Rigid, PressureRelease, FluidFilled},
+        k::Real, a::Real, R::Real; kwargs...)
+    return target_strength(_radial_fem_amplitude(
+        _radial_fem_modes(boundary, k, a, R; kwargs...), k))
+end
+
+function _radial_fem_modes(boundary, k, a, R;
+        m_max::Integer = _default_mode_count(k * a), kwargs...)
+    return NamedTuple[_radial_fem_mode(boundary, l, k, a, R; kwargs...) for l in 0:m_max]
+end
+
+function _radial_fem_amplitude(modes, k)
     total = zero(ComplexF64)
-    for l in 0:m_max
-        Bl = radial_fem_coefficient(
-            boundary, l, k, a, R; n_elements, order, solve_reports)
-        total += Bl * (-im)^l * legendre_p(l, -1.0)
+    for (i, mode) in enumerate(modes)
+        l = i - 1
+        total += mode.coefficient * (-im)^l * legendre_p(l, -1.0)
     end
-    f = -im / k * total
-    return target_strength(f)
+    return -im / k * total
 end
 
 # --- Fluid-filled / transmission boundary: two coupled 1D domains, interior [0, a] and exterior ---
@@ -223,16 +234,7 @@ function _radial_fem_bulk_matrix(l::Integer, k::Real, r::Vector{Float64})
     return K
 end
 
-"""
-    radial_fem_coefficient(boundary::FluidFilled, l, k, a, R; n_elements_int=100, n_elements_ext=100)
-
-Coupled two-domain version of [`radial_fem_coefficient`](@ref) for a
-fluid-filled sphere, see the module section above this method for the
-interior/exterior domain setup and the two coupling conditions at `r=a`.
-Returns the same `Bₗ` (exterior Rayleigh-expansion coefficient) convention
-as the single-domain method.
-"""
-function radial_fem_coefficient(
+function _radial_fem_mode(
         boundary::FluidFilled, l::Integer, k::Real, a::Real, R::Real;
         n_elements_int::Integer = 100, n_elements_ext::Integer = 100, solve_reports = nothing)
     g = boundary.density_contrast
@@ -260,10 +262,13 @@ function radial_fem_coefficient(
     A = zeros(ComplexF64, ntot, ntot)
     bvec = zeros(ComplexF64, ntot)
 
-    # Interior weak form: (K_int p_int)[last] = f_int, elsewhere natural
-    # (the r=0 end has no boundary term at all, see the module note).
+    # Only the monopole has nonzero pressure at the origin.
     A[1:n_i, 1:n_i] .= K_int
     A[n_i, i_fi] -= 1.0
+    if l > 0
+        A[1, :] .= 0.0
+        A[1, 1] = 1.0
+    end
 
     # Exterior weak form: (K_ext p_scat_ext)[first] = -f_ext.
     A[(n_i + 1):(n_i + n_e), (off_pe + 1):(off_pe + n_e)] .= K_ext
@@ -286,101 +291,81 @@ function radial_fem_coefficient(
     bvec[row] = a^2 * dpdn_inc_l
 
     x = _solve_reported(A, bvec, solve_reports; mode = l, n_elements_int, n_elements_ext, R)
-    p_scat_ext_a = x[off_pe + n_e]
-    return p_scat_ext_a / hs(l, k * R)
+    return (; coefficient = x[off_pe + n_e] / hs(l, k * R), order = 1,
+        exterior = (; radii = r_ext, pressure = x[(off_pe + 1):(off_pe + n_e)],
+            interface_flux = x[i_fe]),
+        interior = (; radii = r_int, pressure = x[1:n_i], interface_flux = x[i_fi]))
 end
 
 """
-    radial_fem_target_strength(boundary::FluidFilled, k, a, R; m_max=default, n_elements_int=100, n_elements_ext=100)
+    radial_fem_target_strength_adaptive(boundary, k, a, R; target_tol=0.01, kwargs...)
 
-Coupled two-domain version of [`radial_fem_target_strength`](@ref) for a
-fluid-filled sphere; see [`radial_fem_coefficient`](@ref)'s `FluidFilled`
-method.
-"""
-function radial_fem_target_strength(boundary::FluidFilled, k::Real, a::Real, R::Real;
-        m_max::Integer = _default_mode_count(k * a),
-        n_elements_int::Integer = 100, n_elements_ext::Integer = 100, solve_reports = nothing)
-    total = zero(ComplexF64)
-    for l in 0:m_max
-        Bl = radial_fem_coefficient(boundary, l, k, a, R; n_elements_int = n_elements_int,
-            n_elements_ext = n_elements_ext, solve_reports = solve_reports)
-        total += Bl * (-im)^l * legendre_p(l, -1.0)
-    end
-    f = -im / k * total
-    return target_strength(f)
-end
-
-"""
-    radial_fem_target_strength_adaptive(boundary::FluidFilled, k, a, R; target_tol=0.01, n_elements_start=50, max_n_elements=4000, m_max=default)
-
-Self-checking resolution-doubling wrapper for the `FluidFilled` case,
-mirroring [`radial_fem_target_strength_adaptive`](@ref)'s Rigid/
-PressureRelease version, doubles both domains' element counts together
-each step (the interior domain's own wavenumber `k/soundspeed_contrast`
-can be several times larger than the exterior one, e.g. ~4.3× for a
-gas-filled sphere, so it is not under-resolved by reusing the same element
-*count* even though it needs a finer element *density*).
+Double radial element counts until successive target strengths differ by
+less than `target_tol` dB. Rigid/pressure-release spheres default to
+`n_elements_start=100`, `max_n_elements=8000`, and `order=1`.
+Fluid-filled spheres default to 50 and 4000 elements per domain, refining
+both linear meshes together. `m_max` controls the modal cutoff separately.
+The stopping criterion does not certify complex-amplitude or phase convergence.
 """
 function radial_fem_target_strength_adaptive(
+        boundary::Union{Rigid, PressureRelease, FluidFilled},
+        k::Real, a::Real, R::Real; kwargs...)
+    return target_strength(_radial_fem_amplitude(
+        _radial_fem_modes_adaptive(boundary, k, a, R; kwargs...), k))
+end
+
+function _radial_fem_modes_adaptive(
         boundary::FluidFilled, k::Real, a::Real, R::Real;
         target_tol::Real = 0.01, n_elements_start::Integer = 50,
         max_n_elements::Integer = 4000,
         m_max::Integer = _default_mode_count(k * a), solve_reports = nothing)
     n = n_elements_start
     change_db = nothing
-    ts_prev = radial_fem_target_strength(
+    modes = _radial_fem_modes(
         boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n, solve_reports)
+    ts_prev = target_strength(_radial_fem_amplitude(modes, k))
     while n < max_n_elements
         n = min(max_n_elements, 2n)
-        ts_new = radial_fem_target_strength(
+        modes = _radial_fem_modes(
             boundary, k, a, R; m_max = m_max, n_elements_int = n, n_elements_ext = n, solve_reports)
+        ts_new = target_strength(_radial_fem_amplitude(modes, k))
         change_db = abs(ts_new - ts_prev)
         if change_db < target_tol
             _record_refinement!(solve_reports, true, change_db, target_tol, n)
-            return ts_new
+            return modes
         end
         ts_prev = ts_new
         n == max_n_elements && break
     end
     _record_refinement!(solve_reports, false, change_db, target_tol, n)
     @warn "radial_fem_target_strength_adaptive (FluidFilled) did not converge to target_tol=$target_tol dB within max_n_elements=$max_n_elements (ka=$(k*a)), returning the finest solve tried"
-    return ts_prev
+    return modes
 end
 
-"""
-    radial_fem_target_strength_adaptive(boundary, k, a, R; target_tol=0.01, n_elements_start=100, max_n_elements=8000, m_max=default, order=1)
-
-Self-checking resolution-doubling wrapper around
-[`radial_fem_target_strength`](@ref): doubles `n_elements` until
-successive solves agree to within `target_tol` dB, mirroring
-`axisymmetric_bem.jl`'s [`solve_axial_adaptive`](@ref) so neither solver
-needs a hand-picked, frequency-independent mesh resolution, a single
-fixed `n_elements` that is enough at low `ka` is routinely insufficient at
-high `ka` (linear-element FEM error grows with `ka` at fixed resolution),
-and unnecessarily fine at low `ka`.
-"""
-function radial_fem_target_strength_adaptive(
+function _radial_fem_modes_adaptive(
         boundary::Union{Rigid, PressureRelease}, k::Real, a::Real, R::Real;
         target_tol::Real = 0.01, n_elements_start::Integer = 100,
         max_n_elements::Integer = 8000,
         m_max::Integer = _default_mode_count(k * a), order::Integer = 1, solve_reports = nothing)
     n = n_elements_start
     change_db = nothing
-    ts_prev = radial_fem_target_strength(
+    modes = _radial_fem_modes(
         boundary, k, a, R; m_max = m_max, n_elements = n, order = order, solve_reports)
+    ts_prev = target_strength(_radial_fem_amplitude(modes, k))
     while n < max_n_elements
         n = min(max_n_elements, 2n)
-        ts_new = radial_fem_target_strength(
+        modes = _radial_fem_modes(
             boundary, k, a, R; m_max = m_max, n_elements = n, order = order, solve_reports)
+        ts_new = target_strength(_radial_fem_amplitude(modes, k))
         change_db = abs(ts_new - ts_prev)
         if change_db < target_tol
             _record_refinement!(solve_reports, true, change_db, target_tol, n)
-            return ts_new
+            return modes
         end
         ts_prev = ts_new
         n == max_n_elements && break
     end
     _record_refinement!(solve_reports, false, change_db, target_tol, n)
     @warn "radial_fem_target_strength_adaptive did not converge to target_tol=$target_tol dB within max_n_elements=$max_n_elements (ka=$(k*a)), returning the finest solve tried"
-    return ts_prev
+    return modes
 end

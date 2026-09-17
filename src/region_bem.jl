@@ -110,13 +110,14 @@ The default dense Müller system has two unknowns per quadrature node. All inter
 each region interact. `correction` controls singular and near-singular integration;
 density interpolation receives the target's location from the region topology.
 Refine geometry and quadrature independently, especially at small gaps and resonances.
-For self-interactions with density interpolation, regional `k*radius <= 1` and
-`2k*rms_radius <= 1`,
-normal derivatives follow from Calderón identities with the pressure operators;
-both radius bounds include all boundary nodes of the region and each interface separately.
-Radii use the corresponding mean node position, with surface area weights for the RMS. Other
-interactions use direct derivative quadrature. Pressure and derivative corrections
-share one low-frequency regime throughout a region.
+Regular-wave quadrature requires regional `k*radius <= 1` and `2k*rms_radius <= 1`
+in every medium. Both radius bounds include all boundary nodes of each region and
+each interface separately. Radii use the corresponding mean node position, with
+surface area weights for the RMS. This choice is shared across all media to preserve
+cancellation at weak-contrast interfaces. Otherwise, pressure operators use direct
+density interpolation. Separately, self normal derivatives follow from Calderón
+identities when regional `k*radius <= π/2` in every medium. This reconstruction uses
+the selected pressure operators; other derivatives use direct density interpolation.
 Diagnostics record each derivative route in `derivative_evaluation`.
 
 `formulation=:cbie` instead enforces the pressure representation on both sides of each
@@ -136,6 +137,8 @@ provide an independent check of quadrature accuracy.
 For `:cbie`, the pressure representations are the solved equations themselves; their
 residuals are algebraic checks, and unsampled flux representation residuals are `nothing`.
 Post-process with `scattering_amplitude(sol; direction)` or `target_strength(sol; direction)`.
+[`pressure`](@ref) samples the total field in the containing fluid; `region=i` restricts
+queries to one region and selects either adjacent trace at an interface.
 
 For concentric spheres, `[FluidFilled(g_shell,h_shell), FluidFilled(g_core,h_core)]`
 corresponds to `Shelled(FluidLayer(g_shell,h_shell), FluidInterior(g_core,h_core), b/a)`.
@@ -148,6 +151,21 @@ function bem(
         equilibrate::Bool = true, condition_limit::Integer = 512,
         correction::NamedTuple = (method = :dim,), formulation::Symbol = :muller,
         validation::NamedTuple = (;))
+    all(isfinite, (incidence_angle, incidence_azimuth)) ||
+        throw(ArgumentError("incidence angles must be finite"))
+    condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
+    system = _assemble_region_bem(surfaces, materials, k; parents, correction,
+        formulation, validation)
+    factor = _factor_fluid_system(system.A; equilibrate, condition_limit,
+        norm_floor = eps(Float64))
+    return _solve_region_bem(system, factor; incidence_angle, incidence_azimuth)
+end
+
+function _assemble_region_bem(
+        surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k::Real;
+        parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
+        correction::NamedTuple = (method = :dim,), formulation::Symbol = :muller,
+        validation::NamedTuple = (;))
     count = length(surfaces)
     count > 0 || throw(ArgumentError("at least one interface is required"))
     length(materials) == length(parents) == count ||
@@ -155,9 +173,6 @@ function bem(
     all(i -> 0 <= parents[i] < i, 1:count) ||
         throw(ArgumentError("each parent must be zero or an earlier region index"))
     isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
-    all(isfinite, (incidence_angle, incidence_azimuth)) ||
-        throw(ArgumentError("incidence angles must be finite"))
-    condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     formulation in (:muller, :cbie) ||
         throw(ArgumentError("formulation must be :muller or :cbie"))
     all(
@@ -181,25 +196,18 @@ function bem(
     ranges = [(offsets[i] + 1):offsets[i + 1] for i in 1:count]
     densities = [1.0; getproperty.(materials, :density_contrast)]
     speeds = [1.0; getproperty.(materials, :soundspeed_contrast)]
-    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
+    regular = formulation === :muller && all(
+        region -> _fluid_regular_range(k / speeds[region], region_sizes[region]), eachindex(speeds))
+    reconstruct = all(region -> k / speeds[region] * region_sizes[region].radius <= pi/2,
+        eachindex(speeds))
     A = formulation === :muller ? Matrix{ComplexF64}(I, 2n, 2n) : zeros(ComplexF64, 2n, 2n)
     inner = formulation === :muller ? 0.5 .* A : nothing
-    b = zeros(ComplexF64, 2n)
     derivative_evaluation = NamedTuple[]
     for i in 1:count
         rows = ranges[i]
-        if parents[i] == 0
-            b[rows] = [cis(k * dot(direction, q.coords)) for q in quads[i]]
-            if formulation === :muller
-                b[rows .+ n] = [im * k * dot(direction, q.normal) * b[rows[t]]
-                                for (t, q) in enumerate(quads[i])]
-            end
-        end
         for region in (i, parents[i])
             density = densities[region + 1]
             op = Inti.Helmholtz(; k = k / speeds[region + 1], dim = 3)
-            regular = formulation === :muller &&
-                      _fluid_regular_range(op.k, region_sizes[region + 1])
             equations = region == i ? rows .+ n : rows
             if formulation === :cbie
                 A[equations, rows] .+= 0.5 .*
@@ -221,7 +229,7 @@ function bem(
                     continue
                 end
                 K, H, method = _fluid_derivative_operators(
-                    op, quads[i], quads[j], S, D, options; regular)
+                    op, quads[i], quads[j], S, D, options; regular, reconstruct)
                 push!(derivative_evaluation, (; target = i, source = j, region, method))
                 for matrix in (region == i ? (A, inner) : (A,))
                     matrix[rows, columns] .+= sign .* D
@@ -232,18 +240,39 @@ function bem(
             end
         end
     end
-    if equilibrate
-        row_norms = max.(vec(maximum(abs, A; dims = 2)), eps(Float64))
-        scaled_A = A ./ row_norms
-        col_norms = max.(vec(maximum(abs, scaled_A; dims = 1)), eps(Float64))
-        scaled_A ./= transpose(col_norms)
-        scaled_b = b ./ row_norms
-        scaled_x = scaled_A \ scaled_b
-        x = scaled_x ./ col_norms
-    else
-        scaled_A, scaled_b = A, b
-        x = scaled_x = A \ b
+    return (; A, inner, surfaces, materials, parents, k, formulation, correction,
+        quads, ranges, n, densities, derivative_evaluation, geometry)
+end
+
+function _region_incident_rhs(system, incidence_angle, incidence_azimuth)
+    (; parents, k, formulation, quads, ranges, n) = system
+    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
+    b = zeros(ComplexF64, 2n)
+    for i in eachindex(quads)
+        parents[i] == 0 || continue
+        rows = ranges[i]
+        b[rows] = [cis(k * dot(direction, q.coords)) for q in quads[i]]
+        if formulation === :muller
+            b[rows .+ n] = [im * k * dot(direction, q.normal) * b[rows[t]]
+                            for (t, q) in enumerate(quads[i])]
+        end
     end
+    return b
+end
+
+function _solve_region_bem(system, factor;
+        incidence_angle::Real = pi / 2, incidence_azimuth::Real = 0.0)
+    b = _region_incident_rhs(system, incidence_angle, incidence_azimuth)
+    solved = _solve_fluid_system(factor, b)
+    return _region_bem_solution(
+        system, factor, b, solved, incidence_angle, incidence_azimuth)
+end
+
+function _region_bem_solution(system, factor, b, solved, incidence_angle, incidence_azimuth)
+    (; A, inner, surfaces, materials, parents, k, formulation, correction,
+        ranges, n, densities, derivative_evaluation, geometry) = system
+    (; x, scaled_x, scaled_b) = solved
+    count = length(surfaces)
     residual = A * x - b
     interior_residual = formulation === :muller ? inner * x : nothing
     exterior_residual = formulation === :muller ? residual - interior_residual : nothing
@@ -271,15 +300,9 @@ function bem(
         end
         push!(interface_residuals, representation)
     end
-    compute_condition = 2n <= condition_limit
-    condition_number = compute_condition ? cond(A) : nothing
-    scaled_condition_number = compute_condition ?
-                              (equilibrate ? cond(scaled_A) : condition_number) : nothing
-    scaled_report = _linear_residual(scaled_A, scaled_x, scaled_b)
-    report = merge(_linear_residual(A, x, b),
+    scaled_report = _linear_residual(factor.scaled_A, scaled_x, scaled_b)
+    report = merge(_linear_residual(A, x, b), factor.diagnostics,
         (; method = :direct, formulation,
-            equilibrate, condition_limit, condition_number, scaled_condition_number,
-            conditioning = compute_condition ? :svd : :not_computed,
             scaled_relative_residual = scaled_report.relative_residual,
             scaled_absolute_residual = scaled_report.absolute_residual,
             converged = nothing, iterations = nothing, residual_history = Float64[],

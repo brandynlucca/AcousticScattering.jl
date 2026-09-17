@@ -69,33 +69,52 @@ The complete harmonic space has at most twice the element's quadrature-node coun
 The Green-identity correction follows Faria, Pérez-Arancibia and Bonnet (2021),
 doi:10.1016/j.cma.2021.113703. Regular waves require `k*radius <= 1` and
 `2k*rms_radius <= 1`, with the RMS radius weighted by surface quadrature area.
+For point evaluation, `exclude_nearest=true` omits the nearest element from the base
+quadrature and recovers its contribution through density interpolation. This avoids
+unbounded raw kernel entries as a target approaches a source quadrature node.
 """
 function _fluid_layer_operators(
-        op, target, source, correction; derivative = false, regular = true)
+        op, target, source, correction; derivative = false, regular = true,
+        exclude_nearest = false)
     bounds = _fluid_quadrature_size(source)
     center, radius = bounds.center, bounds.radius
     eligible = regular && correction.method === :dim &&
                _fluid_regular_range(op.k, bounds) &&
                op.k*maximum(q -> norm(q.coords-center), target) <= 2
-    eligible || return Inti.single_double_layer(; op, target, source, derivative,
-        compression = (method = :none,), correction)
+    (eligible || exclude_nearest) ||
+        return Inti.single_double_layer(; op, target, source, derivative,
+            compression = (method = :none,), correction)
     S, D = Inti.single_double_layer(; op, target, source, derivative,
         compression = (method = :none,), correction = (method = :none,))
+    near = Inti.etype_to_nearest_points(target, source; maxdist = get(correction, :maxdist, Inf))
+    location = target === source ? :on : correction.target_location
+    location in (:on, :inside, :outside) ||
+        throw(ArgumentError("target_location must be :on, :inside or :outside"))
+    multiplier = location === :on ? -0.5 : location === :inside ? -1.0 : 0.0
+    if exclude_nearest
+        for (element, tags) in source.etype2qtags, e in axes(tags, 2)
+
+            rows, columns = near[element][e], tags[:, e]
+            S[rows, columns] .= 0
+            D[rows, columns] .= 0
+        end
+    end
+    if !eligible
+        dS, dD = Inti.bdim_correction(op, target, source, S, D;
+            green_multiplier = fill(multiplier, length(target)),
+            maxdist = get(correction, :maxdist, Inf), derivative)
+        return S + dS, D + dD
+    end
     degree = floor(Int, sqrt(2minimum(size(tags, 1)
     for tags in values(source.etype2qtags))))-1
     traces = [_regular_helmholtz_traces(q, center, radius, op.k, degree) for q in source]
     pressure = reduce(vcat, transpose.(first.(traces)))
     flux = reduce(vcat, transpose.(last.(traces)))
-    location = target === source ? :on : correction.target_location
-    location in (:on, :inside, :outside) ||
-        throw(ArgumentError("target_location must be :on, :inside or :outside"))
-    multiplier = location === :on ? -0.5 : location === :inside ? -1.0 : 0.0
     defect = multiplier .* reduce(vcat,
         [transpose(_regular_helmholtz_traces(
              q, center, radius, op.k, degree)[derivative ? 2 : 1]) for q in target])
     mul!(defect, S, flux, 1, 1)
     mul!(defect, D, pressure, -1, 1)
-    near = Inti.etype_to_nearest_points(target, source; maxdist = get(correction, :maxdist, Inf))
     for (element, tags) in source.etype2qtags
         nq, ne = size(tags)
         for e in 1:ne

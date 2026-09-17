@@ -298,13 +298,22 @@ quadrature are selected when constructing `surface`. Returns a [`BEMSolution`](@
 function bem(surface::Mesh{<:Inti.Quadrature},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0, kwargs...)
+    density = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+    capture = boundary isa Rigid ? (; _density = density) : (;)
     p, q, quad, report = solve_full_bem(boundary, k, surface.data;
-        incidence_angle, incidence_azimuth, return_diagnostics = true, kwargs...)
+        incidence_angle, incidence_azimuth, return_diagnostics = true, capture..., kwargs...)
+    return _full_bem_solution(surface, boundary, k, p, q, quad, report,
+        incidence_angle, incidence_azimuth; density = density[])
+end
+
+function _full_bem_solution(surface, boundary, k, p, q, quad, report,
+        incidence_angle, incidence_azimuth; density = nothing)
     report = merge(report, (; meshsize = surface.resolution))
     if surface.body isa _SurfaceGeometry
         report = merge(report, (; geometry = surface.body.validation,
             provenance = surface.body.provenance))
     end
-    data = _FullBEMSurfaceData(quad, p, q, incidence_angle, incidence_azimuth, report)
+    data = _FullBEMSurfaceData(
+        quad, p, q, incidence_angle, incidence_azimuth, report, density)
     return BEMSolution(surface.body, boundary, Float64(k), :full, data)
 end

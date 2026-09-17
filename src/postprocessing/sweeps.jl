@@ -132,6 +132,115 @@ function incidence_angle_sweep(solve::Function, angles::AbstractVector{<:Real})
     return IncidenceAngleSweep(Float64.(angles), ts, amplitudes, labels)
 end
 
+function _validate_incidence_sweep(angles, incidence_azimuth)
+    isempty(angles) && throw(ArgumentError("a sweep needs at least one sample"))
+    all(isfinite, angles) || throw(ArgumentError("sweep coordinates must be finite"))
+    isfinite(incidence_azimuth) || throw(ArgumentError("incidence azimuth must be finite"))
+end
+
+"""
+    incidence_angle_sweep(surface::Mesh, boundary::Union{Rigid,PressureRelease}, k, angles; kwargs...)
+
+Sample full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse metres.
+Polar `angles` are radians from +x, with fixed `incidence_azimuth=0` by default.
+Reuse layer operators, their compression and the system operator within this call.
+Each angle gets an independent GMRES solve with the supplied tolerances.
+
+Accepts `formulation`, `compression`, `correction` and `gmres_kwargs` as in [`bem`](@ref).
+Returns an [`IncidenceAngleSweep`](@ref) retaining amplitudes and strengths. Operators
+are discarded after sampling; subsequent calls assemble from their own inputs.
+"""
+function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature},
+        boundary::Union{Rigid, PressureRelease}, k::Real, angles::AbstractVector{<:Real};
+        incidence_azimuth::Real = 0.0, formulation::Symbol = :burton_miller,
+        compression::NamedTuple = (method = :hmatrix, tol = 1e-5),
+        correction::NamedTuple = (method = :dim,),
+        gmres_kwargs::NamedTuple = (reltol = 1e-4, restart = 150, maxiter = 1200))
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    system = _assemble_full_boundary(boundary, k, surface.data;
+        formulation, compression, correction)
+    return incidence_angle_sweep(angles) do incidence_angle
+        density = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
+        p, q, quad, report = _solve_full_boundary(system;
+            incidence_angle, incidence_azimuth, gmres_kwargs, _density = density)
+        _full_bem_solution(surface, boundary, k, p, q, quad, report,
+            incidence_angle, incidence_azimuth; density = density[])
+    end
+end
+
+"""
+    incidence_angle_sweep(surface::Mesh, material::FluidFilled, k, angles; kwargs...)
+    incidence_angle_sweep(surfaces, materials, k, angles; components=false, labels=nothing, kwargs...)
+
+Sample fluid/gas full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse
+metres. Polar `angles` are radians from +x; `incidence_azimuth=0` sweeps the xy plane.
+Geometry validation, operators and factorization are reused within this call. A new
+call assembles from its supplied meshes, materials, frequency and solver options.
+
+Accepts `formulation`, `correction`, `equilibrate` and `condition_limit` as in [`bem`](@ref).
+The multiple-interface overload also accepts `parents` and `validation`. With
+`components=true`, include each interface isolated in the exterior medium and their
+coherent complex sum, using the same solver options. `labels` supplies one name per
+interface. Each system is sampled separately to limit retained matrix storage.
+
+Returns an [`IncidenceAngleSweep`](@ref) containing complex amplitudes and target
+strengths; dense solution state is discarded after sampling.
+
+# Examples
+```julia
+aspect = incidence_angle_sweep(surfaces, materials, k, deg2rad.([60, 90, 120]);
+    parents=[0, 1], components=true, labels=["flesh", "bladder"])
+```
+"""
+function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature}, material::FluidFilled,
+        k::Real, angles::AbstractVector{<:Real}; incidence_azimuth::Real = 0.0,
+        formulation::Symbol = :muller, correction::NamedTuple = (method = :dim,),
+        equilibrate::Bool = true, condition_limit::Integer = 512)
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
+    system = _assemble_full_fluid(material, k, surface.data; formulation, correction)
+    factor = _factor_fluid_system(system.A; equilibrate, condition_limit)
+    return incidence_angle_sweep(angles) do incidence_angle
+        p, q, quad, report = _solve_full_fluid(system, factor;
+            incidence_angle, incidence_azimuth)
+        _full_bem_solution(surface, material, k, p, q, quad, report,
+            incidence_angle, incidence_azimuth)
+    end
+end
+
+function _region_angle_sweep(surfaces, materials, k, angles;
+        incidence_azimuth, equilibrate, condition_limit, kwargs...)
+    system = _assemble_region_bem(surfaces, materials, k; kwargs...)
+    factor = _factor_fluid_system(system.A; equilibrate, condition_limit,
+        norm_floor = eps(Float64))
+    return incidence_angle_sweep(angles) do incidence_angle
+        _solve_region_bem(system, factor; incidence_angle, incidence_azimuth)
+    end
+end
+
+function incidence_angle_sweep(surfaces::AbstractVector{<:Mesh},
+        materials::AbstractVector{<:FluidFilled}, k::Real, angles::AbstractVector{<:Real};
+        components::Bool = false, labels = nothing,
+        parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
+        incidence_azimuth::Real = 0.0, formulation::Symbol = :muller,
+        correction::NamedTuple = (method = :dim,), equilibrate::Bool = true,
+        condition_limit::Integer = 512, validation::NamedTuple = (;))
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
+    components || labels === nothing ||
+        throw(ArgumentError("labels require components=true"))
+    response_labels = components ? _component_labels(length(surfaces), labels) : nothing
+    options = (; incidence_azimuth, formulation, correction, equilibrate, condition_limit)
+    coupled = _region_angle_sweep(
+        surfaces, materials, k, angles; parents, validation, options...)
+    components || return coupled
+    isolated = [incidence_angle_sweep(surface, material, k, angles; options...).amplitudes
+                for (surface, material) in zip(surfaces, materials)]
+    amplitudes = hcat(coupled.amplitudes, isolated..., sum(isolated))
+    return IncidenceAngleSweep(Float64.(angles), target_strength.(amplitudes),
+        amplitudes, response_labels)
+end
+
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
     FEMSolution{_ShellFEMSurfaceData}}

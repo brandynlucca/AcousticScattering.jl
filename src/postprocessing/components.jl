@@ -4,6 +4,13 @@ struct ComponentComparison
     labels::Vector{String}
 end
 
+function _component_labels(count, labels)
+    names = labels === nothing ? ["Interface $i" for i in 1:count] :
+            String.(collect(labels))
+    length(names) == count || throw(ArgumentError("supply one label per interface"))
+    return ["Coupled"; "Isolated " .* names; "Coherent sum"]
+end
+
 """
     components(solution; labels=nothing, solver_kwargs=(;))
 
@@ -25,9 +32,7 @@ one name per interface; no further solves are needed for observation-angle sweep
 function components(sol::BEMSolution{_RegionBEMData}; labels = nothing,
         solver_kwargs::NamedTuple = (;))
     count = length(sol.body.surfaces)
-    names = labels === nothing ? ["Interface $i" for i in 1:count] :
-            String.(collect(labels))
-    length(names) == count || throw(ArgumentError("supply one label per interface"))
+    response_labels = _component_labels(count, labels)
     options = merge(
         (; correction = diagnostics(sol).correction,
             formulation = diagnostics(sol).formulation,
@@ -38,9 +43,7 @@ function components(sol::BEMSolution{_RegionBEMData}; labels = nothing,
                                incidence_angle = sol.data.incidence_angle,
                                incidence_azimuth = sol.data.incidence_azimuth, options...)
                            for (surface, material) in zip(sol.body.surfaces, sol.boundary.materials)]
-    return ComponentComparison(
-        sol, isolated, ["Coupled"; "Isolated " .* names;
-                        "Coherent sum"])
+    return ComponentComparison(sol, isolated, response_labels)
 end
 
 function _comparison_amplitudes(result::ComponentComparison; kwargs...)

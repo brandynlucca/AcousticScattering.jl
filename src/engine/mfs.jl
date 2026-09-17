@@ -7,7 +7,7 @@ function _ring_dGdn_field(
     r = _ring_distance(ρ, z, ρ2, z2, Δφ)
     r < _RING_DISTANCE_FLOOR && return zero(complex(k)) * zero(r)
     G = cis(k * r) / (4π * r)
-    proj = nρ * (ρ - ρ2 * cos(Δφ)) + nz * (z - z2)
+    proj = nρ * ((ρ - ρ2) + 2ρ2*sin(Δφ/2)^2) + nz * (z - z2)
     return (im * k - 1 / r) * G * proj / r
 end
 
@@ -15,10 +15,18 @@ end
 function _azimuthal_dGdn_field(
         k::Real, ρ::Real, z::Real, nρ::Real, nz::Real, ρ2::Real, z2::Real;
         m::Integer = 0, rtol::Real = 1e-6, atol::Real = _QUAD_ATOL)
-    val, _ = quadgk(Δφ -> _ring_dGdn_field(k, ρ, z, nρ, nz, ρ2, z2, Δφ) * cos(m * Δφ),
-        _azimuthal_breakpoints(m)...; rtol = rtol,
-        atol = atol, maxevals = _AZIMUTHAL_MAXEVALS)
-    return val
+    breaks = collect(_azimuthal_half_breakpoints(m))
+    scale = iszero(ρ*ρ2) ? pi : hypot(ρ-ρ2, z-z2)/sqrt(ρ*ρ2)
+    while 0 < scale < pi
+        push!(breaks, scale)
+        scale *= 8
+    end
+    sort!(unique!(breaks))
+    val, error = quadgk(Δφ -> _ring_dGdn_field(k, ρ, z, nρ, nz, ρ2, z2, Δφ) * cos(m * Δφ),
+        breaks...; rtol, atol = atol/2, maxevals = _AZIMUTHAL_MAXEVALS)
+    error <= max(atol/2, rtol*abs(val)) ||
+        throw(ArgumentError("MFS normal-derivative quadrature did not converge"))
+    return 2val
 end
 
 """
@@ -26,15 +34,25 @@ end
 
 Virtual source ring positions for axisymmetric MFS: one source per panel
 of `mesh` (see [`panels`](@ref)), placed at each panel's midpoint offset
-`offset` [m] *inward* along that panel's own outward normal, so every
-source sits strictly inside the true boundary regardless of local
-curvature. Returns `(ρ_s, z_s)` vectors, same length and ordering as
+`offset` [m] *inward* along that panel's own outward normal. At sharp meridian
+corners, cap the offset by half the distance to the corner so the source mesh
+can resolve the edge field under panel refinement. Negative offsets place
+sources outward for interior representations. A corner is a meridian junction
+whose adjacent unit normals have dot product below 0.25. Returns `(ρ_s, z_s)`
+vectors, same length and ordering as
 `panels(mesh)`.
 """
 function mfs_source_points(mesh::MeridianMesh, offset::Real)
     ps = panels(mesh)
-    ρ_s = [max(p.rhom - offset * p.nrho, 0.0) for p in ps]
-    z_s = [p.zm - offset * p.nz for p in ps]
+    corners = [(mesh.rho[i + 1], mesh.z[i + 1])
+               for i in 1:(length(ps) - 1)
+               if ps[i].nrho*ps[i + 1].nrho + ps[i].nz*ps[i + 1].nz < 0.25]
+    offsets = [copysign(
+                   minimum((hypot(p.rhom-rho, p.zm-z)/2 for (rho, z) in corners);
+                       init = abs(offset)),
+                   offset) for p in ps]
+    ρ_s = [max(p.rhom - shift * p.nrho, 0.0) for (p, shift) in zip(ps, offsets)]
+    z_s = [p.zm - shift * p.nz for (p, shift) in zip(ps, offsets)]
     return ρ_s, z_s
 end
 
@@ -106,7 +124,7 @@ end
 
 function _solve_mfs_mode(boundary, k, mesh, beta, m;
         source_mesh = mesh, offset_ext, offset_int = offset_ext, rtol,
-        condition_limit::Integer = 512, solve_reports = nothing)
+        condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     rho_ext, z_ext = mfs_source_points(source_mesh, offset_ext)
     P, V, ps = assemble_mfs_operators(mesh, k, rho_ext, z_ext; m, rtol)
     P_int = V_int = nothing
@@ -120,6 +138,12 @@ function _solve_mfs_mode(boundary, k, mesh, beta, m;
     ns = length(rho_ext)
     ext = x[1:ns]
     int = boundary isa FluidFilled ? x[(ns + 1):end] : nothing
+    if source_modes !== nothing
+        interior = int === nothing ? nothing :
+                   (; rho = rho_int, z = z_int, coefficients = int)
+        push!(source_modes, (; exterior = (; rho = rho_ext, z = z_ext, coefficients = ext),
+            interior, rtol))
+    end
     if solve_reports !== nothing
         check_mesh = _mfs_check_mesh(mesh)
         Pc, Vc, checks = assemble_mfs_operators(check_mesh, k, rho_ext, z_ext; m, rtol)
@@ -163,9 +187,9 @@ axisymmetric BEM, so the exact same postprocessing applies unchanged.
 function solve_axial_mfs(
         boundary::Union{Rigid, PressureRelease}, k::Real, mesh::MeridianMesh;
         offset::Real, rtol::Real = 1e-6, source_mesh = mesh,
-        condition_limit::Integer = 512, solve_reports = nothing)
+        condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     p_scat, dpdn_scat, ps, _, _ = _solve_mfs_mode(boundary, k, mesh, 0.0, 0;
-        offset_ext = offset, rtol, source_mesh, condition_limit, solve_reports)
+        offset_ext = offset, rtol, source_mesh, condition_limit, solve_reports, source_modes)
     return p_scat, dpdn_scat, ps
 end
 
@@ -196,9 +220,9 @@ Returns `(p_scat, dpdn_scat, ps, p_int, dpdn_int)`, matching
 """
 function solve_axial_mfs(boundary::FluidFilled, k::Real, mesh::MeridianMesh;
         offset_ext::Real, offset_int::Real, rtol::Real = 1e-6,
-        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing)
+        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     return _solve_mfs_mode(boundary, k, mesh, 0.0, 0;
-        offset_ext, offset_int, rtol, source_mesh, condition_limit, solve_reports)
+        offset_ext, offset_int, rtol, source_mesh, condition_limit, solve_reports, source_modes)
 end
 
 """
@@ -221,7 +245,7 @@ applies unchanged.
 function solve_oblique_mfs(boundary::Union{Rigid, PressureRelease}, k::Real,
         mesh::MeridianMesh, incidence_angle::Real;
         m_max::Integer, offset::Real, rtol::Real = 1e-6,
-        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing)
+        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     β = incidence_angle
     ps = panels(mesh)
 
@@ -231,7 +255,7 @@ function solve_oblique_mfs(boundary::Union{Rigid, PressureRelease}, k::Real,
     for m in 0:m_max
         p_scat_modes[m + 1], dpdn_scat_modes[m + 1], _, _, _ = _solve_mfs_mode(
             boundary, k, mesh, β, m; offset_ext = offset, rtol,
-            source_mesh, condition_limit, solve_reports)
+            source_mesh, condition_limit, solve_reports, source_modes)
     end
 
     return p_scat_modes, dpdn_scat_modes, ps
@@ -260,7 +284,7 @@ Returns `(p_scat_modes, dpdn_scat_modes, ps)`, matching
 function solve_oblique_mfs(
         boundary::FluidFilled, k::Real, mesh::MeridianMesh, incidence_angle::Real;
         m_max::Integer, offset_ext::Real, offset_int::Real, rtol::Real = 1e-6,
-        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing)
+        source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     β = incidence_angle
     ps = panels(mesh)
 
@@ -270,8 +294,22 @@ function solve_oblique_mfs(
     for m in 0:m_max
         p_scat_modes[m + 1], dpdn_scat_modes[m + 1], _, _, _ = _solve_mfs_mode(
             boundary, k, mesh, β, m; offset_ext, offset_int, rtol,
-            source_mesh, condition_limit, solve_reports)
+            source_mesh, condition_limit, solve_reports, source_modes)
     end
 
     return p_scat_modes, dpdn_scat_modes, ps
+end
+
+function _mfs_source_amplitude(k, modes, theta, phi)
+    value = zero(ComplexF64)
+    for (i, mode) in enumerate(modes)
+        m = i - 1
+        sources = mode.exterior
+        for j in eachindex(sources.coefficients)
+            value += sources.coefficients[j] * (-im)^m / 2 * cos(m * phi) *
+                     besselj(m, k * sources.rho[j] * sin(theta)) *
+                     cis(-k * sources.z[j] * cos(theta))
+        end
+    end
+    return value
 end

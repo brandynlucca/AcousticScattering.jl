@@ -349,15 +349,11 @@ medium, matching [`ElasticLayer`](@ref)'s convention:
 
 Uses Hickling's (1962) resonance form (`sin η`, `cos η`) rather than
 a boundary-matrix determinant like [`ElasticLayer`](@ref)/[`Shelled`](@ref): there's no
-interior fluid, so it's a direct ratio of tangent terms. The classical
-expression `f_bs = |-2i f_j / (k a)| a/2` with
-`f_j = Σ (2m+1) Pₘ(cosθ) sin η (i cos η - sin η)` rearranges to
-`-i/k * Σ (2m+1) Pₘ(cosθ) Aₘ` with `Aₘ = sin η (i cos η - sin η)`, which
+interior fluid, so it's a direct ratio of tangent terms. For the package's `exp(-iωt)` time
+convention and outgoing first-kind Hankel waves, the amplitude is
+`-i/k * Σ (2m+1) Pₘ(cosθ) Aₘ` with `Aₘ = sin η (-i cos η - sin η)`, which
 maps exactly onto this package's existing `form_function`/`target_strength`
-convention (taking `abs()` is equivalent to
-`target_strength(f) = 20 log10(|f|)` at the end).
-
-Validated (see test/runtests.jl) against the very-high-contrast to `Rigid` limiting case.
+convention, with `target_strength(f) = 20 log10(|f|)`.
 """
 struct SolidElastic <: AbstractBoundaryCondition
     density_contrast::Float64
@@ -391,6 +387,10 @@ function _modal_coefficient(::PressureRelease, m::Integer, k::Real, a::Real)
 end
 
 function _modal_coefficient(bc::FluidFilled, m::Integer, k::Real, a::Real)
+    return _sphere_fluid_coefficients(bc, m, k, a).scattered
+end
+
+function _sphere_fluid_coefficients(bc::FluidFilled, m::Integer, k::Real, a::Real)
     ka = k * a
     ka_interior = ka / bc.soundspeed_contrast
     gh = bc.density_contrast * bc.soundspeed_contrast
@@ -399,66 +399,53 @@ function _modal_coefficient(bc::FluidFilled, m::Integer, k::Real, a::Real)
     jd_ext = jsd(m, ka)
     j_int = js(m, ka_interior)
     j_ext = js(m, ka)
-    y_ext = ys(m, ka)
-    yd_ext = ysd(m, ka)
-
-    ratio = jd_int / jd_ext
-    numerator = ratio * (y_ext / j_int) - gh * (yd_ext / jd_ext)
-    denominator = ratio * (j_ext / j_int) - gh
-    C = numerator / denominator
-
-    return -1 / (1 + im * C)
-end
-
-# `dc_ratio` is D/C, the shell's two-Bessel-kind solution ratio fixed by the inner surface condition.
-function _shell_outer_coefficient(
-        m::Integer, ka::Real, k2a::Real, gh_shell::Real, dc_ratio::Number)
-    Jb = js(m, k2a) + dc_ratio * ys(m, k2a)
-    Jbd = jsd(m, k2a) + dc_ratio * ysd(m, k2a)
-    ratio2 = Jbd / (gh_shell * Jb)
-
-    j_ext = js(m, ka)
-    jd_ext = jsd(m, ka)
     h_ext = hs(m, ka)
     hd_ext = hsd(m, ka)
-
-    return (ratio2 * j_ext - jd_ext) / (hd_ext - ratio2 * h_ext)
+    denominator = gh * j_int * hd_ext - h_ext * jd_int
+    scattered = (j_ext * jd_int - gh * j_int * jd_ext) / denominator
+    interior = gh * (j_ext * hd_ext - jd_ext * h_ext) / denominator
+    return (; scattered, interior)
 end
 
-function _modal_coefficient(bc::Shelled{FluidLayer, VacuumInterior}, m::Integer, k::Real, a::Real)
+function _sphere_interface_solution(matrix, rhs)
+    columns = maximum(abs, matrix; dims = 1)
+    scaled = matrix ./ columns
+    rows = maximum(abs, scaled; dims = 2)
+    return (scaled ./ rows \ (rhs ./ vec(rows))) ./ vec(columns)
+end
+
+function _modal_coefficient(
+        bc::Union{Shelled{FluidLayer, VacuumInterior},
+            Shelled{FluidLayer, FluidInterior}, Shelled{ElasticLayer, FluidInterior}},
+        m::Integer, k::Real, a::Real)
+    return _sphere_shell_coefficients(bc, m, k, a).scattered
+end
+
+function _sphere_shell_coefficients(bc::Shelled{FluidLayer}, m::Integer, k::Real, a::Real)
     ka = k * a
     k2a = ka / bc.material.soundspeed_contrast
     k2b = k2a * bc.radius_ratio
     gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
-
-    dc_ratio = -js(m, k2b) / ys(m, k2b)
-    return _shell_outer_coefficient(m, ka, k2a, gh_shell, dc_ratio)
-end
-
-function _modal_coefficient(bc::Shelled{FluidLayer, FluidInterior}, m::Integer, k::Real, a::Real)
-    ka = k * a
-    k2a = ka / bc.material.soundspeed_contrast
-    k2b = k2a * bc.radius_ratio
-    k3b = (ka / bc.interior.soundspeed_contrast) * bc.radius_ratio
-    gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
-    gh_23 = (bc.interior.density_contrast * bc.interior.soundspeed_contrast) /
-            (bc.material.density_contrast * bc.material.soundspeed_contrast)
-
-    j3b = js(m, k3b)
-    jd3b = jsd(m, k3b)
-    ratio3 = jd3b / (j3b * gh_23)
-
-    j2b = js(m, k2b)
-    jd2b = jsd(m, k2b)
-    y2b = ys(m, k2b)
-    yd2b = ysd(m, k2b)
-    dc_ratio = (jd2b - ratio3 * j2b) / (ratio3 * y2b - yd2b)
-
-    return _shell_outer_coefficient(m, ka, k2a, gh_shell, dc_ratio)
+    n = bc.interior isa FluidInterior ? 4 : 3
+    matrix = zeros(ComplexF64, n, n)
+    rhs = zeros(ComplexF64, n)
+    matrix[1, 1:3] = [hs(m, ka), -js(m, k2a), -ys(m, k2a)]
+    matrix[2, 1:3] = [hsd(m, ka), -jsd(m, k2a) / gh_shell, -ysd(m, k2a) / gh_shell]
+    matrix[3, 2:3] = [js(m, k2b), ys(m, k2b)]
+    rhs[1:2] = [-js(m, ka), -jsd(m, ka)]
+    if bc.interior isa FluidInterior
+        k3b = ka * bc.radius_ratio / bc.interior.soundspeed_contrast
+        gh_int = bc.interior.density_contrast * bc.interior.soundspeed_contrast
+        matrix[3, 4] = -js(m, k3b)
+        matrix[4, 2:4] = [
+            jsd(m, k2b) / gh_shell, ysd(m, k2b) / gh_shell, -jsd(m, k3b) / gh_int]
+    end
+    x = _sphere_interface_solution(matrix, rhs)
+    return (; scattered = x[1], shell = (x[2], x[3]), interior = n == 4 ? x[4] : nothing)
 end
 
 # λ/(λ+2G) = 1 - 2β, 2G/(λ+2G) = 2β, where β = (c_T/c_L)²
-function _modal_coefficient(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer, k::Real, a::Real)
+function _sphere_shell_coefficients(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer, k::Real, a::Real)
     a_in = bc.radius_ratio * a
     ka1s = k * a
     kLs = (k / bc.material.speed_longitudinal_contrast) * a
@@ -539,8 +526,10 @@ function _modal_coefficient(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer
     A_denominator = copy(A_numerator)
     A_denominator[1:2, 1] = [a11, a21]
 
-    # The incident field moves to the right-hand side with a minus sign.
-    return -det(A_numerator) / det(A_denominator)
+    x = _sphere_interface_solution(A_denominator, -A_numerator[:, 1])
+    density = bc.material.interior_coupling === :generalized ?
+              bc.interior.density_contrast : 1.0
+    return (; scattered = x[1], interior = density * x[end])
 end
 
 # Resonance form, see SolidElastic's docstring.
@@ -579,7 +568,7 @@ function _modal_coefficient(bc::SolidElastic, m::Integer, k::Real, a::Real)
     cos_eta = 1 / sqrt(1 + eta_tan^2)
     sin_eta = eta_tan * cos_eta
 
-    return sin_eta * (im * cos_eta - sin_eta)
+    return sin_eta * (-im * cos_eta - sin_eta)
 end
 
 """

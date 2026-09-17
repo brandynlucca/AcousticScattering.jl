@@ -1,4 +1,5 @@
 struct _FullMFSSurfaceData
+    quad::Inti.Quadrature
     sources::Vector{NTuple{3, Float64}}
     coefficients::Vector{ComplexF64}
     incidence_angle::Float64
@@ -77,7 +78,8 @@ function mfs(
         unknown_count = length(sources), equation_count = length(surface.data),
         check_count = check_mesh === nothing ? 0 : length(check_mesh.data), boundary_residual,
         solver_options = (; offset, incidence_angle, incidence_azimuth))
-    data = _FullMFSSurfaceData(sources, coefficients, Float64(incidence_angle),
+    data = _FullMFSSurfaceData(
+        surface.data, sources, coefficients, Float64(incidence_angle),
         Float64(incidence_azimuth), report)
     return MFSSolution(surface.body, boundary, Float64(k), data)
 end

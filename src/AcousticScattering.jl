@@ -12,7 +12,7 @@ using Gmsh: gmsh
 using HMatrices: HMatrices
 using LinearMaps: LinearMap
 using IterativeSolvers: IterativeSolvers
-using StaticArrays: SVector
+using StaticArrays: SVector, SMatrix
 using PrecompileTools: @compile_workload
 
 # Must precede every include below: Spheroid subtypes this directly.
@@ -51,6 +51,7 @@ include("engine/mfs.jl")
 include("engine/shell_fem.jl")
 include("engine/shell_fem_general.jl")
 include("engine/fluid_quadrature.jl")
+include("engine/edge_quadrature.jl")
 include("engine/full_bem.jl")
 include("engine/hybrid.jl")
 include("engine/hybrid_general_shell.jl")
@@ -65,6 +66,10 @@ include("surface_mfs.jl")
 include("region_bem.jl")
 
 include("postprocessing/components.jl")
+include("postprocessing/surface_location.jl")
+include("postprocessing/pressure.jl")
+include("postprocessing/region_pressure.jl")
+include("postprocessing/axisymmetric_pressure.jl")
 include("postprocessing/sweeps.jl")
 include("postprocessing/revolution.jl")
 
@@ -75,7 +80,7 @@ export AbstractBody, Sphere, Cylinder, Spheroid, Shell
 export AbstractSolution, ModalSolution, KirchhoffSolution, FEMSolution, BEMSolution,
        MFSSolution
 export modal, kirchhoff, fem, bem, mfs
-export target_strength, scattering_amplitude, diagnostics
+export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
 
