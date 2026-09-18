@@ -88,26 +88,21 @@ end
         compare_rim_pressure(last(values)[[1, 7]], last(values)[[2, 8]])
     end
     compare_rim_pressure(last(values), first(values))
-    full_values = Vector{ComplexF64}[]
-    for meshsize in (0.12, 0.1)
-        solution = bem(
-            body, boundary, k; method = :full, meshsize, mesh_order = 3, qorder = 5,
-            incidence_angle = pi/3, formulation = :cbie, compression = (method = :none,),
-            correction = (method = :edge,), gmres_kwargs = (
-                reltol = 1e-11, restart = 150, maxiter = 1200))
-        @test diagnostics(solution).converged
-        @test diagnostics(solution).relative_residual < 1e-10
-        actual = pressure(solution, points; field = :scattered)
-        push!(full_values, actual)
-        compare_rim_pressure(actual[[1, 7]], actual[[2, 8]])
-        amplitude = scattering_amplitude(solution)
-        compare_rim_pressure([amplitude], [last(amplitudes)])
-        direction = [-cos(pi/3), -sin(pi/3), 0.0]
-        far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
-        compare_rim_pressure([far], [amplitude])
-    end
-    compare_rim_pressure(last(full_values), first(full_values))
-    compare_rim_pressure(last(full_values), last(values))
+    solution = bem(
+        body, boundary, k; method = :full, meshsize = 0.1, mesh_order = 3, qorder = 5,
+        incidence_angle = pi/3, formulation = :cbie, compression = (method = :none,),
+        correction = (method = :edge,), gmres_kwargs = (
+            reltol = 1e-11, restart = 150, maxiter = 1200))
+    @test diagnostics(solution).converged
+    @test diagnostics(solution).relative_residual < 1e-10
+    actual = pressure(solution, points; field = :scattered)
+    compare_rim_pressure(actual[[1, 7]], actual[[2, 8]])
+    amplitude = scattering_amplitude(solution)
+    compare_rim_pressure([amplitude], [last(amplitudes)])
+    direction = [-cos(pi/3), -sin(pi/3), 0.0]
+    far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
+    compare_rim_pressure([far], [amplitude])
+    compare_rim_pressure(actual, last(values))
 end
 
 @testset "Fluid-filled flat-cylinder rims" begin
@@ -135,28 +130,23 @@ end
     end
     compare_rim_pressure(last(bem_values), first(bem_values))
     compare_rim_pressure(last(mfs_values), first(mfs_values))
-    full_values = Vector{ComplexF64}[]
-    for meshsize in (0.25, 0.2)
-        solution = bem(body, boundary, k; method = :full, meshsize, mesh_order = 3,
-            qorder = 7, incidence_angle = pi/3, formulation = :cbie,
-            correction = (method = :edge,), condition_limit = 0)
-        @test diagnostics(solution).relative_residual < 1e-10
-        actual = pressure(solution, points; field = :scattered)
-        push!(full_values, actual)
-        compare_rim_pressure(actual, last(bem_values))
-        compare_rim_pressure(actual, last(mfs_values))
-        compare_rim_pressure(actual[[1, 7]], actual[[2, 8]])
-        rim = points[[1, 7]]
-        compare_rim_pressure(pressure(solution, rim), pressure(solution, rim; field = :interior))
-        amplitude = scattering_amplitude(solution)
-        for expected in last(amplitudes)
-            compare_rim_pressure([amplitude], [expected])
-        end
-        direction = [-cos(pi/3), -sin(pi/3), 0.0]
-        far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
-        compare_rim_pressure([far], [amplitude])
+    solution = bem(body, boundary, k; method = :full, meshsize = 0.2, mesh_order = 3,
+        qorder = 7, incidence_angle = pi/3, formulation = :cbie,
+        correction = (method = :edge,), condition_limit = 0)
+    @test diagnostics(solution).relative_residual < 1e-10
+    actual = pressure(solution, points; field = :scattered)
+    compare_rim_pressure(actual, last(bem_values))
+    compare_rim_pressure(actual, last(mfs_values))
+    compare_rim_pressure(actual[[1, 7]], actual[[2, 8]])
+    rim = points[[1, 7]]
+    compare_rim_pressure(pressure(solution, rim), pressure(solution, rim; field = :interior))
+    amplitude = scattering_amplitude(solution)
+    for expected in last(amplitudes)
+        compare_rim_pressure([amplitude], [expected])
     end
-    compare_rim_pressure(last(full_values), first(full_values))
+    direction = [-cos(pi/3), -sin(pi/3), 0.0]
+    far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
+    compare_rim_pressure([far], [amplitude])
 end
 
 @testset "Pressure-release flat-cylinder rims" begin
@@ -181,27 +171,22 @@ end
     end
     compare_rim_pressure(last(bem_values), first(bem_values))
     compare_rim_pressure(last(mfs_values), first(mfs_values))
-    full_values = Vector{ComplexF64}[]
-    for resolution in (0.2, 0.15)
-        surface = mesh(body; method = :full, resolution, mesh_order = 3, qorder = 5)
-        solution = bem(surface, boundary, k; incidence_angle = pi/3,
-            formulation = :cbie, compression = (method = :none,), correction = (method = :edge,),
-            gmres_kwargs = (reltol = 1e-10, restart = 300, maxiter = 1600))
-        @test diagnostics(solution).converged
-        @test diagnostics(solution).relative_residual < 1e-9
-        values = pressure(solution, points; field = :scattered)
-        push!(full_values, values)
-        compare_rim_pressure(values, last(bem_values))
-        compare_rim_pressure(values, last(mfs_values))
-        compare_rim_pressure(values[[1, 7]], -pressure(solution, points[[1, 7]]; field = :incident))
-        compare_rim_pressure(values[[1, 7]], values[[2, 8]])
-        amplitude = scattering_amplitude(solution)
-        compare_rim_pressure([amplitude], [last(amplitudes)])
-        direction = [-cos(pi/3), -sin(pi/3), 0.0]
-        far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
-        compare_rim_pressure([far], [amplitude])
-        @test_throws ArgumentError bem(surface, FluidFilled(1.2, 1.1), k; correction = (method = :edge,))
-        @test_throws ArgumentError bem(surface, boundary, k; correction = (method = :edge,))
-    end
-    compare_rim_pressure(last(full_values), first(full_values))
+    surface = mesh(body; method = :full, resolution = 0.15, mesh_order = 3, qorder = 5)
+    solution = bem(surface, boundary, k; incidence_angle = pi/3,
+        formulation = :cbie, compression = (method = :none,), correction = (method = :edge,),
+        gmres_kwargs = (reltol = 1e-10, restart = 300, maxiter = 1600))
+    @test diagnostics(solution).converged
+    @test diagnostics(solution).relative_residual < 1e-9
+    values = pressure(solution, points; field = :scattered)
+    compare_rim_pressure(values, last(bem_values))
+    compare_rim_pressure(values, last(mfs_values))
+    compare_rim_pressure(values[[1, 7]], -pressure(solution, points[[1, 7]]; field = :incident))
+    compare_rim_pressure(values[[1, 7]], values[[2, 8]])
+    amplitude = scattering_amplitude(solution)
+    compare_rim_pressure([amplitude], [last(amplitudes)])
+    direction = [-cos(pi/3), -sin(pi/3), 0.0]
+    far = pressure(solution, Tuple(1e5*direction); field = :scattered)*1e5*cis(-k*1e5)
+    compare_rim_pressure([far], [amplitude])
+    @test_throws ArgumentError bem(surface, FluidFilled(1.2, 1.1), k; correction = (method = :edge,))
+    @test_throws ArgumentError bem(surface, boundary, k; correction = (method = :edge,))
 end

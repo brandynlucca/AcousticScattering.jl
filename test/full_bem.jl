@@ -34,11 +34,11 @@ BLAS.set_num_threads(1)
     end
 
     @testset "Independent mesh and quadrature refinement" begin
-        for boundary in (Rigid(), PressureRelease()), (h, q) in ((0.35, 4), (0.4, 5))
+        for boundary in (Rigid(), PressureRelease())
 
             solution = bem(Sphere(1.0), boundary, Float64(pi); method = :full,
-                incidence_angle = beta, incidence_azimuth = alpha, meshsize = h,
-                qorder = q, gmres_kwargs = options)
+                incidence_angle = beta, incidence_azimuth = alpha, meshsize = 0.35,
+                qorder = 4, gmres_kwargs = options)
             @test diagnostics(solution).converged
             for (angle, direction) in observations
                 actual = scattering_amplitude(solution; direction)

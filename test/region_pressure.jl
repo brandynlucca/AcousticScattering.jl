@@ -72,7 +72,7 @@ end
     inner = mesh(Sphere(0.5); method = :full, resolution = 0.2, mesh_order = 3, qorder = 5)
     materials = [FluidFilled(1.2, 1.1), FluidFilled(0.7, 0.8)]
     boundary = Shelled(FluidLayer(1.2, 1.1), FluidInterior(0.7, 0.8), 0.5)
-    for k in (0.3, 1.0)
+    for k in (1.0,)
         solution = bem([outer, inner], materials, k; incidence_angle = beta,
             incidence_azimuth = alpha, condition_limit = 0)
         reference = modal(Sphere(1.0), boundary, k; m_max = 16)

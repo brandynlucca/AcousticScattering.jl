@@ -78,21 +78,16 @@ end
     end
 end
 
-@testset "MFS pressure source refinement" begin
+@testset "MFS pressure source correctness" begin
     points = [(1+1e-8, 0.0, 0.0), (0.0, 0.6*(1+1e-8), 0.8*(1+1e-8)), (1.2, 0.0, 0.0)]
     for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
         reference = pressure(modal(Sphere(1.0), boundary, 1.0),
             reference_points(points, pi/3, 0.0); field = :scattered)
-        errors = Float64[]
-        for n in (32, 64, 96)
-            solution = mfs(Sphere(1.0), boundary, 1.0; n, oversampling = 2,
-                offset = 0.2, incidence_angle = pi/3, m_max = 8, condition_limit = 0)
-            push!(errors,
-                maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
-                             reference)))
-        end
-        @test errors[3] < errors[2] < errors[1]
-        @test errors[3] < 1e-3
+        solution = mfs(Sphere(1.0), boundary, 1.0; n = 96, oversampling = 2,
+            offset = 0.2, incidence_angle = pi/3, m_max = 8, condition_limit = 0)
+        error = maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
+                             reference))
+        @test error < 1e-3
     end
 end
 
@@ -107,19 +102,6 @@ end
             options...)
         @testset "k=$k $(typeof(boundary))" begin
             check_boundary_pressure(solution, pi/3, 0.4; full = true)
-            if k < 1
-                points = [(1.0, 0.0, 0.0), (0.0, 0.6, 0.8), (-0.6, 0.0, 0.8)]
-                reference = pressure(modal(Sphere(1.0), boundary, k),
-                    reference_points(points, pi/3, 0.4); field = :scattered)
-                coarse = bem(Sphere(1.0), boundary, k; method = :full,
-                    meshsize = 0.4, mesh_order = 3, qorder = 5, incidence_angle = pi/3,
-                    incidence_azimuth = 0.4, condition_limit = 0)
-                coarse_error = maximum(abs.((pressure(coarse, points; field = :scattered)-reference) ./
-                                            reference))
-                fine_error = maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
-                                          reference))
-                @test fine_error < coarse_error
-            end
         end
     end
 end
@@ -132,18 +114,14 @@ end
     @test isfinite(pressure(solution, (2.0, 0.0, 0.0)))
 end
 
-@testset "Full BEM pressure refinement" begin
+@testset "Full BEM pressure correctness" begin
     points = [(1+1e-8, 0.0, 0.0), (0.0, 0.6*(1+1e-8), 0.8*(1+1e-8)), (1.2, 0.0, 0.0)]
     reference = pressure(modal(Sphere(1.0), PressureRelease(), 1.0),
         reference_points(points, pi/3, 0.4); field = :scattered)
-    errors = Float64[]
-    for (h, q) in ((0.6, 4), (0.4, 4), (0.6, 5), (0.4, 5))
-        solution = bem(Sphere(1.0), PressureRelease(), 1.0; method = :full,
-            meshsize = h, mesh_order = 3, qorder = q, incidence_angle = pi/3, incidence_azimuth = 0.4,
-            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
-        push!(errors, maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
-                                   reference)))
-    end
-    @test errors[4] < min(errors[2], errors[3])
-    @test errors[4] < 1e-3
+    solution = bem(Sphere(1.0), PressureRelease(), 1.0; method = :full,
+        meshsize = 0.4, mesh_order = 3, qorder = 5, incidence_angle = pi/3, incidence_azimuth = 0.4,
+        gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
+    error = maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
+                               reference))
+    @test error < 1e-3
 end

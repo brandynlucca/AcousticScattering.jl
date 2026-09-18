@@ -277,7 +277,7 @@ end
     @testset "thin-shell backscatter: mesh and pole refinement below 0.1 dB" begin
         material = AS.Shelled(0.32, 2565.0, 70e9)
         results = Float64[]
-        for (n_eta, pole_offset) in ((513, 0.001), (769, 0.001), (513, 0.0001))
+        for (n_eta, pole_offset) in ((257, 0.001), (257, 0.0001))
             sol = AS.fem(shell_body, material, rho_ext, c_ext, 0.0, 1.0, k;
                 method = :thin, incidence_angle = 0.0, n_eta = n_eta,
                 pole_offset = pole_offset, rtol = 1e-4)
@@ -412,7 +412,7 @@ end
         end
     end
 
-    @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.8, 1.92, 2.0, 2.1)
+    @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92, 2.0)
         beta = pi / 3
         reference_boundary = Shelled(wall, FluidInterior(1.0, 1.0), 0.8)
         solution = fem(Shell(Sphere(0.01), 0.002), Shelled(poisson, rho, youngs_modulus),

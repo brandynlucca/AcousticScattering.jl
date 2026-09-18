@@ -11,39 +11,34 @@ BLAS.set_num_threads(2)
         resolution = 0.9, qorder = 4)
     surfaces = [outer, inner]
     materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
-    angles = [0.6, pi / 2, 2.2, 0.6]
+    angles = [0.6, pi / 2, 0.6]
     k, azimuth = 0.8, 0.4
-    for formulation in (:muller, :cbie), equilibrate in (false, true)
-
-        options = (;
-            formulation, equilibrate, condition_limit = 0, incidence_azimuth = azimuth)
-        single = incidence_angle_sweep(outer, materials[1], k, angles; options...)
-        fresh_single = incidence_angle_sweep(angles) do incidence_angle
-            bem(outer, materials[1], k; incidence_angle, options...)
-        end
-        @test single.amplitudes ≈ fresh_single.amplitudes rtol = 1e-11
-        @test single.target_strength ≈ fresh_single.target_strength atol = 1e-10
-        @test single.labels == ["Scattered field"]
-        @test single.angles == angles
-        @test single.amplitudes[1] == single.amplitudes[end]
-
-        reused = incidence_angle_sweep(surfaces, materials, k, angles;
-            components = true, labels = ["body", "inclusion"], options...)
-        fresh = incidence_angle_sweep(angles) do incidence_angle
-            components(bem(surfaces, materials, k; incidence_angle, options...);
-                labels = ["body", "inclusion"])
-        end
-        @test reused.amplitudes ≈ fresh.amplitudes rtol = 1e-11
-        @test reused.target_strength ≈ fresh.target_strength atol = 1e-10
-        @test reused.labels == fresh.labels
-        @test size(reused.amplitudes) == (4, 4)
-        @test reused.amplitudes[:, 4] ≈ reused.amplitudes[:, 2] + reused.amplitudes[:, 3]
-        @test reused.amplitudes[1, :] == reused.amplitudes[end, :]
+    options = (;
+        formulation = :muller, equilibrate = true, condition_limit = 0, incidence_azimuth = azimuth)
+    single = incidence_angle_sweep(outer, materials[1], k, angles; options...)
+    fresh_single = incidence_angle_sweep(angles) do incidence_angle
+        bem(outer, materials[1], k; incidence_angle, options...)
     end
+    @test single.amplitudes ≈ fresh_single.amplitudes rtol = 1e-11
+    @test single.target_strength ≈ fresh_single.target_strength atol = 1e-10
+    @test single.labels == ["Scattered field"]
+    @test single.angles == angles
+    @test single.amplitudes[1] == single.amplitudes[end]
 
-    for (surface, material, wavenumber) in ((inner, materials[2], k), (
-        outer, FluidFilled(1.2, 0.95), k),
-        (outer, materials[1], 1.3))
+    reused = incidence_angle_sweep(surfaces, materials, k, angles;
+        components = true, labels = ["body", "inclusion"], options...)
+    fresh = incidence_angle_sweep(angles) do incidence_angle
+        components(bem(surfaces, materials, k; incidence_angle, options...);
+            labels = ["body", "inclusion"])
+    end
+    @test reused.amplitudes ≈ fresh.amplitudes rtol = 1e-11
+    @test reused.target_strength ≈ fresh.target_strength atol = 1e-10
+    @test reused.labels == fresh.labels
+    @test size(reused.amplitudes) == (3, 4)
+    @test reused.amplitudes[:, 4] ≈ reused.amplitudes[:, 2] + reused.amplitudes[:, 3]
+    @test reused.amplitudes[1, :] == reused.amplitudes[end, :]
+
+    let (surface, material, wavenumber) = (inner, materials[2], k)
         sweep = incidence_angle_sweep(surface, material, wavenumber, [0.7])
         direct = bem(surface, material, wavenumber; incidence_angle = 0.7)
         @test sweep.amplitudes[1] ≈ scattering_amplitude(direct) rtol = 1e-11

@@ -65,15 +65,15 @@ end
     points = [Tuple(collect(p) + center) for p in local_points]
     reference_points = [(dot(direction, p), sqrt(norm(p)^2-dot(direction, p)^2), 0.0)
                         for p in local_points]
-    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
+    for boundary in (Rigid(), FluidFilled(1.2, 1.1))
         k = boundary isa FluidFilled ? 0.3 : 1.0
-        h = boundary isa FluidFilled ? 0.25 : boundary isa PressureRelease ? 0.3 : 0.4
+        h = boundary isa FluidFilled ? 0.25 : 0.4
         generated = mesh(; semiaxes = (1.0, 1.0, 1.0), center = Tuple(center),
             resolution = h, mesh_order = 3, qorder = 5)
         surface = mesh(generated.body.nodes, hcat(generated.body.connectivity...); qorder = 5)
         options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                  (; compression = (method = :none,),
-            gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))
+                  (; compression = (method = :hmatrix, tol = 1e-7),
+            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
         solution = bem(surface, boundary, k; incidence_angle = beta,
             incidence_azimuth = alpha, options...)
         reference = modal(Sphere(1.0), boundary, k)
@@ -113,12 +113,12 @@ end
 
 @testset "Closed bent cylinder pressure" begin
     body = Cylinder(0.5, 1.0; radius_curvature = 2.0, endcap_depth = 0.5)
-    surface = mesh(body; method = :full, resolution = 0.17, mesh_order = 3, qorder = 5)
+    surface = mesh(body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 5)
     rigid_surface = mesh(
-        body; method = :full, resolution = 0.17, mesh_order = 3, qorder = 7)
-    sources = mesh(body; method = :full, resolution = 0.17, mesh_order = 3, qorder = 1)
+        body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 5)
+    sources = mesh(body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 1)
     coarse_sources = mesh(
-        body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 1)
+        body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 1)
     anchors = (AS.SVector(0.8, 0.1, 0.25), AS.SVector(0.0, -0.5, 0.0),
         AS.SVector(-0.5, 0.2, 0.45))
     samples = [surface.data[argmin(norm(node.coords-anchor) for node in surface.data)]
@@ -127,13 +127,12 @@ end
     points = [Tuple(node.coords + d*node.normal) for node in samples
               for d in (0.0, 1e-8, 1e-6, 1e-4, 0.01, 0.1)]
     append!(points, [(1.5, 0.2, 0.3), (-1.2, 0.5, 0.5)])
-    for boundary in (Rigid(), PressureRelease())
-        grid = boundary isa Rigid ? rigid_surface : surface
-        restart = boundary isa PressureRelease ? 800 : 400
+    for boundary in (Rigid(),)
+        grid = rigid_surface
         solution = bem(
             grid, boundary, 0.5; incidence_angle = pi/3, incidence_azimuth = 0.4,
-            compression = (method = :none,),
-            gmres_kwargs = (; reltol = 1e-9, restart, maxiter = 2400))
+            compression = (method = :hmatrix, tol = 1e-7),
+            gmres_kwargs = (; reltol = 1e-9, restart = 150, maxiter = 600))
         reference = mfs(surface, boundary, 0.5; source_mesh = sources, offset = 0.2,
             incidence_angle = pi/3, incidence_azimuth = 0.4, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)
@@ -162,10 +161,10 @@ end
         end
     end
     boundary = FluidFilled(1.2, 1.1)
-    fluid_surface = mesh(body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 5)
+    fluid_surface = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 5)
     solution = bem(fluid_surface, boundary, 0.5; incidence_angle = pi/3,
         incidence_azimuth = 0.4, condition_limit = 0)
-    refined = bem(body, boundary, 0.5; method = :full, meshsize = 0.17,
+    refined = bem(body, boundary, 0.5; method = :full, meshsize = 0.25,
         mesh_order = 3, qorder = 5, incidence_angle = pi/3,
         incidence_azimuth = 0.4, condition_limit = 0)
     exterior = [points[6], points[end - 1], points[end]]

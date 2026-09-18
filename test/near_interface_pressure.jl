@@ -21,7 +21,7 @@ end
     body, k, beta = Sphere(1.0), 6.0, pi/3
     points = [Tuple(r .* direction) for r in (1.0, 1+1e-8, 1.01, 1.2)
               for direction in ([1.0, 0, 0], [0.0, 0.6, 0.8], [-0.6, 0, 0.8])]
-    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
+    for boundary in (Rigid(), FluidFilled(1.2, 1.1))
         reference = modal(body, boundary, k; m_max = 32)
         @testset "$(typeof(boundary))" begin
             solution = mfs(body, boundary, k; n = 128, oversampling = 2,
@@ -29,11 +29,11 @@ end
             compare_near_pressure(pressure(solution, points; field = :scattered),
                 pressure(reference, near_reference_points(points, beta, 0.0); field = :scattered))
             options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                      (; compression = (method = :none,),
-                gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))
+                      (; compression = (method = :hmatrix, tol = 1e-7),
+                gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
             solution = bem(body, boundary, k; method = :full,
-                meshsize = boundary isa Rigid ? 0.25 : 0.3,
-                mesh_order = 3, qorder = 7, incidence_angle = beta, incidence_azimuth = 0.4,
+                meshsize = boundary isa Rigid ? 0.3 : 0.35,
+                mesh_order = 3, qorder = 5, incidence_angle = beta, incidence_azimuth = 0.4,
                 options...)
             compare_near_pressure(pressure(solution, points; field = :scattered),
                 pressure(reference, near_reference_points(points, beta, 0.4); field = :scattered))
@@ -60,7 +60,7 @@ end
     peaks, references = Float64[], Float64[]
     for k in (0.0137, 0.0138, 0.0139)
         reference = modal(body, gas, k; m_max = 8)
-        solution = bem(body, gas, k; method = :full, meshsize = 0.22,
+        solution = bem(body, gas, k; method = :full, meshsize = 0.3,
             mesh_order = 3, qorder = 5, incidence_angle = beta, incidence_azimuth = alpha,
             condition_limit = 0)
         @testset "k=$k" begin

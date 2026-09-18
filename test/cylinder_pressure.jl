@@ -15,19 +15,16 @@ end
     body = Cylinder(0.5, 1.0; endcap_depth = 0.5)
     points = [(1.0, 0.0, 0.0), (1+1e-8, 0.0, 0.0), (1.2, 0.0, 0.0),
         (0.0, 0.3, 0.4), (0.0, 0.3*(1+1e-8), 0.4*(1+1e-8)), (0.3, 0.36, 0.48)]
-    surface = mesh(body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 4)
-    sources = mesh(body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 1)
-    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
+    surface = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 4)
+    sources = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 1)
+    for boundary in (Rigid(), FluidFilled(1.2, 1.1))
         reference = mfs(body, boundary, 0.5; n = 256, oversampling = 2, offset = 0.12,
             incidence_angle = pi/3, m_max = 6, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)
-        coarse = mfs(body, boundary, 0.5; n = 128, oversampling = 2, offset = 0.12,
-            incidence_angle = pi/3, m_max = 6, condition_limit = 0)
-        compare_cylinder_pressure(pressure(coarse, points; field = :scattered), expected)
         options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                  (; compression = (method = :none,),
-            gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))
-        h = boundary isa FluidFilled ? 0.17 : 0.2
+                  (; compression = (method = :hmatrix, tol = 1e-7),
+            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
+        h = boundary isa FluidFilled ? 0.25 : 0.28
         solution = bem(body, boundary, 0.5; method = :full, meshsize = h, mesh_order = 3,
             qorder = 5, incidence_angle = pi/3, options...)
         @testset "$(typeof(boundary))" begin

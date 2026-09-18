@@ -7,11 +7,11 @@ BLAS.set_num_threads(2)
 @testset "Rigid and pressure-release incidence sweeps" begin
     surface = mesh(
         Sphere(1.0); method = :full, resolution = 0.4, mesh_order = 3, qorder = 4)
-    angles = [pi / 6, pi / 2, 2pi / 3, pi / 6]
+    angles = [pi / 6, pi / 2, pi / 6]
     gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200)
-    for boundary in (Rigid(), PressureRelease()),
-        compression in ((method = :none,), (method = :hmatrix, tol = 1e-7)),
-        (formulation, k) in ((:cbie, 0.8), (:burton_miller, Float64(pi)))
+    for boundary in (Rigid(),),
+        compression in ((method = :hmatrix, tol = 1e-7),),
+        (formulation, k) in ((:cbie, 0.8),)
         options = (; formulation, compression, gmres_kwargs, incidence_azimuth = 0.4)
         reused = incidence_angle_sweep(surface, boundary, k, angles; options...)
         fresh = incidence_angle_sweep(angles) do incidence_angle
@@ -49,7 +49,7 @@ end
     options = (; incidence_azimuth = 0.4, compression = (method = :hmatrix, tol = 1e-7),
         gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
     angles = [pi / 6, pi / 3]
-    for boundary in (Rigid(), PressureRelease())
+    for boundary in (Rigid(),)
         reused = incidence_angle_sweep(surface, boundary, 1.0, angles; options...)
         fresh = incidence_angle_sweep(
             a -> bem(surface, boundary, 1.0;

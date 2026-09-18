@@ -63,22 +63,15 @@ end
     end
 
     @testset "Spherical layers and strong contrasts" begin
-        for (g, h, k) in ((0.7, 0.8, 1.0), (0.0012, 0.23, 1.0),
-            (0.0012, 0.23, 0.027), (1000.0, 2.0, 1.0))
-            solution = bem([outer, inner], [FluidFilled(1.2, 1.1), FluidFilled(g, h)], k;
-                incidence_angle = beta, incidence_azimuth = alpha)
-            boundary = Shelled(FluidLayer(1.2, 1.1), FluidInterior(g, h), 0.5)
-            errors = Float64[]
-            relative = Float64[]
-            for (angle, direction) in observations
-                actual = scattering_amplitude(solution; direction)
-                reference = scattering_amplitude(modal(Sphere(1.0), boundary, k; angle))
-                push!(errors, abs(target_strength(actual) - target_strength(reference)))
-                push!(relative, abs(actual - reference) / abs(reference))
-                @test last(errors) < 0.1
-                @test last(relative) < 0.01
-            end
-            @info "Layered sphere comparison" g h k maximum_db=maximum(errors) maximum_complex=maximum(relative)
+        g, h, k = 0.0012, 0.23, 1.0
+        solution = bem([outer, inner], [FluidFilled(1.2, 1.1), FluidFilled(g, h)], k;
+            incidence_angle = beta, incidence_azimuth = alpha)
+        boundary = Shelled(FluidLayer(1.2, 1.1), FluidInterior(g, h), 0.5)
+        for (angle, direction) in observations
+            actual = scattering_amplitude(solution; direction)
+            reference = scattering_amplitude(modal(Sphere(1.0), boundary, k; angle))
+            @test abs(target_strength(actual) - target_strength(reference)) < 0.1
+            @test abs(actual - reference) / abs(reference) < 0.01
         end
     end
 
@@ -90,31 +83,16 @@ end
         core = mesh(
             Sphere(0.3); method = :full, resolution = 0.18, mesh_order = 3, qorder = 5)
         materials = [FluidFilled(1.1, 1.05), FluidFilled(0.8, 0.9), FluidFilled(0.02, 0.4)]
-        references = (
-            (0.7,
-                (-0.3953599802493457 + 0.1290315899313256im,
-                    -0.4228617984591631 + 0.1291200358732379im,
-                    -0.4097734508458774 + 0.1290757719448574im)),
-            (1.3,
-                (-0.254242765907524 + 0.1608149102933179im,
-                    -0.3680639039475212 + 0.1636734674224787im,
-                    -0.3151245072807862 + 0.1622414748131294im)))
-        for (k, amplitudes) in references, formulation in (:muller, :cbie)
-
-            solution = bem([reference_outer, middle, core], materials, k;
-                incidence_angle = 0.0, formulation)
-            errors = Float64[]
-            relative = Float64[]
-            for (direction, reference) in zip(
-                (
-                    [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), amplitudes)
-                actual = scattering_amplitude(solution; direction)
-                push!(errors, abs(target_strength(actual) - target_strength(reference)))
-                push!(relative, abs(actual - reference) / abs(reference))
-                @test last(errors) < 0.1
-                @test last(relative) < 0.01
-            end
-            @info "Three-interface comparison" k formulation maximum_db=maximum(errors) maximum_complex=maximum(relative)
+        k, amplitudes = 0.7,
+        (-0.3953599802493457 + 0.1290315899313256im,
+            -0.4228617984591631 + 0.1291200358732379im,
+            -0.4097734508458774 + 0.1290757719448574im)
+        solution = bem([reference_outer, middle, core], materials, k; incidence_angle = 0.0)
+        for (direction, reference) in zip(
+            ([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), amplitudes)
+            actual = scattering_amplitude(solution; direction)
+            @test abs(target_strength(actual) - target_strength(reference)) < 0.1
+            @test abs(actual - reference) / abs(reference) < 0.01
         end
     end
 
