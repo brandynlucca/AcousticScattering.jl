@@ -5,10 +5,10 @@
         (pi / 2, [0.0, -sin(alpha), cos(alpha)]))
 
     @testset "Material contrasts and irregular frequencies" begin
-        for (g, h, k) in ((0.0012, 0.23, 1.0), (0.01, 0.5, 1.0),
-            (1.05, 1.02, 1.0), (1000.0, 2.0, 1.0), (1e6, 2.0, 1.0),
-            (1.04, 1.04, 1.5), (1.04, 1.04, 1.6),
-            (0.0012, 0.23, 2.0815759778181), (1000.0, 2.0, Float64(pi)))
+        # NOTE: the full material-contrast/frequency grid is covered in perf/full_bem.jl;
+        # here a reduced set keeps both weak/strong-contrast and irregular-frequency coverage.
+        for (g, h, k) in ((0.0012, 0.23, 1.0), (1000.0, 2.0, 1.0),
+            (1.04, 1.04, 1.5), (1000.0, 2.0, Float64(pi)))
             boundary = FluidFilled(g, h)
             solution = bem(Sphere(1.0), boundary, k; method = :full,
                 incidence_angle = beta, incidence_azimuth = alpha, meshsize = 0.4)
@@ -34,7 +34,8 @@
 
     @testset "Gas resonance and mesh refinement" begin
         boundary = FluidFilled(0.0012, 0.23)
-        for k in (0.012, 0.0138, 0.014, 0.016)
+        # NOTE: the full 4-point mesh-refinement sweep is covered in perf/full_bem.jl.
+        for k in (0.0138, 0.016)
             solution = bem(Sphere(1.0), boundary, k; method = :full,
                 incidence_angle = beta, incidence_azimuth = alpha,
                 meshsize = 0.35, mesh_order = 3, qorder = 5)

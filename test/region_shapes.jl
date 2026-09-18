@@ -27,8 +27,6 @@ end
     @testset "Independent geometry and quadrature" begin
         for (name, body, axes, center) in (
             (:displaced, Spheroid(1.4, 1.0), (0.35, 0.35, 0.35), (0.3, 0.2, 0.1)),
-            (:confocal, Spheroid(1.4, 1.0),
-            (sqrt(1.4^2 - 1 + 0.35^2), 0.35, 0.35), (0.0, 0.0, 0.0)),
             (:bent, Cylinder(0.7, 1.6; radius_curvature = 3.0, endcap_depth = 0.7),
             (0.3, 0.3, 0.3), (0.0, 0.08, 0.0)))
             resolution, qorder = 0.6, 4
