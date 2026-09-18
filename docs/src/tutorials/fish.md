@@ -19,7 +19,7 @@ All media are homogeneous, lossless fluids; the bladder wall has no elastic stif
 using AcousticScattering
 using CairoMakie: plot, save
 
-function fish_surfaces(; resolution=0.5, qorder=5)
+function fish_surfaces(; resolution=0.4, qorder=5)
     options = (; resolution, qorder, tip_ratio=0.4)
     return [mesh(; semiaxes=(0.100,0.018,0.025), options...),
         mesh(; semiaxes=(0.025,0.006,0.009), center=(0.010,0.003,0),
@@ -132,7 +132,7 @@ all observation angles.
 For example, compare a finer mesh at the same frequency and incidence:
 
 ```@example fish
-refined = bem(fish_surfaces(; resolution=0.45), materials, k; parents=[0,1])
+refined = bem(fish_surfaces(; resolution=0.36), materials, k; parents=[0,1])
 a, b = scattering_amplitude(solution), scattering_amplitude(refined)
 (; change_db=abs(target_strength(a)-target_strength(b)),
     relative_amplitude_change=abs(a-b)/abs(b))

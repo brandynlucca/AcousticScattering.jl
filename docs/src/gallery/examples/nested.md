@@ -7,9 +7,9 @@ using AcousticScattering
 using CairoMakie: plot, save
 
 surfaces = [
-    mesh(; semiaxes=(0.10, 0.018, 0.025), resolution=0.5, tip_ratio=0.4, qorder=5),
+    mesh(; semiaxes=(0.10, 0.018, 0.025), resolution=0.4, tip_ratio=0.4, qorder=5),
     mesh(; semiaxes=(0.025, 0.006, 0.009), center=(0.01, 0.003, 0.0),
-        rotation=(axis=(0, 0, 1), angle=deg2rad(10)), resolution=0.5, tip_ratio=0.4, qorder=5)]
+        rotation=(axis=(0, 0, 1), angle=deg2rad(10)), resolution=0.4, tip_ratio=0.4, qorder=5)]
 solution = bem(surfaces, [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)],
     2pi * 2250 / 1477.4; parents=[0, 1], incidence_angle=pi / 2)
 fig = plot(solution; kind=:mesh, wireframe_interfaces=[1],
