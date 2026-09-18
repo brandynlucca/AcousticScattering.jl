@@ -122,6 +122,6 @@ end
         meshsize = 0.4, mesh_order = 3, qorder = 5, incidence_angle = pi/3, incidence_azimuth = 0.4,
         gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
     error = maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
-                               reference))
+                         reference))
     @test error < 1e-3
 end

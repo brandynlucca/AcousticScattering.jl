@@ -21,6 +21,9 @@ end
         reference = mfs(body, boundary, 0.5; n = 256, oversampling = 2, offset = 0.12,
             incidence_angle = pi/3, m_max = 6, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)
+        coarse = mfs(body, boundary, 0.5; n = 128, oversampling = 2, offset = 0.12,
+            incidence_angle = pi/3, m_max = 6, condition_limit = 0)
+        compare_cylinder_pressure(pressure(coarse, points; field = :scattered), expected)
         options = boundary isa FluidFilled ? (; condition_limit = 0) :
                   (; compression = (method = :none,),
             gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))

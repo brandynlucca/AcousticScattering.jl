@@ -161,7 +161,8 @@ end
         end
     end
     boundary = FluidFilled(1.2, 1.1)
-    fluid_surface = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 5)
+    fluid_surface = mesh(
+        body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 5)
     solution = bem(fluid_surface, boundary, 0.5; incidence_angle = pi/3,
         incidence_azimuth = 0.4, condition_limit = 0)
     refined = bem(body, boundary, 0.5; method = :full, meshsize = 0.25,

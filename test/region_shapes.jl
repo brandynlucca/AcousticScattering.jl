@@ -36,7 +36,8 @@ end
             inner = ellipsoid_surface(axes, center; resolution = 0.35resolution, qorder)
             solution = bem([outer, inner], materials, 1.0;
                 incidence_angle = beta, incidence_azimuth = alpha)
-            amplitudes = [scattering_amplitude(solution; direction) for direction in observations]
+            amplitudes = [scattering_amplitude(solution; direction)
+                          for direction in observations]
             @test diagnostics(solution).scaled_relative_residual < 1e-10
             @test all(isfinite, amplitudes)
         end
