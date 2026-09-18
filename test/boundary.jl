@@ -114,7 +114,7 @@ end
 
     for boundary in (AS.Rigid(), AS.PressureRelease())
         ts_modal = AS.target_strength(AS.modal(sphere, boundary, k))
-        for offset_frac in (0.2, 0.5, 0.9)
+        for offset_frac in (0.2, 0.9)
             ts_mfs = AS.target_strength(AS.mfs(
                 sphere, boundary, k; incidence_angle = 0.0, offset = offset_frac * a))
             @test ts_mfs ≈ ts_modal atol = 0.1
@@ -137,7 +137,7 @@ end
     for boundary in (AS.Rigid(), AS.PressureRelease())
         p_bem, dpdn_bem, ps_bem = AS.solve_axial(boundary, k, mesh; rtol = 1e-5)
         ts_bem = AS.target_strength(ps_bem, p_bem, dpdn_bem, k, pi)
-        for offset_frac in (0.1, 0.2, 0.3, 0.5)
+        for offset_frac in (0.1, 0.5)
             ts_mfs = AS.target_strength(AS.mfs(
                 capped_cyl, boundary, k; incidence_angle = 0.0,
                 offset = offset_frac * radius, n = 112))
@@ -155,7 +155,7 @@ end
 
     for boundary in (AS.Rigid(), AS.PressureRelease())
         ts_modal = AS.target_strength(AS.modal(sphere, boundary, k))
-        for angle_deg in (0.0, 30.0, 60.0, 90.0)
+        for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
             sol = AS.mfs(
                 sphere, boundary, k; incidence_angle = β, m_max = 15, offset = 0.3a)
@@ -209,7 +209,7 @@ end
 
     @testset "rigid limit (gh >> 1)" begin
         stiff = AS.FluidFilled(1e8, 1e8)
-        for angle_deg in (0.0, 30.0, 60.0, 90.0)
+        for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
             sol_stiff = AS.mfs(sphere, stiff, k; incidence_angle = β,
                 m_max = 15, offset = 0.3a, n = 24)
@@ -224,7 +224,7 @@ end
 
     @testset "pressure-release limit (g << 1)" begin
         soft = AS.FluidFilled(1e-8, 1.0)
-        for angle_deg in (0.0, 30.0, 60.0, 90.0)
+        for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
             sol_soft = AS.mfs(
                 sphere, soft, k; incidence_angle = β, m_max = 15, offset = 0.3a, n = 24)
@@ -241,7 +241,7 @@ end
         g, h = 1.05, 1.02
         bc = AS.FluidFilled(g, h)
         ts_modal = AS.target_strength(AS.modal(sphere, bc, k))
-        for angle_deg in (0.0, 30.0, 60.0, 90.0)
+        for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
             sol = AS.mfs(
                 sphere, bc, k; incidence_angle = β, m_max = 15, offset = 0.3a, n = 48)

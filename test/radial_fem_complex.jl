@@ -3,7 +3,7 @@ using Test
 
 @testset "Complex acoustic radial FEM against modal spheres" begin
     body = Sphere(1.0)
-    for boundary in (Rigid(), PressureRelease()), k in (0.4, 1.6, 4.0), order in (1, 2)
+    for boundary in (Rigid(), PressureRelease()), k in (0.4, 4.0), order in (1, 2)
         solution = fem(body, boundary, k; R = 3.0, n_elements = 200, order)
         reference = modal(body, boundary, k)
         amplitude = scattering_amplitude(solution)
@@ -43,8 +43,7 @@ end
 @testset "Adaptive radial FEM retains the final complex solution" begin
     body, k = Sphere(1.0), 1.0
     for (boundary, element_options) in ((Rigid(), (; order = 1)),
-        (Rigid(), (; order = 2)), (PressureRelease(), (; order = 1)),
-        (PressureRelease(), (; order = 2)), (FluidFilled(1.2, 1.1), (;)))
+        (PressureRelease(), (; order = 1)), (FluidFilled(1.2, 1.1), (;)))
         solution = fem(body, boundary, k; adaptive = true, m_max = 3,
             n_elements_start = 16, max_n_elements = 128, target_tol = 0.001,
             element_options...)

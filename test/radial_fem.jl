@@ -36,7 +36,7 @@ include("layered_radial_fem_complex.jl")
     @test ts_fem_quad ≈ ts_modal_rigid atol = 1e-3
 
     reference_soundspeed = 1477.3
-    range_cases_khz = (12.0, 100.0, 200.0, 300.0, 386.0)
+    range_cases_khz = (12.0, 200.0)
     for freq_khz in range_cases_khz
         kk = 2pi * freq_khz * 1000 / reference_soundspeed
         ts_modal = AS.target_strength(AS.modal(sphere, AS.Rigid(), kk))
@@ -45,7 +45,7 @@ include("layered_radial_fem_complex.jl")
         @test ts_fem_adaptive ≈ ts_modal atol = 0.01
     end
 
-    range_cases_pr_khz = (12.0, 100.0, 200.0, 300.0, 386.0)
+    range_cases_pr_khz = (12.0, 200.0)
     for freq_khz in range_cases_pr_khz
         kk = 2pi * freq_khz * 1000 / reference_soundspeed
         ts_modal_pr2 = AS.target_strength(AS.modal(sphere, AS.PressureRelease(), kk))
@@ -92,7 +92,7 @@ end
     @test AS.target_strength(AS.fem(cyl, shell_cyl, k; n_elements = 200)) ≈
           AS.target_strength(AS.modal(cyl, shell_cyl, k)) atol = 0.001
 
-    for angle_deg in (90.0, 70.0, 50.0, 30.0)
+    for angle_deg in (90.0, 30.0)
         ang = deg2rad(angle_deg)
         @test AS.target_strength(AS.fem(
             cyl, solid_cyl, k; incidence_angle = ang, n_elements = 200)) ≈

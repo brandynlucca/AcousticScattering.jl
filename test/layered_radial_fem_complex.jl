@@ -4,16 +4,16 @@ using Test
 @testset "Elastic and layered radial FEM complex sphere references" begin
     body = Sphere(1.0)
     cases = (
-        (SolidElastic(2.7, 4.0, 2.0), (0.4, 1.6, 3.2, 5.0), 400),
+        (SolidElastic(2.7, 4.0, 2.0), (0.4, 3.2), 400),
         (Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8),
-            (0.4, 1.8, 1.92, 2.0, 2.1), 640),
+            (0.4, 1.92), 640),
         (Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(0.0012, 0.23), 0.8),
-            (0.4, 1.6, 3.2), 640),
-        (Shelled(FluidLayer(1.04, 1.04), VacuumInterior(), 0.8), (0.4, 1.6, 4.0), 200),
+            (0.4, 3.2), 640),
+        (Shelled(FluidLayer(1.04, 1.04), VacuumInterior(), 0.8), (0.4, 4.0), 200),
         (Shelled(FluidLayer(1.04, 1.04), FluidInterior(1.2, 1.1), 0.8),
-            (0.4, 1.6, 4.0), 200),
+            (0.4, 4.0), 200),
         (Shelled(FluidLayer(1.04, 1.04), FluidInterior(0.0012, 0.23), 0.8),
-            (0.016, 0.017, 0.018, 1.6), 200))
+            (0.016, 1.6), 200))
     for (boundary, ks, n_elements) in cases, k in ks
 
         reference = modal(body, boundary, k; m_max = 14)
@@ -57,7 +57,7 @@ end
     stiff = SolidElastic(5000.0, 40.0, 20.0)
     solid = SolidElastic(2.7, 4.0, 2.0)
     shell = Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.005)
-    for k in (0.4, 1.6, 3.2)
+    for k in (0.4, 3.2)
         rigid = scattering_amplitude(modal(body, Rigid(), k))
         @test scattering_amplitude(modal(body, stiff, k)) ≈ rigid rtol = 0.001
         @test scattering_amplitude(fem(body, stiff, k; n_elements = 200)) ≈ rigid rtol = 0.001

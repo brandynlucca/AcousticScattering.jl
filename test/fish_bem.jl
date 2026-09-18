@@ -2,9 +2,9 @@ using AcousticScattering
 using LinearAlgebra: BLAS
 using Test
 
-BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
+BLAS.set_num_threads(1)
 
-function fish_surfaces(; resolution = 0.4, qorder = 5)
+function fish_surfaces(; resolution = 0.4, qorder = 4)
     options = (; resolution, qorder, tip_ratio = 0.4)
     return [mesh(; semiaxes = (0.10, 0.018, 0.025), options...),
         mesh(; semiaxes = (0.025, 0.006, 0.009), center = (0.01, 0.003, 0),

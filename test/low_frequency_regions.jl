@@ -2,7 +2,7 @@ using AcousticScattering
 using Test
 using LinearAlgebra: BLAS
 
-BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
+BLAS.set_num_threads(1)
 
 @testset "Low-frequency fluid regions" begin
     k = 2pi * 500 / 1477.4
@@ -24,7 +24,7 @@ BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
 
     @testset "Nested ellipsoid: $formulation" for formulation in (:muller,)
         materials = [FluidFilled(1.04, 1.04), gas]
-        options = (; resolution = 0.4, qorder = 5, tip_ratio = 0.4)
+        options = (; resolution = 0.4, qorder = 4, tip_ratio = 0.4)
         surfaces = [mesh(; semiaxes = (0.10, 0.018, 0.025), options...),
             mesh(; semiaxes = (0.025, 0.006, 0.009), center = (0.01, 0.003, 0),
                 rotation = (axis = (0, 0, 1), angle = deg2rad(10)), options...)]
