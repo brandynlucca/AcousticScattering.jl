@@ -8,7 +8,7 @@ Bistatic far-field scattering amplitude f(theta) [m] extrapolated from an
 axial-incidence axisymmetric BEM surface solution, piecewise-constant
 surface pressure `p_scat` and its normal derivative `dpdn_scat` on panels
 `ps` (as returned by [`solve_axial`](@ref)), at polar angle `theta` [rad]
-from the z-axis measured from the +z (incidence) direction, `theta = π` is
+from the x-axis measured from the +x (incidence) direction, `theta = π` is
 backscatter, `theta = 0` is forward scatter.
 """
 function far_field(ps::Vector{Panel}, p_scat::AbstractVector{<:Number},
@@ -51,7 +51,7 @@ oblique-incidence axisymmetric BEM solution, `p_scat_modes[m+1]`,
 `dpdn_scat_modes[m+1]` are Fourier mode `m`'s piecewise-constant surface
 pressure/normal-derivative on panels `ps` (as returned by
 [`solve_oblique`](@ref)), at observation direction `(theta, phi)` [rad]
-(`theta` from the z-axis, `phi` azimuth measured from the incidence plane).
+(`theta` from the x-axis, `phi` azimuth measured from the incidence plane).
 """
 function far_field(
         ps::Vector{Panel}, p_scat_modes::AbstractVector{<:AbstractVector{<:Number}},

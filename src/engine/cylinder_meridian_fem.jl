@@ -2,9 +2,10 @@
 # numerical cross-check of `cylinder_modal.jl`'s FCMS and of `axisymmetric_bem.jl`'s BEM.
 
 # Wraps Julia's opaque `SingularException` (from `l_max` running well past `k*R`) with context.
-function _dtn_fem_solve(K, b, m::Integer, l_max::Integer, kR::Real)
+function _dtn_fem_solve(K, b, m::Integer, l_max::Integer, kR::Real;
+        solve_reports = nothing, kwargs...)
     try
-        return K \ b
+        return _solve_reported(K, b, solve_reports; mode = m, l_max, kR, kwargs...)
     catch e
         e isa SingularException || rethrow()
         error("meridian FEM linear system is singular at Fourier mode m=$m, l_max=$l_max, " *
@@ -25,9 +26,8 @@ curved side, the finite-element solution has a local singularity there
 spacing converges very slowly under mesh refinement; power-law grading
 within each of the three smooth sub-arcs (cap/side/cap), each clustering
 toward the corner(s) it borders, restores good convergence without an
-excessive node count (standard treatment for a re-entrant-corner
-singularity, see e.g. R. B. Kellogg 1974, "Singularities in interface
-problems").
+excessive node count. See Kellogg (1974), "Singularities in interface problems," for
+the treatment of interface singularities.
 """
 function _graded_theta_grid(n_theta::Integer, θ_cap::Real; p::Real = 2.5)
     n1 = max(1, round(Int, n_theta * θ_cap / π))
@@ -168,7 +168,7 @@ end
     _cylinder_r_inner(θ, radius, length)
 
 Distance from the center to the finite cylinder's own surface along the
-ray at angle `θ` from the z-axis (axis of symmetry), flat cap for `θ`
+ray at angle `θ` from the x-axis (axis of symmetry), flat cap for `θ`
 near the axis, curved side otherwise, matching the same meridian profile
 `cylinder_mesh` builds for the BEM (traversed top cap → side → bottom
 cap).
@@ -192,17 +192,13 @@ Backscatter target strength [dB re 1 m²] of a finite rigid/pressure-release
 cylinder at *axial* (end-on, `p_inc = e^{ikz}`) incidence, computed via a
 genuine 2D `(ρ,z)` isoparametric finite element mesh over the cylinder's
 actual exterior shape (flat caps + curved side, exact spherical DtN
-truncation at `r=R`), see the module preamble. Cross-checks
-[`solve_axial`](@ref)'s BEM (same real geometry, already validated against
-`Francis_BEM_TS`) and `cylinder_modal.jl`'s FCMS modal series (same
-physics, no end-cap diffraction) as two independent, different-method
-comparisons.
+truncation at `r=R`). The geometry includes end-cap diffraction.
 """
 function cylinder_meridian_fem_target_strength(
         boundary::Union{Rigid, PressureRelease}, k::Real,
         radius::Real, length::Real, R::Real;
         n_r::Integer = 30, n_theta::Integer = 60,
-        l_max::Integer = max(_default_mode_count(k * R), m_max))
+        l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
     nr1 = n_r + 1
 
     halfL = length / 2
@@ -334,7 +330,7 @@ function cylinder_meridian_fem_target_strength(
         end
     end
 
-    p = K \ b
+    p = _solve_reported(K, b, solve_reports; mode = 0, n_r, n_theta, l_max, R)
 
     pR = p[idxR]
     total = zero(ComplexF64)
@@ -355,7 +351,7 @@ function _cylinder_fem_mode_trace(
         boundary::Union{Rigid, PressureRelease}, m::Integer, k::Real, β::Real,
         radius::Real, length::Real, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
-        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64})
+        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing)
     nr1 = n_r + 1
 
     halfL = length / 2
@@ -461,7 +457,7 @@ function _cylinder_fem_mode_trace(
         end
     end
 
-    p = _dtn_fem_solve(K, b, m, l_max, k * R)
+    p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
 
     pR = p[idxR]
     Bl = ComplexF64[(2l + 1) / 2 * _legendre_norm_ratio(l, m) * dot(Q[idx, :], pR) /
@@ -478,10 +474,9 @@ end
     cylinder_meridian_fem_target_strength(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
 
 Target strength [dB re 1 m²] of a finite rigid/pressure-release cylinder
-at `incidence_angle` [rad] from the z-axis (`0` = axial, matching the
-4-positional-argument method above; `π/2` = broadside, matching the
-`Figure_06_Rigid-Cylinder.csv` `Macaulay_FEM_TS`/`Francis_BEM_TS` reference
-convention), computed via the same 2D `(ρ,z)` meridian FEM decomposed into
+at `incidence_angle` [rad] from the x-axis (`0` = axial, matching the
+4-positional-argument method above; `π/2` = broadside), computed via the same
+2D `(ρ,z)` meridian FEM decomposed into
 azimuthal Fourier modes `m = 0, …, m_max` (see the module comment above).
 Backscatter is observed at the [`solve_oblique`](@ref)-established
 convention `target_strength(ps, p_modes, dpdn_modes, k, π - incidence_angle, π)`.
@@ -490,7 +485,7 @@ function cylinder_meridian_fem_target_strength(
         boundary::Union{Rigid, PressureRelease}, k::Real,
         radius::Real, length::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
-        l_max::Integer = max(_default_mode_count(k * R), m_max))
+        l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
     β = incidence_angle
     θ = Float64[]
     p_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
@@ -498,7 +493,8 @@ function cylinder_meridian_fem_target_strength(
     hs_cache, hsd_cache = _spherical_hankel_cache(l_max, k * R)
     for m in 0:m_max
         θ, pR, dpdnR = _cylinder_fem_mode_trace(
-            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache)
+            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache;
+            solve_reports)
         p_modes[m + 1] = pR
         dpdn_modes[m + 1] = dpdnR
     end
@@ -549,7 +545,7 @@ end
 function _cylinder_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β::Real,
         radius::Real, length::Real, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
-        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64})
+        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing)
     g, h = boundary.density_contrast, boundary.soundspeed_contrast
     k_int = k / h
 
@@ -652,7 +648,7 @@ function _cylinder_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
         end
     end
 
-    p = _dtn_fem_solve(K, b, m, l_max, k * R)
+    p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
 
     pR = p[idxR]
     Bl = ComplexF64[(2l + 1) / 2 * _legendre_norm_ratio(l, m) * dot(Q[idx, :], pR) /
@@ -669,13 +665,13 @@ end
     cylinder_meridian_fem_target_strength(boundary::FluidFilled, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
 
 Target strength [dB re 1 m²] of a finite fluid-filled (or gas-filled)
-cylinder at `incidence_angle` [rad] from the z-axis, via the coupled
+cylinder at `incidence_angle` [rad] from the x-axis, via the coupled
 interior/exterior 2D meridian FEM described above.
 """
 function cylinder_meridian_fem_target_strength(boundary::FluidFilled, k::Real,
         radius::Real, length::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
-        l_max::Integer = max(_default_mode_count(k * R), m_max))
+        l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
     β = incidence_angle
     θ = Float64[]
     p_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
@@ -683,7 +679,8 @@ function cylinder_meridian_fem_target_strength(boundary::FluidFilled, k::Real,
     hs_cache, hsd_cache = _spherical_hankel_cache(l_max, k * R)
     for m in 0:m_max
         θ, pR, dpdnR = _cylinder_fem_mode_trace(
-            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache)
+            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache;
+            solve_reports)
         p_modes[m + 1] = pR
         dpdn_modes[m + 1] = dpdnR
     end

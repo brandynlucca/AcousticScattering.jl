@@ -19,6 +19,15 @@ These references cover the scattering models and numerical methods discussed in 
   Journal of the Acoustical Society of America.
   [DOI: 10.1121/1.1909055](https://doi.org/10.1121/1.1909055).
   Solid-elastic sphere scattering.
+- Hayek, S. I., and Boisvert, J. E. (2003). *Vibration of prolate spheroidal shells with
+  shear deformation and rotatory inertia: Axisymmetric case*. Journal of the Acoustical
+  Society of America, 114, 2799–2811.
+  [DOI: 10.1121/1.1616925](https://doi.org/10.1121/1.1616925).
+  Shell kinematics, elastic operators, and natural frequencies.
+- Yan, Z. Y. (2017). *Simulation of sound transmission through thin elastic shell by the
+  coupled FEM/BEM*. International Conference on Computational Methods.
+  [Conference paper](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf).
+  Interior/exterior acoustic coupling, pressure loading, and interface normal conventions.
 - Fairweather, G., Karageorghis, A., and Martin, P. A. (2003).
   *The method of fundamental solutions for scattering and radiation problems*.
   Engineering Analysis with Boundary Elements.

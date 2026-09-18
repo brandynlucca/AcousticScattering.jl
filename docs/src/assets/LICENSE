@@ -1,7 +1,7 @@
 AcousticScattering.jl logo artwork
 
 This notice applies to logo.svg, favicon.svg and favicon.ico in this directory.
-It does not change the MIT license for the package source code.
+It does not change the GPL-3.0-only license for the package source code.
 
 The artwork incorporates the Julia dots from Julia logo graphics:
 Copyright (c) 2012-2022 Stefan Karpinski.

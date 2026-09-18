@@ -1,4 +1,4 @@
-# Bent-cylinder modal series (BCMS), Stanton (1988, 1989). Applies a curvature-modified
+# Bent-cylinder modal series (BCMS). Applies a curvature-modified
 # equivalent coherent length correction on top of cylinder_modal.jl's finite-cylinder modal series.
 
 using QuadGK: quadgk
@@ -8,7 +8,7 @@ using QuadGK: quadgk
 
 Curvature-modified equivalent coherent length `L_ebc(k1)` [m, complex] for
 a uniformly bent finite cylinder of the given straight-line `length` [m]
-and (constant) `radius_curvature` [m], Stanton (1989)'s Fresnel-integral
+and (constant) `radius_curvature` [m], using Stanton's (1989) Fresnel-integral
 reduction, used by [`bcms_target_strength`](@ref):
 
 ```math
@@ -32,11 +32,10 @@ end
     bcms_target_strength(boundary::Union{Rigid,PressureRelease,FluidFilled}, k, radius, length; aspect_angle=π/2, radius_curvature=Inf, m_max=default)
 
 Bent-cylinder modal series (BCMS) target strength [dB re 1 m²]: the
-*exact* finite-cylinder modal series this package already implements
-(`cylinder_modal.jl`'s [`form_function`](@ref)) for the straight-cylinder
+finite-length approximation in [`form_function`](@ref) for the straight-cylinder
 cross-sectional physics, combined with the [`equivalent_length_fresnel`](@ref)
-bent-axis coherence correction, Stanton (1988, 1989); Stanton, Chu, Wiebe
-& Clay (1993). The bent-axis correction itself is derived near broadside
+bent-axis coherence correction (Stanton 1988, 1989; Stanton, Chu, Wiebe & Clay 1993).
+The bent-axis correction is derived near broadside
 incidence, and a warning is raised if `aspect_angle` departs from `π/2` by
 more than 10° while bent (`radius_curvature` finite), since the correction
 is not expected to hold accurately away from broadside.
@@ -73,11 +72,11 @@ straight-cylinder modal series [`form_function`](@ref)`(::Union{Rigid,
 PressureRelease,FluidFilled}, k, radius, length; ...)` this is meant to
 complement, not a separate limitation introduced here.
 
-Derivation: parametrize the centerline `r_c(s) = ρc(sin γ, 0, 1-cos γ)`,
+Derivation: parametrize the centerline `r_c(s) = ρc(sin γ, 1-cos γ, 0)`,
 `γ = s/ρc`, `s ∈ [-L/2, L/2]` (reducing to a straight axis along `x` as
 `ρc → ∞`), with local circular cross-section `r(s,φ) = r_c(s) +
 radius·(cosφ, 0, 0)`-rotated-into the plane normal to the local tangent.
-Writing incidence `k̂ᵢ = (cosβ, 0, sinβ)` (in-plane, matching the bend's
+Writing incidence `k̂ᵢ = (cosβ, sinβ, 0)` (in-plane, matching the bend's
 own plane), the illuminated-region and phase coefficients collapse to a
 single combination `A(s) = sin(β-γ)` (illumination `A·cosφ > 0`, handled
 by the same [`_spheroid_phi_illuminated`](@ref) single-lobe logic the
@@ -92,23 +91,8 @@ spheroid's own derivation reduces to a closed form, both are evaluated
 by the same adaptive `QuadGK` strategy, with no departure from that
 established pattern.
 
-`radius_curvature = Inf` reduces to (numerically) the *lateral* portion of
-the existing straight finite-cylinder Kirchhoff formula, `high_frequency.jl`'s
-`kirchhoff_form_function(boundary, k, radius, length; angle)`'s `f_lateral`
-term, confirmed directly in `test/runtests.jl`, since this function has
-no separate straight-line closed form of its own to fall back on.
-
-This exact-limit check is what caught two real sign errors during
-derivation, neither obvious from inspection alone: the by-hand Frenet-frame
-algebra for "outward" first produced an *inward* normal (amplitude matched
-the reference exactly in magnitude but with the opposite overall sign at
-every angle tested, invisible in target strength, since `|-f| = |f|`, but
-wrong), and after fixing that, the phase exponent's sign was still the
-complex conjugate of the reference at every angle (matching real parts,
-negated imaginary parts), a `e^{+i(...)}` vs. `e^{-i(...)}` convention
-mismatch, fixed by negating the phase argument. Both were confirmed fixed
-by the relative error shrinking from `O(1)` to `O(10^{-6})` at
-`radius_curvature = 10^6·length` and `O(10^{-9})` at `10^8·length`, genuine convergence to the reference, not a coincidence at one scale.
+As the curvature radius increases, the amplitude approaches the lateral-surface term
+of the straight finite-cylinder Kirchhoff result. End-cap scattering is excluded.
 """
 function bent_cylinder_kirchhoff_form_function(
         boundary::AbstractBoundaryCondition, k::Real, radius::Real, length::Real,
@@ -155,8 +139,8 @@ function _bent_cylinder_point(s::Real, φ::Real, radius::Real, radius_curvature:
     sγ, cγ = sincos(γ)
     cφ, sφ = sincos(φ)
     x = (radius_curvature + radius * cφ) * sγ
-    y = radius * sφ
-    z = radius_curvature * (1 - cγ) - radius * cφ * cγ
+    y = radius_curvature * (1 - cγ) - radius * cφ * cγ
+    z = -(radius * sφ)
     return (x, y, z)
 end
 
@@ -165,7 +149,7 @@ function _bent_cylinder_normal(s::Real, φ::Real, radius_curvature::Real)
     sγ, cγ = sincos(γ)
     cφ, sφ = sincos(φ)
     # Outward normal = (r(s,φ) - r_c(s))/radius, r_c the centerline (`_bent_cylinder_point` at radius=0).
-    return (cφ * sγ, sφ, -cφ * cγ)
+    return (cφ * sγ, -cφ * cγ, -sφ)
 end
 
 """
@@ -216,7 +200,7 @@ end
     solve_bent_cylinder_mfs(boundary::Union{Rigid,PressureRelease}, k, radius, length, radius_curvature; aspect_angle=π/2, offset, n_s=20, n_φ=16)
 
 3D (non-axisymmetric) MFS solution for a unit-amplitude plane wave
-`e^{ik k̂ᵢ·x}`, `k̂ᵢ = (cos(aspect_angle), 0, sin(aspect_angle))` (in the
+`e^{ik k̂ᵢ·x}`, `k̂ᵢ = (cos(aspect_angle), sin(aspect_angle), 0)` (in the
 bend's own plane, matching [`bent_cylinder_kirchhoff_form_function`](@ref)'s
 convention), scattering off a uniformly bent finite cylinder. One source
 per collocation point (see [`bent_cylinder_mfs_points`](@ref)), offset
@@ -225,46 +209,58 @@ MFS scheme [`solve_axial_mfs`](@ref) uses for canonical axisymmetric
 bodies, here without any azimuthal reduction since none is available.
 Returns `(p_scat, dpdn_scat, points, normals, areas)`.
 
-**Fixed bug, previously left broken and undocumented in tests**:
-`_bent_cylinder_normal` returned the *inward* normal (confirmed
-algebraically, `(r(s,φ) - r_c(s))/radius` gives `(cosφ·sinγ, sinφ,
--cosφ·cosγ)`, the exact negative of what the function returned), so
-sources meant to sit inside the body were instead placed outside it. This
-produced a *stable but wrong* answer (a discrepancy that did not shrink
-with mesh resolution, ~20-26 dB off the exact modal series regardless of
-`n_s`/`n_φ`) rather than an obvious failure, consistent with solving a
-nearby, still-well-posed problem with sources on the wrong side, not with
-under-resolution. After the fix: `PressureRelease` converges to <0.02 dB
-of the exact straight-limit modal series by `n_s=30,n_φ=24` at either
-tested angle; `Rigid` converges too, but more slowly and needs a larger
-offset to reach the same accuracy, e.g. at oblique incidence
-(`aspect_angle=1.2`), the gap shrinks monotonically with *both* levers
-independently (resolution: -1.10 dB at `n_s=40` → -0.92 dB at `n_s=100`,
-fixed `offset=0.3·radius`; offset: -1.59 dB at `offset=0.1·radius` →
--0.35 dB at `offset=0.7·radius`, fixed `n_s=100,n_φ=80`), genuine, if
-slower, convergence, matching this package's own established pattern that
-Neumann (`Rigid`) MFS problems converge less tightly than Dirichlet
-(`PressureRelease`) ones (see e.g. the axisymmetric sphere oblique MFS
-testset), not a second bug.
+The grid omits end caps: this is a lateral-surface approximation, not the exterior
+boundary-value problem of a closed cylinder. Neither a small fitted residual nor
+agreement with a finite-length modal approximation establishes closed-body accuracy.
+For a closed finite body, pass a full surface mesh to [`mfs`](@ref) and refine source
+spacing, inward offset and collocation independently.
 """
 function solve_bent_cylinder_mfs(
         boundary::Union{Rigid, PressureRelease}, k::Real, radius::Real, length::Real,
-        radius_curvature::Real; aspect_angle::Real = π / 2, offset::Real, n_s::Integer = 20, n_φ::Integer = 16)
-    points, normals, areas = bent_cylinder_mfs_points(
+        radius_curvature::Real; aspect_angle::Real = π / 2, offset::Real, n_s::Integer = 20, n_φ::Integer = 16,
+        oversampling::Integer = 1, condition_limit::Integer = 512, solve_reports = nothing)
+    oversampling >= 1 || throw(ArgumentError("oversampling must be at least 1"))
+    source_points, source_normals, _ = bent_cylinder_mfs_points(
         radius, length, radius_curvature, n_s, n_φ)
+    points, normals, areas = bent_cylinder_mfs_points(
+        radius, length, radius_curvature, oversampling * n_s, oversampling * n_φ)
     n = Base.length(points)
-    sources = [_sub3(points[i], offset .* normals[i]) for i in 1:n]
+    sources = [_sub3(p, offset .* normal)
+               for (p, normal) in zip(source_points, source_normals)]
+    ns = Base.length(sources)
 
-    k̂ᵢ = (cos(aspect_angle), 0.0, sin(aspect_angle))
+    k̂ᵢ = (cos(aspect_angle), sin(aspect_angle), 0.0)
     p_inc = [cis(k * _dot3(k̂ᵢ, points[i])) for i in 1:n]
     dpdn_inc = [im * k * _dot3(k̂ᵢ, normals[i]) * p_inc[i] for i in 1:n]
 
-    P = [_green3d(k, points[i], sources[j]) for i in 1:n, j in 1:n]
-    V = [_dgreen3d_dn(k, points[i], normals[i], sources[j]) for i in 1:n, j in 1:n]
+    P = [_green3d(k, points[i], sources[j]) for i in 1:n, j in 1:ns]
+    V = [_dgreen3d_dn(k, points[i], normals[i], sources[j]) for i in 1:n, j in 1:ns]
 
-    A = boundary isa PressureRelease ? P \ (-p_inc) : V \ (-dpdn_inc)
-    p_scat = P * A
-    dpdn_scat = V * A
+    matrix = boundary isa PressureRelease ? P : V
+    rhs = boundary isa PressureRelease ? -p_inc : -dpdn_inc
+    coefficients = matrix \ rhs
+    if solve_reports !== nothing
+        checks, check_normals, _ = bent_cylinder_mfs_points(
+            radius, length, radius_curvature, 2oversampling * n_s, 2oversampling * n_φ)
+        pc = [cis(k * _dot3(k̂ᵢ, p)) for p in checks]
+        check_rhs = boundary isa PressureRelease ? -pc :
+                    [-im * k * _dot3(k̂ᵢ, normal) * p
+                     for (normal, p) in zip(check_normals, pc)]
+        check_values = zeros(ComplexF64, Base.length(checks))
+        Threads.@threads for i in eachindex(checks)
+            for j in eachindex(sources)
+                kernel = boundary isa PressureRelease ? _green3d(k, checks[i], sources[j]) :
+                         _dgreen3d_dn(k, checks[i], check_normals[i], sources[j])
+                check_values[i] += kernel * coefficients[j]
+            end
+        end
+        _record_solve!(solve_reports, matrix, coefficients, rhs; offset, n_s, n_phi = n_φ,
+            oversampling, source_count = ns, collocation_count = n, check_count = Base.length(checks),
+            boundary_residual = _residual_report(check_values - check_rhs, check_rhs),
+            _mfs_matrix_diagnostics(matrix; condition_limit)...)
+    end
+    p_scat = P * coefficients
+    dpdn_scat = V * coefficients
     return p_scat, dpdn_scat, points, normals, areas
 end
 
@@ -288,7 +284,7 @@ function bent_cylinder_mfs_target_strength(
     p_scat, dpdn_scat, points, normals, areas = solve_bent_cylinder_mfs(
         boundary, k, radius, length, radius_curvature;
         aspect_angle = aspect_angle, offset = offset, n_s = n_s, n_φ = n_φ)
-    q̂ = (-cos(aspect_angle), 0.0, -sin(aspect_angle))
+    q̂ = (-cos(aspect_angle), -sin(aspect_angle), 0.0)
     f = zero(ComplexF64)
     for i in eachindex(points)
         f += (im * k * _dot3(q̂, normals[i]) * p_scat[i] + dpdn_scat[i]) *

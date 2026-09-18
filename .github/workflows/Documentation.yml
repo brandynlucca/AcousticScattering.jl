@@ -36,7 +36,7 @@ jobs:
       - name: Test documentation deployment guard
         run: julia --project=docs test/documentation.jl
       - name: Build documentation and run examples
-        run: julia --project=docs docs/make.jl
+        run: julia --depwarn=error --project=docs docs/make.jl
       - name: Upload documentation preview
         uses: actions/upload-artifact@v4
         with:

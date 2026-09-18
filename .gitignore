@@ -8,6 +8,7 @@ LocalPreferences.toml
 .vscode/
 /output/logo/
 benchmarks/
+perf/
 
 # Fortran debug-unit artifact written by the SpheroidalWaves.jl backend
 fort.60

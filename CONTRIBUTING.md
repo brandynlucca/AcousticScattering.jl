@@ -18,8 +18,10 @@ julia --project=test/core -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); P
 julia --check-bounds=yes --project=test/core test/runtests.jl Spheroidal
 ```
 
-The numerical groups are `Analytical`, `RadialFEM`, `MeridianFEM`, `Boundary`, `Spheroidal`,
-`Oblique`, and `Interfaces`. `Core` runs all seven.
+The numerical groups are `Analytical`, `RadialFEM`, `MeridianFEM`, `Boundary`, `FullBEM`,
+`CylinderBEM`, `RegionBEM`, `RegionShapes`, `FishBEM`, `LowFrequencyRegions`, `GasResonance`,
+`CoupledResonance`, `Spheroidal`, `Oblique`, and `Interfaces`.
+`Core` runs all numerical groups.
 
 Plotting groups use the full test environment:
 
@@ -64,7 +66,7 @@ Pass `overwrite = false` to check formatting without modifying files.
 
 ```sh
 julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-julia --project=docs docs/make.jl
+julia --depwarn=error --project=docs docs/make.jl
 ```
 
 The site is written to `docs/build`. The build runs doctests and executable examples. Local

@@ -60,26 +60,30 @@ julia> target_strength(0.01 + 0im)
 | `direction` on full BEM results | Observation unit vector in Cartesian coordinates |
 | `angle` on sphere `modal` | Scattering angle relative to the incident axis |
 
-Ordinary axisymmetric geometry uses z as its axis:
+Body length lies along x, width along y, and height/depth along z. Canonical
+axisymmetric bodies have their symmetry axis along x; bent cylinders curve in the xy plane.
+Supplied meshes retain their Cartesian coordinates. Incidence changes the wave direction,
+not the geometry.
 
-![Incident wave vector and opposite backscatter direction relative to positive z.](../assets/directions.svg)
+![Incident wave vector and opposite backscatter direction relative to positive x.](../assets/directions.svg)
 
 Arrows indicate direction vectors, not positions of transmitter and receiver. The incident
 wave propagates along `d`, and monostatic observation is along `-d`.
 
 ```math
 \hat{\boldsymbol d} =
-(\sin\beta\cos\alpha,\sin\beta\sin\alpha,\cos\beta),
+(\cos\beta,\sin\beta\cos\alpha,\sin\beta\sin\alpha),
 \qquad
 \hat{\boldsymbol q}_{\mathrm{bs}}=-\hat{\boldsymbol d}.
 ```
 
 Thus axial incidence has `beta = 0`, while broadside has `beta = pi / 2`.
-For incidence in the x–z plane, axisymmetric backscatter requires observation
-`angle = pi - beta, azimuth = pi`. Its default `angle = pi, azimuth = 0`
-only gives backscatter for axial incidence. Full BEM's default observation and bent-cylinder
-MFS's result already use the negative incident direction.
+Azimuth is measured from +y toward +z about +x. For incidence in the xy plane,
+axisymmetric backscatter requires observation
+`angle = pi - beta, azimuth = pi`. These are the default observation angles for axisymmetric
+BEM/MFS and structural shell FEM. Full BEM's default observation and bent-cylinder MFS's
+result also use the negative incident direction. Explicit `angle`/`azimuth` values remain
+body-coordinate directions.
 
-The bent-cylinder implementation uses its own bend-plane convention,
-`direction = (cos(beta), 0, sin(beta))`. Do not transfer Cartesian vectors between that
-implementation and a z-axis body without transforming coordinates.
+The lateral bent-cylinder approximation uses in-plane incidence,
+`direction = (cos(beta), sin(beta), 0)`, with the same body frame.

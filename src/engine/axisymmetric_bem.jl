@@ -1,5 +1,4 @@
-# Fourier-mode (2.5D) acoustic BEM over bodies of revolution: reduces the 3D CBIE to a 1D integral
-# equation over the meridian curve via azimuthal Fourier expansion of the Green's function. Rigid/PressureRelease/FluidFilled, axial exact for all three, oblique (Jacobi-Anger) for Rigid/PressureRelease only. No Burton-Miller/CHIEF irregular-frequency regularization yet.
+# Fourier-mode acoustic BEM on piecewise-linear meridians for rigid, soft and fluid boundaries.
 
 using QuadGK: quadgk, gauss
 
@@ -8,9 +7,10 @@ using QuadGK: quadgk, gauss
 
 Piecewise-linear discretization of the generating (meridian) curve of a
 body of revolution in the half-plane rho ≥ 0: node coordinates `(rho[i],
-z[i])`, panels connecting consecutive nodes. The curve must be traversed
+z[i])`, panels connecting consecutive nodes. The internal axial parameter `z`
+maps to Cartesian x; rho is distance from that axis. The curve must be traversed
 so that outward normals equal `(-Δz, Δrho)/L` per panel, e.g. north pole to
-south pole for a convex body enclosing the z-axis (verified for
+south pole for a convex body enclosing the symmetry axis (verified for
 [`sphere_mesh`](@ref)).
 """
 struct MeridianMesh
@@ -148,7 +148,7 @@ end
     cylinder_mesh(radius, length, n)
 
 Meridian mesh for a finite right circular cylinder of the given `radius`
-and `length` [m] (axis of symmetry along z), discretized into approximately
+and `length` [m] (axis of symmetry along Cartesian x), discretized into approximately
 `n` panels total, distributed across the three meridian segments (top cap,
 side, bottom cap) in proportion to their arc length. Traversed from the top
 cap's center (ρ=0, z=length/2) outward across the cap, down the side, and
@@ -162,14 +162,8 @@ Unlike the sphere/spheroid meridian, this one has two genuine sharp
 corners (ρ=radius, z=±length/2, where a flat cap meets the cylindrical
 side at a right angle, a discontinuous surface normal). The surface
 pressure/velocity has a local corner singularity there (a well-known
-feature of Helmholtz BIEs at a wedge), which a *uniform* panel spacing
-within each segment resolves only algebraically slowly, confirmed
-directly: a weakly-scattering (near-total-cancellation) cylinder's BEM
-`target_strength` at oblique incidence sat 1.3-1.7 dB from the reference
-value at both 48 and 68 panels remained essentially unchanged after
-doubling total panels 112, ruling out plain under-resolution (which
-would keep shrinking) and pointing at a fixed local feature the uniform
-mesh never targets. Each segment's nodes are therefore placed at
+feature of Helmholtz BIEs at a wedge), which uniform panel spacing
+resolves only algebraically slowly. Each segment's nodes are placed at
 `t = clustering(u)`, `u` uniform, rather than `t` uniform, using a cosine
 map that clusters panels toward whichever segment endpoint(s) sit at a
 sharp corner, the cap segments cluster toward their outer rim (the
@@ -217,22 +211,19 @@ Meridian mesh for a finite cylinder of the given `radius` [m] and straight
 `cylinder_length` [m], capped on both ends by a quarter-prolate-spheroid
 dome of polar depth `endcap_depth` [m] and equatorial radius `radius`
 (matching the cylinder exactly) instead of [`cylinder_mesh`](@ref)'s flat
-caps, Gong, Li, Chai, Zhao & Mitri (2017), "T-matrix method for
-acoustical Bessel beam scattering from a rigid finite cylinder with
-spheroidal endcaps," Ocean Engineering, Eqs. (5)-(7) (their `b` = this
-`radius`, their `h` = `cylinder_length/2`, their `d` = `endcap_depth`).
+caps.
 Total body half-length is `cylinder_length/2 + endcap_depth`.
+The geometry follows Gong, Li, Chai, Zhao & Mitri (2017), "T-matrix method for
+acoustical Bessel beam scattering from a rigid finite cylinder with spheroidal endcaps,"
+Eqs. (5)-(7): their `b=radius`, `h=cylinder_length/2` and `d=endcap_depth`.
 
 Unlike `cylinder_mesh`, this body has **no sharp edges at all**: an
 ellipse's tangent at its own equator is always perpendicular to its major
 axis, i.e., parallel to the cylinder's own straight side, for *any*
 choice of `endcap_depth`, so the cap/side junction has a continuous
-normal by construction, not just a well-resolved corner. Motivated by
-[`solve_axial_mfs`](@ref) failing badly (7-100 dB off the axisymmetric
-BEM reference, at every tested source offset) on the sharp-cornered
-`cylinder_mesh`, matching the method-of-fundamental-solutions literature's
-own documented difficulty with sharp edges (Pérez-Arjona et al. 2018), rounding the geometry itself, rather than trying to special-case the
-source placement at a true corner, sidesteps the problem entirely.
+normal by construction. Smooth caps allow normal-offset source placement
+without the corner singularity of a flat-ended cylinder.
+For MFS treatment of sharp edges, see Pérez-Arjona, Godinho & Espinosa (2018).
 
 Nodes are placed at equal arc length within each of the three segments
 (top endcap, straight side, bottom endcap), the same discipline used by
@@ -316,7 +307,7 @@ function _quadgk_breakpoints(xρ::Real, xz::Real, p::Panel, self::Bool)
 end
 
 function _ring_distance(ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
-    sqrt(max(ρ^2 + ρ2^2 - 2ρ * ρ2 * cos(Δφ) + (z - z2)^2, 0.0))
+    hypot(ρ - ρ2, z - z2, 2sqrt(ρ * ρ2) * sin(Δφ / 2))
 end
 
 # Floor on the ring distance r, guards against a floating-point r=0.0/NaN at fine meshes (a
@@ -332,11 +323,12 @@ const _AZIMUTHAL_MAXEVALS = 2000
 
 # ∂G/∂n_y at ring point y=(ρ2,φ',z2), field point x=(ρ,0,z), Δφ=φ'-0, n̂_y=(nρ2 cosΔφ, nρ2 sinΔφ, nz2).
 function _ring_dGdn(
-        k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real, nz2::Real, Δφ::Real)
+        k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real, nz2::Real, Δφ::Real;
+        meridian_projection::Real = nρ2 * (ρ - ρ2) + nz2 * (z - z2))
     r = _ring_distance(ρ, z, ρ2, z2, Δφ)
     r < _RING_DISTANCE_FLOOR && return zero(complex(k)) * zero(r)
     G = cis(k * r) / (4π * r)
-    proj = nρ2 * (ρ * cos(Δφ) - ρ2) + nz2 * (z - z2)
+    proj = meridian_projection - 2nρ2 * ρ * sin(Δφ / 2)^2
     return -(im * k - 1 / r) * G * proj / r
 end
 
@@ -349,6 +341,7 @@ end
 # Breakpoints aligned to cos(mΔφ)'s zero crossings, avoids quadgk having to discover the
 # oscillation structure itself, which otherwise dominates cost and grows explosively with m.
 _azimuthal_breakpoints(m::Integer) = m == 0 ? (0.0, 2π) : range(0.0, 2π; length = 4m + 1)
+_azimuthal_half_breakpoints(m::Integer) = m == 0 ? (0.0, π) : range(0.0, π; length = 2m + 1)
 
 # Function-barrier helpers for outer (meridian) quadrature over a panel pair, avoids closure-capture
 # boxing in the i,j loops below. Fixed order-12 Gauss-Legendre on [0,1] for "far" pairs, cross-checked against the fully-adaptive path and the sphere modal series.
@@ -360,20 +353,24 @@ end
 
 function _pair_K(
         k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real; m::Integer = 0)
+    # The normal projection is constant along the panel and exactly zero for a self pair.
+    projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(complex(k))
         for (s, w) in zip(_MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS)
             ρ2, z2 = _panel_point(pj, s)
             total += _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz;
-                         m = m, rtol = rtol, far = true) * ρ2 * pj.L * w
+                         m = m, rtol = rtol, far = true, meridian_projection = projection) *
+                     ρ2 * pj.L * w
         end
         return total
     end
     bp = _quadgk_breakpoints(xρ, xz, pj, self)
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
-        _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; m = m, rtol = rtol, far = far) *
+        _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; m = m, rtol = rtol, far = far,
+            meridian_projection = projection) *
         ρ2 * pj.L
     end
     return quadgk(
@@ -426,6 +423,7 @@ end
 
 # PressureRelease's double-layer-applied-to-known-p_scat integrand: -p_scat(y)·∂G/∂n_y(x,y).
 function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real)
+    projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(ComplexF64)
@@ -433,7 +431,8 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
             ρ2, z2 = _panel_point(pj, s)
             total += -cis(k * z2) *
                      _azimuthal_dGdn(
-                         k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; rtol = rtol, far = true) * ρ2 *
+                         k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; rtol = rtol, far = true,
+                         meridian_projection = projection) * ρ2 *
                      pj.L * w
         end
         return total
@@ -442,15 +441,15 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
         -cis(k * z2) *
-        _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; rtol = rtol, far = far) * ρ2 *
+        _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; rtol = rtol, far = far,
+            meridian_projection = projection) * ρ2 *
         pj.L
     end
     return quadgk(
         integrand, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
 end
 
-# Fixed-order Gauss-Legendre rule on [0,2π] for well-separated (>= _AZIMUTHAL_FAR_FACTOR panel
-# lengths) azimuthal integrals, the dominant assembly cost; closer pairs keep the fully-adaptive path since a fixed low order under-resolves the near-field peak.
+# Meridian separation selects panel quadrature; ring separation separately selects azimuthal quadrature.
 const _AZIMUTHAL_FAR_FACTOR = 0.5
 
 # Whether (ρ,z) is far enough from panel `pj` (relative to the panel's own
@@ -470,7 +469,11 @@ const _AZIMUTHAL_FIXED_RULE_CACHE = Dict{Int, Tuple{Vector{Float64}, Vector{Floa
 function _azimuthal_fixed_rule(order::Integer)
     return get!(_AZIMUTHAL_FIXED_RULE_CACHE, order) do
         nodes, weights = gauss(order)  # on [-1, 1]
-        (π .* (nodes .+ 1), π .* weights)  # mapped to [0, 2π]
+        count = cld(order, 2)
+        angles = π .* (nodes[1:count] .+ 1)
+        folded_weights = 2π .* weights[1:count]
+        isodd(order) && (folded_weights[end] /= 2)
+        return angles, folded_weights
     end
 end
 
@@ -486,7 +489,7 @@ supports).
 """
 function _azimuthal_G(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real; m::Integer = 0,
         rtol::Real = 1e-6, atol::Real = _QUAD_ATOL, far::Bool = false)
-    if far
+    if far && hypot(ρ - ρ2, z - z2) >= 0.5sqrt(ρ * ρ2)
         nodes, weights = _azimuthal_fixed_rule(_azimuthal_fixed_order(m, k, ρ, ρ2))
         total = zero(ComplexF64)
         for (Δφ, w) in zip(nodes, weights)
@@ -495,27 +498,30 @@ function _azimuthal_G(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real; m::Intege
         return total
     end
     val, _ = quadgk(
-        Δφ -> _ring_G(k, ρ, z, ρ2, z2, Δφ) * cos(m * Δφ), _azimuthal_breakpoints(m)...;
-        rtol = rtol, atol = atol, maxevals = _AZIMUTHAL_MAXEVALS)
-    return val
+        Δφ -> _ring_G(k, ρ, z, ρ2, z2, Δφ) * cos(m * Δφ), _azimuthal_half_breakpoints(m)...;
+        rtol = rtol, atol = atol / 2, maxevals = _AZIMUTHAL_MAXEVALS)
+    return 2val
 end
 
 "Fourier-mode-`m` (unnormalized) azimuthal integral over Δφ ∈ [0,2π) of the double-layer ring kernel; see [`_azimuthal_G`](@ref)."
 function _azimuthal_dGdn(
         k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real, nz2::Real;
-        m::Integer = 0, rtol::Real = 1e-6, atol::Real = _QUAD_ATOL, far::Bool = false)
-    if far
+        m::Integer = 0, rtol::Real = 1e-6, atol::Real = _QUAD_ATOL, far::Bool = false,
+        meridian_projection::Real = nρ2 * (ρ - ρ2) + nz2 * (z - z2))
+    if far && hypot(ρ - ρ2, z - z2) >= 0.5sqrt(ρ * ρ2)
         nodes, weights = _azimuthal_fixed_rule(_azimuthal_fixed_order(m, k, ρ, ρ2))
         total = zero(ComplexF64)
         for (Δφ, w) in zip(nodes, weights)
-            total += _ring_dGdn(k, ρ, z, ρ2, z2, nρ2, nz2, Δφ) * cos(m * Δφ) * w
+            total += _ring_dGdn(k, ρ, z, ρ2, z2, nρ2, nz2, Δφ; meridian_projection) *
+                     cos(m * Δφ) * w
         end
         return total
     end
-    val, _ = quadgk(Δφ -> _ring_dGdn(k, ρ, z, ρ2, z2, nρ2, nz2, Δφ) * cos(m * Δφ),
-        _azimuthal_breakpoints(m)...; rtol = rtol,
-        atol = atol, maxevals = _AZIMUTHAL_MAXEVALS)
-    return val
+    val, _ = quadgk(
+        Δφ -> _ring_dGdn(k, ρ, z, ρ2, z2, nρ2, nz2, Δφ; meridian_projection) * cos(m * Δφ),
+        _azimuthal_half_breakpoints(m)...; rtol = rtol,
+        atol = atol / 2, maxevals = _AZIMUTHAL_MAXEVALS)
+    return 2val
 end
 
 """
@@ -632,7 +638,8 @@ No fictitious-eigenfrequency (Burton-Miller/CHIEF) regularization is
 applied yet, avoid `k*a` near an interior eigenvalue of the body (a
 different eigenvalue set for each boundary condition).
 """
-function solve_axial(::Rigid, k::Real, mesh::MeridianMesh; rtol::Real = 1e-6)
+function solve_axial(
+        ::Rigid, k::Real, mesh::MeridianMesh; rtol::Real = 1e-6, solve_reports = nothing)
     ps = panels(mesh)
     n = length(ps)
     K = zeros(ComplexF64, n, n)
@@ -669,12 +676,13 @@ function solve_axial(::Rigid, k::Real, mesh::MeridianMesh; rtol::Real = 1e-6)
     end
 
     A = 0.5I - K
-    p_scat = A \ b
+    p_scat = _solve_reported(A, b, solve_reports; mode = 0, rtol)
     dpdn_scat = ComplexF64[-im * k * p.nz * cis(k * p.zm) for p in ps]
     return p_scat, dpdn_scat, ps
 end
 
-function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh; rtol::Real = 1e-6)
+function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh;
+        rtol::Real = 1e-6, solve_reports = nothing)
     ps = panels(mesh)
     n = length(ps)
     G = zeros(ComplexF64, n, n)
@@ -713,7 +721,7 @@ function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh; rtol::Real 
 
     p_scat = ComplexF64[-cis(k * p.zm) for p in ps]
     b = Kp_known .- p_scat ./ 2
-    dpdn_scat = G \ b
+    dpdn_scat = _solve_reported(G, b, solve_reports; mode = 0, rtol)
     return p_scat, dpdn_scat, ps
 end
 
@@ -750,26 +758,12 @@ modal series (spheroid_modal.jl); this BEM solve is always the "full"
 (no diagonal-mode-coupling shortcut) transmission problem.
 
 `chief_points` (default `0`) optionally adds that many CHIEF (Combined
-Helmholtz Integral Equation Formulation) equations from [`chief_row`](@ref), extra rows testing the exterior representation formula at interior
-points ([`_chief_points`](@ref)), over-determining the system (solved by
-least squares) to suppress the exterior CBIE's spurious solutions near its
-fictitious interior eigenfrequencies. Left in as correctly-derived,
-available infrastructure (the exterior-only formulation is the standard,
-low-risk textbook case, and the row equation itself was directly verified
-correct, evaluated against a known-good solution's actual boundary data
-and found to be ≈0 to within discretization error) but **disabled by
-default and not needed for this solver's own accuracy**: what looked like
-CHIEF-fixable "fictitious eigenfrequency" error near a handful of specific
-frequencies turned out, on closer inspection, to be a genuine sharp interference resonance
-(target strength changing >10 dB per kHz there) combined with ordinary
-frequency-grid sensitivity when comparing against an external benchmark, this package's own analytical modal series and this BEM solver agree with
-*each other* at those frequencies to a few hundredths of a dB once
-adequately resolved (see [`solve_axial_adaptive`](@ref)); they just don't
-match the external reference's specific 2 kHz-grid sample point near that
-resonance, which no amount of regularization of *this* solver can or
-should change. Scaling `chief_points` up (tested to 36 per block) made
-accuracy *worse*, not better, consistent with there being no real
-fictitious-eigenfrequency defect here to suppress.
+Helmholtz Integral Equation Formulation) equations from [`chief_row`](@ref).
+These enforce the exterior representation at interior points and give an
+overdetermined system solved by least squares. Their effectiveness depends
+on point placement; they do not replace mesh and quadrature convergence checks.
+Near a physical resonance, compare complex amplitudes at identical frequencies
+and refine the meridian mesh independently of `rtol`.
 
 Returns `(p_scat, dpdn_scat, ps, p_int, dpdn_int)`: the exterior scattered
 surface pressure/normal-derivative and panel geometry (usable with
@@ -778,7 +772,7 @@ pressure-release methods are), plus the interior transmitted field and its
 normal derivative on the same panels.
 """
 function solve_axial(boundary::FluidFilled, k::Real, mesh::MeridianMesh;
-        rtol::Real = 1e-6, chief_points::Integer = 0)
+        rtol::Real = 1e-6, chief_points::Integer = 0, solve_reports = nothing)
     g = boundary.density_contrast
     k_int = k / boundary.soundspeed_contrast
 
@@ -821,7 +815,7 @@ function solve_axial(boundary::FluidFilled, k::Real, mesh::MeridianMesh;
         A[row, (off_d + 1):(off_d + n)] = -V_row
     end
 
-    x = A \ b
+    x = _solve_reported(A, b, solve_reports; mode = 0, rtol, chief_points)
     p_scat = x[(off_p + 1):(off_p + n)]
     dpdn_scat = x[(off_d + 1):(off_d + n)]
     p_int = x[(off_pi + 1):(off_pi + n)]
@@ -955,7 +949,7 @@ end
     solve_oblique(::Rigid, k, mesh::MeridianMesh, incidence_angle; m_max, rtol=1e-5)
 
 Solve the rigid-boundary axisymmetric CBIE for a unit-amplitude plane wave
-arriving at `incidence_angle` [rad] from the z-axis (`0` = axial/end-on,
+arriving at `incidence_angle` [rad] from the x-axis (`0` = axial/end-on,
 matching [`solve_axial`](@ref); `π/2` = broadside), by decomposing into
 azimuthal Fourier modes `m = 0, …, m_max` and solving each mode's
 decoupled CBIE independently (see the derivation above).
@@ -967,7 +961,7 @@ Returns `(p_scat_modes, dpdn_scat_modes, ps)`: `Vector`s of length
 at any observation angle.
 """
 function solve_oblique(::Rigid, k::Real, mesh::MeridianMesh, incidence_angle::Real;
-        m_max::Integer, rtol::Real = 1e-5)
+        m_max::Integer, rtol::Real = 1e-5, solve_reports = nothing)
     ps = panels(mesh)
     n = length(ps)
     β = incidence_angle
@@ -980,7 +974,7 @@ function solve_oblique(::Rigid, k::Real, mesh::MeridianMesh, incidence_angle::Re
         dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, β, p.rhom, p.zm, p.nrho, p.nz)
                               for p in ps]
         dpdn_scat = -dpdn_inc
-        p_scat = (0.5I - K) \ (V * dpdn_inc) # (0.5I-K)p = -V*dpdn_scat = V*dpdn_inc
+        p_scat = _solve_reported(0.5I - K, V * dpdn_inc, solve_reports; mode = m, rtol)
         p_scat_modes[m + 1] = p_scat
         dpdn_scat_modes[m + 1] = dpdn_scat
     end
@@ -1007,7 +1001,7 @@ same shape.
 """
 function solve_oblique(
         ::PressureRelease, k::Real, mesh::MeridianMesh, incidence_angle::Real;
-        m_max::Integer, rtol::Real = 1e-5)
+        m_max::Integer, rtol::Real = 1e-5, solve_reports = nothing)
     ps = panels(mesh)
     β = incidence_angle
 
@@ -1018,7 +1012,8 @@ function solve_oblique(
         K, V, _ = assemble_cbie_operators(mesh, k; m = m, rtol = rtol)
         p_inc = ComplexF64[_p_inc_mode(m, k, β, p.rhom, p.zm) for p in ps]
         p_scat = -p_inc
-        dpdn_scat = V \ (K * p_scat .- p_scat ./ 2)
+        dpdn_scat = _solve_reported(
+            V, K * p_scat .- p_scat ./ 2, solve_reports; mode = m, rtol)
         p_scat_modes[m + 1] = p_scat
         dpdn_scat_modes[m + 1] = dpdn_scat
     end
@@ -1112,7 +1107,7 @@ computes it directly in `Float64`.
 function solve_oblique(
         boundary::FluidFilled, k::Real, mesh::MeridianMesh, incidence_angle::Real;
         m_max::Integer, rtol::Real = 1e-5, precision::Symbol = :double,
-        chief_points::Integer = 0, chief_points_int::Integer = 0)
+        chief_points::Integer = 0, chief_points_int::Integer = 0, solve_reports = nothing)
     precision === :double || precision === :quad ||
         throw(ArgumentError("precision must be :double or :quad, got $precision"))
     ps = panels(mesh)
@@ -1180,7 +1175,8 @@ function solve_oblique(
             A[row, (off_d + 1):(off_d + n)] = -g .* V_row
         end
 
-        x = A \ b
+        x = _solve_reported(A, b, solve_reports; mode = m, rtol, precision,
+            chief_points, chief_points_int)
         p_scat_modes[m + 1] = x[(off_p + 1):(off_p + n)]
         dpdn_scat_modes[m + 1] = x[(off_d + 1):(off_d + n)]
     end

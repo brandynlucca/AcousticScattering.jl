@@ -46,7 +46,9 @@ function _cylinder_shear_ops(mode::Integer, value::Real, deriv::Real, kT::Real, 
 end
 
 # Solid (regular-at-origin) cylinder: one basis per potential kind, value=1 at the outer radius.
-function _regular_solid_cylinder_basis_value_deriv(mode::Integer, x_outer::Real, n_elements::Integer)
+function _regular_solid_cylinder_basis_value_deriv(
+        mode::Integer, x_outer::Real, n_elements::Integer;
+        solve_reports = nothing)
     nodes = collect(range(0.0, x_outer; length = n_elements + 1))
     dl, d = _elastic_cylinder_radial_mode_matrix(nodes, mode)
     n_node = n_elements + 1
@@ -67,17 +69,20 @@ function _regular_solid_cylinder_basis_value_deriv(mode::Integer, x_outer::Real,
         A[1, 1] = 1.0
         rhs[1] = 0.0
     end
-    values = A \ rhs
+    values = _solve_reported(
+        A, rhs, solve_reports; mode, component = :radial_basis, n_elements)
     return values[end], _boundary_derivative(nodes, values, :outer)
 end
 
 # Shelled cylinder: outer-anchored / inner-anchored bases, each returned at both boundaries.
-function _cylinder_shell_basis_value_deriv(mode::Integer, x_inner::Real, x_outer::Real, n_elements::Integer)
+function _cylinder_shell_basis_value_deriv(
+        mode::Integer, x_inner::Real, x_outer::Real, n_elements::Integer;
+        solve_reports = nothing)
     nodes = collect(range(x_inner, x_outer; length = n_elements + 1))
     dl, d = _elastic_cylinder_radial_mode_matrix(nodes, mode)
     n_node = n_elements + 1
-    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0)
-    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0)
+    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0; solve_reports, mode)
+    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0; solve_reports, mode)
     return (
         outer_at_outer = (outer_vals[end], _boundary_derivative(nodes, outer_vals, :outer)),
         outer_at_inner = (outer_vals[1], _boundary_derivative(nodes, outer_vals, :inner)),
@@ -86,15 +91,36 @@ function _cylinder_shell_basis_value_deriv(mode::Integer, x_inner::Real, x_outer
     )
 end
 
-function _raw_bn_radial_fem(bc::SolidElastic, mode::Integer, k1a::Real, n_elements::Integer)
+function _cramer_coefficient(M, rhs, solve_reports, mode)
+    denominator = det(M)
+    numerator = copy(M)
+    numerator[:, 1] = rhs
+    coefficient = det(numerator) / denominator
+    if solve_reports !== nothing
+        values = zeros(eltype(M), size(M, 2))
+        values[1] = coefficient
+        for j in 2:length(values)
+            numerator .= M
+            numerator[:, j] = rhs
+            values[j] = det(numerator) / denominator
+        end
+        _record_solve!(
+            solve_reports, M, values, rhs; mode, component = :interface, method = :cramer)
+    end
+    return coefficient
+end
+
+function _raw_bn_radial_fem(
+        bc::SolidElastic, mode::Integer, k1a::Real, n_elements::Integer;
+        solve_reports = nothing)
     ω = Float64(k1a)
     ρ = bc.density_contrast
     cL, cT = bc.speed_longitudinal_contrast, bc.speed_transversal_contrast
     μ = ρ * cT^2
     kL, kT = ω / cL, ω / cT
 
-    vL, dL = _regular_solid_cylinder_basis_value_deriv(mode, kL, n_elements)
-    vT, dT = _regular_solid_cylinder_basis_value_deriv(mode, kT, n_elements)
+    vL, dL = _regular_solid_cylinder_basis_value_deriv(mode, kL, n_elements; solve_reports)
+    vT, dT = _regular_solid_cylinder_basis_value_deriv(mode, kT, n_elements; solve_reports)
     long = _cylinder_longitudinal_ops(mode, vL, dL, kL, ρ, ω, μ)
     shear = _cylinder_shear_ops(mode, vT, dT, kT, μ)
 
@@ -111,13 +137,12 @@ function _raw_bn_radial_fem(bc::SolidElastic, mode::Integer, k1a::Real, n_elemen
     M[3, 2] = long.shear
     M[3, 3] = shear.shear
 
-    M_num = copy(M)
-    M_num[:, 1] = rhs
-    return det(M_num) / det(M)
+    return _cramer_coefficient(M, rhs, solve_reports, mode)
 end
 
 function _raw_bn_radial_fem(
-        bc::Shelled{ElasticLayer, FluidInterior}, mode::Integer, k1a::Real, n_elements::Integer)
+        bc::Shelled{ElasticLayer, FluidInterior}, mode::Integer, k1a::Real, n_elements::Integer;
+        solve_reports = nothing)
     ω = Float64(k1a)
     ρ_shell = bc.material.density_contrast
     cL, cT = bc.material.speed_longitudinal_contrast, bc.material.speed_transversal_contrast
@@ -128,8 +153,8 @@ function _raw_bn_radial_fem(
     xLb, xTb, x3b = kL * b, kT * b, k3 * b
     ρ_int, c_int = bc.interior.density_contrast, bc.interior.soundspeed_contrast
 
-    long = _cylinder_shell_basis_value_deriv(mode, xLb, kL, n_elements)
-    shear = _cylinder_shell_basis_value_deriv(mode, xTb, kT, n_elements)
+    long = _cylinder_shell_basis_value_deriv(mode, xLb, kL, n_elements; solve_reports)
+    shear = _cylinder_shell_basis_value_deriv(mode, xTb, kT, n_elements; solve_reports)
 
     long_oo = _cylinder_longitudinal_ops(mode, long.outer_at_outer..., kL, ρ_shell, ω, μ)
     long_io = _cylinder_longitudinal_ops(mode, long.inner_at_outer..., kL, ρ_shell, ω, μ)
@@ -167,9 +192,7 @@ function _raw_bn_radial_fem(
     M[6, 2], M[6, 3], M[6, 4], M[6, 5] = long_oi.shear, long_ii.shear, shear_oi.shear,
     shear_ii.shear
 
-    M_num = copy(M)
-    M_num[:, 1] = rhs
-    return det(M_num) / det(M)
+    return _cramer_coefficient(M, rhs, solve_reports, mode)
 end
 
 """
@@ -189,7 +212,7 @@ function elastic_cylinder_radial_fem_target_strength(
         boundary::Union{SolidElastic, Shelled{ElasticLayer, FluidInterior}}, k::Real, radius::Real, length::Real;
         aspect_angle::Real = π / 2,
         n_elements::Integer = 320,
-        m_max::Integer = _default_mode_count(k * sin(aspect_angle) * radius))
+        m_max::Integer = _default_mode_count(k * sin(aspect_angle) * radius), solve_reports = nothing)
     k1a = k * sin(aspect_angle) * radius
     k1L = k * length
     x = k1L * cos(aspect_angle)
@@ -197,7 +220,7 @@ function elastic_cylinder_radial_fem_target_strength(
 
     total = zero(ComplexF64)
     for m in 0:m_max
-        raw = _raw_bn_radial_fem(boundary, m, k1a, n_elements)
+        raw = _raw_bn_radial_fem(boundary, m, k1a, n_elements; solve_reports)
         total += -neumann_factor(m) * (-1)^m * raw
     end
 

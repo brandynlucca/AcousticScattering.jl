@@ -9,25 +9,33 @@ abstract type AbstractShellInterior end
 "Material of the shell layer in a [`Shelled`](@ref) boundary condition."
 abstract type AbstractShellMaterial end
 
-"Rigid (fixed, immovable) sphere boundary condition."
+"""
+    Rigid()
+
+Rigid boundary with zero total normal velocity, for supported geometries and solvers.
+"""
 struct Rigid <: AbstractBoundaryCondition end
 
-"Pressure-release (soft) sphere boundary condition."
+"""
+    PressureRelease()
+
+Soft boundary with zero total acoustic pressure, for supported geometries and solvers.
+"""
 struct PressureRelease <: AbstractBoundaryCondition end
 
 """
     FluidFilled(density_contrast, soundspeed_contrast; coupling=:full)
 
-Fluid-filled sphere boundary condition (Anderson 1950). Also covers
-gas-filled spheres: the boundary-value problem is identical, only the
-material contrasts differ.
+Homogeneous fluid transmission boundary condition. The sphere modal solution follows
+Anderson (1950); other supported geometries use their corresponding solver. Gas-filled
+bodies use the same boundary conditions with different material contrasts.
 
 - `density_contrast`: g = ρ_interior / ρ_exterior
 - `soundspeed_contrast`: h = c_interior / c_exterior
 - `coupling`: for the spheroid modal series only (ignored for the sphere,
   which is diagonal exactly by symmetry, see sphere_modal.jl and
   spheroid_modal.jl). `:full` solves the complete off-diagonal boundary
-  coupling (Furusawa 1988 Eq. 4). `:diagonal` uses the cheaper, less
+  coupling (Furusawa 1988, Eq. 4). `:diagonal` uses the cheaper, less
   accurate closed-form approximation (Eq. 5) that ignores mode coupling
   between the interior and exterior angular functions, with accuracy
   degrading at higher `ka` and larger eccentricity.
@@ -82,11 +90,10 @@ end
 A *fluid* spherical shell layer (no shear waves, just an ordinary fluid layer with its own
 density/sound-speed, e.g. a swim bladder wall modeled as a fluid layer rather than solid tissue).
 `density_contrast` = ρ_shell/ρ_exterior, `soundspeed_contrast` = c_shell/c_exterior, both relative
-to the *exterior* medium (not to each other). Paired with [`VacuumInterior`](@ref) this is
-Jech et al. (2015)'s "fluid shell, pressure release interior" sphere (former `ShellSoft`); paired
-with [`FluidInterior`](@ref) it's their "fluid shell, fluid interior" sphere (former
-`ShellFluidFilled`, covering both gas-filled-shell and weakly-scattering-shell cases — same
-boundary-value problem, different contrasts). See [`Shelled`](@ref).
+to the *exterior* medium (not to each other). Pair with [`VacuumInterior`](@ref) for a
+pressure-release interior or [`FluidInterior`](@ref) for a fluid interior, including
+gas-filled and weakly scattering shells with different material contrasts. See [`Shelled`](@ref).
+These fluid-shell configurations are described by Jech et al. (2015).
 
 Derivation (vacuum interior): two fluid regions (exterior `r>a`, shell `b<r<a`), the shell's
 general solution `Cⱼₗ(k₂r) + Dyₗ(k₂r)` (both spherical Bessel kinds, since the shell doesn't
@@ -130,11 +137,11 @@ absolute density/soundspeed.
   shell's longitudinal and shear wave speeds, related to Lamé parameters `λ, G` and shell density
   `ρ_shell` by `c_L = √((λ+2G)/ρ_shell)`, `c_T = √(G/ρ_shell)`.
 
-Implements the Goodman & Stern (1962) boundary-matching determinant, with the inner-boundary terms
+Uses the Goodman & Stern (1962) boundary-matching determinant, with the inner-boundary terms
 (`a46`, `a56`) evaluated using the interior fluid's own wavenumber/density (not the exterior
 medium's), which is what radial-displacement and radial-stress continuity at the shell/interior-
 fluid interface actually require. Each mode's coefficient `b_m` is computed as a genuine complex
-determinant ratio `det(A_numerator)/det(A_denominator)`, preserving phase for the coherent modal
+determinant ratio `-det(A_numerator)/det(A_denominator)`, preserving phase for the coherent modal
 sum.
 
 Validated (see test/runtests.jl): the stiff/dense-shell limit recovers (to ~0.003 dB at realistic
@@ -145,35 +152,18 @@ converges slowly and becomes numerically delicate before fully resolving, the sa
 direct/unnormalized-radial-function fragility documented for the liquid-filled spheroid coupling
 in spheroid_modal.jl, not a separate concern.
 
-## `interior_coupling`: generalized vs. original (1962) inner boundary
+## Interior coupling
 
-Goodman & Stern's (1962) own paper states its two fluid media (exterior and interior) "are taken
-to be identical ideal fluids" (Sec. II). The published 6×6 determinant's inner-boundary column
-(`α₄₆ = jₗ(y)ρI/ρII`, `α₅₆ = y jₗ'(y)`, their Eqs. 7cc-7dd) is evaluated at `y = k(R-Δ)`, the
-*exterior* fluid's own wavenumber, and uses the *exterior*/shell density ratio, because interior ≡
-exterior was assumed from the outset. It is not a free choice in their formula as published. The
-generalization to a distinct interior fluid (interior wavenumber and density used in those same
-two terms instead) is a later modification, cited by name in Stanton (1990) ("Sound scattering by
-spherical and elongated shelled bodies", JASA 88, 1619-1633, Sec. I.A, referencing Poggio 1969 and
-Murphy et al. 1979): "generalized to the case of the inner and outer fluids being different by a
-simple modification of the two nonzero terms in the sixth column of each determinant". Stanton's
-own numerical results in that paper use the generalized determinants throughout.
+`interior_coupling` selects the material properties in the inner-boundary terms (`a46`, `a56`):
 
-`interior_coupling` selects which of these two forms the inner-boundary terms (`a46`, `a56`) use:
-- `:generalized` (default): the interior fluid's own `k3f`/density enter `a46`/`a56` (this
-  package's existing, already-validated behavior, matching Stanton 1990's generalized
-  determinants).
-- `:identical_fluid`: reproduces the original 1962 paper exactly. `a46`/`a56` are evaluated using
-  the *exterior* medium's wavenumber and density ratio at the inner radius, regardless of what the
-  enclosing [`Shelled`](@ref)'s [`FluidInterior`](@ref) contrasts are set to (those are ignored in
-  this mode, since the 1962 formula has no place for them, matching the paper's own restriction,
-  not an approximation of it).
+- `:generalized` (default): use the interior fluid's own wavenumber and density.
+- `:identical_fluid`: use the exterior fluid's wavenumber and density at the inner radius,
+  ignoring the enclosing [`Shelled`](@ref)'s [`FluidInterior`](@ref) contrasts.
 
-The two must agree exactly when the interior contrasts are both `1` (interior genuinely is the
-exterior fluid), a direct, checkable consistency test, validated in test/runtests.jl alongside a
-comparison at real interior/exterior contrast (air- and water-filled shells) quantifying how far
-the original, non-generalized formula departs from the physically-correct generalized one whenever
-the interior fluid actually differs from the exterior.
+Both forms agree when the interior density and sound-speed contrasts are `1`.
+Use `:generalized` when the interior and exterior fluids differ.
+Goodman & Stern (1962) assume identical interior and exterior fluids; Stanton (1990,
+section I.A) describes the generalized determinant for distinct fluids.
 """
 struct ElasticLayer <: AbstractShellMaterial
     density_contrast::Float64
@@ -205,12 +195,12 @@ swimbladder. Used as the outer layer of a [`LayeredMaterial`](@ref) (see [`Shell
 former `ViscoelasticShell`.
 
 - `soundspeed_exterior` [m/s]: the exterior medium's actual sound speed, needed only to recover
-  the angular frequency `ω = k·c1` for this layer's frequency-dependent complex wavenumbers
-  (Eqs. 6-7); everything else below is a contrast relative to the exterior medium, matching
+  the angular frequency `ω = k·c1` for this layer's frequency-dependent complex wavenumbers;
+  the material contrasts below are relative to the exterior medium, matching
   [`ElasticLayer`](@ref).
 - `density_contrast`, `soundspeed_contrast`: lossless reference density/compressional-speed
   contrasts, `ρ2/ρ1`, `c2/c1`.
-- `kinematic_viscosity_compressional` = `ξ2/ρ2` [m²/s] (`ξ2 = η2+4μ2/3`, Eq. 5's combined
+- `kinematic_viscosity_compressional` = `ξ2/ρ2` [m²/s] (`ξ2 = η2+4μ2/3`, the combined
   bulk+shear viscosity) and `kinematic_viscosity_shear` = `μ2/ρ2` [m²/s] (shear viscosity alone),
   both *kinematic* (already divided by this layer's density) so they combine with
   `soundspeed_contrast` and `ω` without needing the absolute density separately. Set both to `0.0`
@@ -357,17 +347,13 @@ medium, matching [`ElasticLayer`](@ref)'s convention:
 - `speed_longitudinal_contrast` = c_L / c_ext,
   `speed_transversal_contrast` = c_T / c_ext.
 
-Implements Hickling's (1962) resonance form (`sin η`, `cos η`) rather than
+Uses Hickling's (1962) resonance form (`sin η`, `cos η`) rather than
 a boundary-matrix determinant like [`ElasticLayer`](@ref)/[`Shelled`](@ref): there's no
-interior fluid, so it's a direct ratio of tangent terms. The classical
-expression `f_bs = |-2i f_j / (k a)| a/2` with
-`f_j = Σ (2m+1) Pₘ(cosθ) sin η (i cos η - sin η)` rearranges to
-`-i/k * Σ (2m+1) Pₘ(cosθ) Aₘ` with `Aₘ = sin η (i cos η - sin η)`, which
+interior fluid, so it's a direct ratio of tangent terms. For the package's `exp(-iωt)` time
+convention and outgoing first-kind Hankel waves, the amplitude is
+`-i/k * Σ (2m+1) Pₘ(cosθ) Aₘ` with `Aₘ = sin η (-i cos η - sin η)`, which
 maps exactly onto this package's existing `form_function`/`target_strength`
-convention (taking `abs()` is equivalent to
-`target_strength(f) = 20 log10(|f|)` at the end).
-
-Validated (see test/runtests.jl) against the very-high-contrast to `Rigid` limiting case.
+convention, with `target_strength(f) = 20 log10(|f|)`.
 """
 struct SolidElastic <: AbstractBoundaryCondition
     density_contrast::Float64
@@ -401,6 +387,10 @@ function _modal_coefficient(::PressureRelease, m::Integer, k::Real, a::Real)
 end
 
 function _modal_coefficient(bc::FluidFilled, m::Integer, k::Real, a::Real)
+    return _sphere_fluid_coefficients(bc, m, k, a).scattered
+end
+
+function _sphere_fluid_coefficients(bc::FluidFilled, m::Integer, k::Real, a::Real)
     ka = k * a
     ka_interior = ka / bc.soundspeed_contrast
     gh = bc.density_contrast * bc.soundspeed_contrast
@@ -409,66 +399,53 @@ function _modal_coefficient(bc::FluidFilled, m::Integer, k::Real, a::Real)
     jd_ext = jsd(m, ka)
     j_int = js(m, ka_interior)
     j_ext = js(m, ka)
-    y_ext = ys(m, ka)
-    yd_ext = ysd(m, ka)
-
-    ratio = jd_int / jd_ext
-    numerator = ratio * (y_ext / j_int) - gh * (yd_ext / jd_ext)
-    denominator = ratio * (j_ext / j_int) - gh
-    C = numerator / denominator
-
-    return -1 / (1 + im * C)
-end
-
-# `dc_ratio` is D/C, the shell's two-Bessel-kind solution ratio fixed by the inner surface condition.
-function _shell_outer_coefficient(
-        m::Integer, ka::Real, k2a::Real, gh_shell::Real, dc_ratio::Number)
-    Jb = js(m, k2a) + dc_ratio * ys(m, k2a)
-    Jbd = jsd(m, k2a) + dc_ratio * ysd(m, k2a)
-    ratio2 = Jbd / (gh_shell * Jb)
-
-    j_ext = js(m, ka)
-    jd_ext = jsd(m, ka)
     h_ext = hs(m, ka)
     hd_ext = hsd(m, ka)
-
-    return (ratio2 * j_ext - jd_ext) / (hd_ext - ratio2 * h_ext)
+    denominator = gh * j_int * hd_ext - h_ext * jd_int
+    scattered = (j_ext * jd_int - gh * j_int * jd_ext) / denominator
+    interior = gh * (j_ext * hd_ext - jd_ext * h_ext) / denominator
+    return (; scattered, interior)
 end
 
-function _modal_coefficient(bc::Shelled{FluidLayer, VacuumInterior}, m::Integer, k::Real, a::Real)
+function _sphere_interface_solution(matrix, rhs)
+    columns = maximum(abs, matrix; dims = 1)
+    scaled = matrix ./ columns
+    rows = maximum(abs, scaled; dims = 2)
+    return (scaled ./ rows \ (rhs ./ vec(rows))) ./ vec(columns)
+end
+
+function _modal_coefficient(
+        bc::Union{Shelled{FluidLayer, VacuumInterior},
+            Shelled{FluidLayer, FluidInterior}, Shelled{ElasticLayer, FluidInterior}},
+        m::Integer, k::Real, a::Real)
+    return _sphere_shell_coefficients(bc, m, k, a).scattered
+end
+
+function _sphere_shell_coefficients(bc::Shelled{FluidLayer}, m::Integer, k::Real, a::Real)
     ka = k * a
     k2a = ka / bc.material.soundspeed_contrast
     k2b = k2a * bc.radius_ratio
     gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
-
-    dc_ratio = -js(m, k2b) / ys(m, k2b)
-    return _shell_outer_coefficient(m, ka, k2a, gh_shell, dc_ratio)
-end
-
-function _modal_coefficient(bc::Shelled{FluidLayer, FluidInterior}, m::Integer, k::Real, a::Real)
-    ka = k * a
-    k2a = ka / bc.material.soundspeed_contrast
-    k2b = k2a * bc.radius_ratio
-    k3b = (ka / bc.interior.soundspeed_contrast) * bc.radius_ratio
-    gh_shell = bc.material.density_contrast * bc.material.soundspeed_contrast
-    gh_23 = (bc.interior.density_contrast * bc.interior.soundspeed_contrast) /
-            (bc.material.density_contrast * bc.material.soundspeed_contrast)
-
-    j3b = js(m, k3b)
-    jd3b = jsd(m, k3b)
-    ratio3 = jd3b / (j3b * gh_23)
-
-    j2b = js(m, k2b)
-    jd2b = jsd(m, k2b)
-    y2b = ys(m, k2b)
-    yd2b = ysd(m, k2b)
-    dc_ratio = (jd2b - ratio3 * j2b) / (ratio3 * y2b - yd2b)
-
-    return _shell_outer_coefficient(m, ka, k2a, gh_shell, dc_ratio)
+    n = bc.interior isa FluidInterior ? 4 : 3
+    matrix = zeros(ComplexF64, n, n)
+    rhs = zeros(ComplexF64, n)
+    matrix[1, 1:3] = [hs(m, ka), -js(m, k2a), -ys(m, k2a)]
+    matrix[2, 1:3] = [hsd(m, ka), -jsd(m, k2a) / gh_shell, -ysd(m, k2a) / gh_shell]
+    matrix[3, 2:3] = [js(m, k2b), ys(m, k2b)]
+    rhs[1:2] = [-js(m, ka), -jsd(m, ka)]
+    if bc.interior isa FluidInterior
+        k3b = ka * bc.radius_ratio / bc.interior.soundspeed_contrast
+        gh_int = bc.interior.density_contrast * bc.interior.soundspeed_contrast
+        matrix[3, 4] = -js(m, k3b)
+        matrix[4, 2:4] = [
+            jsd(m, k2b) / gh_shell, ysd(m, k2b) / gh_shell, -jsd(m, k3b) / gh_int]
+    end
+    x = _sphere_interface_solution(matrix, rhs)
+    return (; scattered = x[1], shell = (x[2], x[3]), interior = n == 4 ? x[4] : nothing)
 end
 
 # λ/(λ+2G) = 1 - 2β, 2G/(λ+2G) = 2β, where β = (c_T/c_L)²
-function _modal_coefficient(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer, k::Real, a::Real)
+function _sphere_shell_coefficients(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer, k::Real, a::Real)
     a_in = bc.radius_ratio * a
     ka1s = k * a
     kLs = (k / bc.material.speed_longitudinal_contrast) * a
@@ -549,10 +526,13 @@ function _modal_coefficient(bc::Shelled{ElasticLayer, FluidInterior}, m::Integer
     A_denominator = copy(A_numerator)
     A_denominator[1:2, 1] = [a11, a21]
 
-    return det(A_numerator) / det(A_denominator)
+    x = _sphere_interface_solution(A_denominator, -A_numerator[:, 1])
+    density = bc.material.interior_coupling === :generalized ?
+              bc.interior.density_contrast : 1.0
+    return (; scattered = x[1], interior = density * x[end])
 end
 
-# Hickling (1962) resonance form, see SolidElastic's docstring.
+# Resonance form, see SolidElastic's docstring.
 function _modal_coefficient(bc::SolidElastic, m::Integer, k::Real, a::Real)
     ka_sw = k * a
     ka_l = (k / bc.speed_longitudinal_contrast) * a
@@ -588,7 +568,7 @@ function _modal_coefficient(bc::SolidElastic, m::Integer, k::Real, a::Real)
     cos_eta = 1 / sqrt(1 + eta_tan^2)
     sin_eta = eta_tan * cos_eta
 
-    return sin_eta * (im * cos_eta - sin_eta)
+    return sin_eta * (-im * cos_eta - sin_eta)
 end
 
 """

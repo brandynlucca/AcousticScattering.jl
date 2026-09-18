@@ -46,7 +46,7 @@ end
 
 Triangulated through-thickness meridional cross-section mesh for the
 general shell FEM: a `Ferrite.Grid` spanning `n_t` layers from the inner to
-outer confocal-offset surface at `n_eta` meridional stations, plus the
+outer confocal surface at `n_eta` meridional stations, plus the
 outer/inner boundary curves' geometry (coordinates and outward normals)
 and the global node indices lying on each.
 """
@@ -69,42 +69,33 @@ end
     build_structured_shell_strip(geometry, n_eta, n_t; pole_offset=1e-3, eta_override=nothing)
 
 Structured triangular mesh of the shell's through-thickness meridional
-cross-section: `n_t` layers (inner to outer confocal-offset surface) at
+cross-section: `n_t` layers (inner to outer confocal surface) at
 `n_eta` meridional stations (`uniform_eta_grid`, or `eta_override` if
 given). Two triangles per structured quad cell.
 """
 function build_structured_shell_strip(
         geometry::ProlateShellGeometry, n_eta::Integer, n_t::Integer;
         pole_offset::Real = 1e-3, eta_override::Union{Nothing, AbstractVector{<:Real}} = nothing)
+    n_t >= 2 || throw(ArgumentError("n_t must be at least 2 to resolve shell thickness"))
     eta = eta_override === nothing ? uniform_eta_grid(n_eta; pole_offset = pole_offset) :
           collect(Float64, eta_override)
     n = length(eta)
     a = geometry.semimajor_length
     b = geometry.semiminor_length
 
-    z_mid = a .* eta
-    ρ_mid = b .* sqrt.(max.(0.0, 1.0 .- eta .^ 2))
+    # Use the outer semi-axes and confocal inner surface specified by ProlateShellGeometry.
+    sin_theta = sqrt.(max.(0.0, 1.0 .- eta .^ 2))
+    z_outer = a .* eta
+    ρ_outer = b .* sin_theta
+    z_inner = geometry.semimajor_inner .* eta
+    ρ_inner = geometry.semiminor_inner .* sin_theta
 
-    dz_deta = fill(a, n)
-    dρ_deta = -b .* eta ./ sqrt.(max.(1e-14, 1.0 .- eta .^ 2))
-    nz = dρ_deta
-    nρ = -dz_deta
-    norm_ = sqrt.(nz .^ 2 .+ nρ .^ 2)
-    nz = nz ./ norm_
-    nρ = nρ ./ norm_
-    if maximum(nρ) < 0.0
-        nz = -nz
-        nρ = -nρ
-    end
-
-    h2 = 0.5 * geometry.shell_thickness
-    z_outer = z_mid .+ h2 .* nz
-    ρ_outer = max.(1e-9, ρ_mid .+ h2 .* nρ)
-    z_inner = z_mid .- h2 .* nz
-    ρ_inner = max.(1e-9, ρ_mid .- h2 .* nρ)
-
-    onz, onρ = face_normals_from_curve(ρ_outer, z_outer; prefer_radial_positive = true)
-    inz, inρ = -onz, -onρ
+    onz, onρ = eta ./ a, sin_theta ./ b
+    outer_norm = hypot.(onz, onρ)
+    onz, onρ = onz ./ outer_norm, onρ ./ outer_norm
+    inz, inρ = -eta ./ geometry.semimajor_inner, -sin_theta ./ geometry.semiminor_inner
+    inner_norm = hypot.(inz, inρ)
+    inz, inρ = inz ./ inner_norm, inρ ./ inner_norm
 
     t_vals = range(0.0, 1.0; length = n_t)
     node_ids = Matrix{Int}(undef, n_t, n)
@@ -120,8 +111,7 @@ function build_structured_shell_strip(
         end
     end
 
-    # Ferrite requires counter-clockwise (positive-Jacobian) triangle vertex
-    # ordering
+    # Ferrite requires counter-clockwise triangle vertices for a positive Jacobian.
     ccw(a, b, c) = begin
         pa, pb, pc = nodes[a].x, nodes[b].x, nodes[c].x
         area2 = (pb[1] - pa[1]) * (pc[2] - pa[2]) - (pb[2] - pa[2]) * (pc[1] - pa[1])
@@ -154,9 +144,7 @@ prolate spheroid, but that limit is a genuine coordinate singularity of
 uses the sphere's own, much simpler parametrization directly instead of
 approaching the `a → b` limit numerically: `η = cos θ ∈ (-1, 1)`,
 `z = r η`, `ρ = r √(1-η²)` at any layer radius `r`, with an *exact*
-radially-outward normal at every layer (no finite-difference curve-normal
-estimate needed, unlike the general confocal-offset case, a sphere's
-normal is trivially radial at any offset radius). `outer_radius` is the
+radially-outward normal at every layer. `outer_radius` is the
 *outer* shell surface's radius (matching [`ProlateShellGeometry`](@ref)'s
 and [`ElasticLayer`](@ref)'s convention); the inner surface is at
 `outer_radius - thickness`.
@@ -164,6 +152,7 @@ and [`ElasticLayer`](@ref)'s convention); the inner surface is at
 function build_structured_spherical_shell(
         outer_radius::Real, thickness::Real, n_eta::Integer, n_t::Integer;
         pole_offset::Real = 1e-3, eta_override::Union{Nothing, AbstractVector{<:Real}} = nothing)
+    n_t >= 2 || throw(ArgumentError("n_t must be at least 2 to resolve shell thickness"))
     0 < thickness < outer_radius ||
         throw(ArgumentError("thickness must lie in (0, outer_radius)"))
     eta = eta_override === nothing ? uniform_eta_grid(n_eta; pole_offset = pole_offset) :
@@ -248,12 +237,12 @@ DOF indices, and the outer/inner boundary displacement-extraction (`B`) and
 pressure-load (`Q`) matrices, already restricted to the retained DOFs.
 """
 struct GeneralShellOperators
-    dynamic_matrix::Matrix{ComplexF64}
+    dynamic_matrix::SparseMatrixCSC{ComplexF64, Int}
     keep::Vector{Int}
-    B_out::Matrix{ComplexF64}
-    B_in::Matrix{ComplexF64}
-    Q_out::Matrix{ComplexF64}
-    Q_in::Matrix{ComplexF64}
+    B_out::SparseMatrixCSC{ComplexF64, Int}
+    B_in::SparseMatrixCSC{ComplexF64, Int}
+    Q_out::SparseMatrixCSC{ComplexF64, Int}
+    Q_in::SparseMatrixCSC{ComplexF64, Int}
 end
 
 """
@@ -263,10 +252,9 @@ Assemble Fourier-mode-`m`'s dynamic-stiffness matrix `K - ω²M` for the
 general (full through-thickness, solid-elasticity) shell FEM on `mesh`
 (see the module preamble for the strain-displacement relations), plus the
 boundary displacement-extraction and pressure-load coupling matrices on
-both the outer and inner confocal-offset surfaces. At `m = 0` the
+both the outer and inner confocal surfaces. At `m = 0` the
 circumferential displacement DOF decouples entirely and is dropped from
-the system (`keep` excludes it), matching the Python reference this was
-ported from.
+the system (`keep` excludes it).
 """
 function assemble_shell_modal_operators(mesh::GeneralShellMesh, m::Integer, omega::Real,
         rho_shell::Real, youngs_modulus::Real, poisson::Real)
@@ -280,8 +268,11 @@ function assemble_shell_modal_operators(mesh::GeneralShellMesh, m::Integer, omeg
     Ferrite.close!(dh)
     n = Ferrite.ndofs(dh)
 
-    K = zeros(ComplexF64, n, n)
-    M = zeros(ComplexF64, n, n)
+    n_entries = Ferrite.getncells(mesh.grid) * Ferrite.getnbasefunctions(cv)^2
+    rows = Vector{Int}(undef, n_entries)
+    columns = Vector{Int}(undef, n_entries)
+    values = Vector{ComplexF64}(undef, n_entries)
+    entry = 0
 
     for cellid in 1:Ferrite.getncells(mesh.grid)
         coords = Ferrite.getcoordinates(mesh.grid, cellid)
@@ -332,12 +323,14 @@ function assemble_shell_modal_operators(mesh::GeneralShellMesh, m::Integer, omeg
 
         for a in 1:nlocal, b in 1:nlocal
 
-            K[dofs[a], dofs[b]] += Ke[a, b]
-            M[dofs[a], dofs[b]] += Me[a, b]
+            entry += 1
+            rows[entry] = dofs[a]
+            columns[entry] = dofs[b]
+            values[entry] = Ke[a, b] - omega^2 * Me[a, b]
         end
     end
 
-    A_full = K .- omega^2 .* M
+    A_full = sparse(rows, columns, values, n, n)
     node_dofs = _node_to_dofs(dh, mesh.grid)
 
     keep = collect(1:n)
@@ -365,16 +358,14 @@ end
 """
 Boundary displacement-extraction matrix: row `j` picks out the (axial,
 radial) displacement DOFs at boundary node `boundary_ids[j]` and projects
-onto that node's outward normal, giving the normal displacement directly
-(no integration, evaluated pointwise at each boundary node, matching the
-Python reference).
+onto that node's outward normal, giving the normal displacement pointwise.
 """
 function build_boundary_displacement_matrix(
         n_state::Integer, node_dofs::AbstractVector{<:NTuple{3, Integer}},
         boundary_ids::AbstractVector{<:Integer},
         normal_z::AbstractVector{<:Real}, normal_ρ::AbstractVector{<:Real})
     n_bnd = length(boundary_ids)
-    B = zeros(ComplexF64, n_bnd, n_state)
+    B = spzeros(ComplexF64, n_bnd, n_state)
     for j in 1:n_bnd
         dof_z, dof_ρ, _ = node_dofs[boundary_ids[j]]
         B[j, dof_z] = normal_z[j]
@@ -396,7 +387,7 @@ function build_boundary_pressure_load_matrix(
         boundary_z::AbstractVector{<:Real}, boundary_ρ::AbstractVector{<:Real},
         normal_z::AbstractVector{<:Real}, normal_ρ::AbstractVector{<:Real})
     n_bnd = length(boundary_ids)
-    Q = zeros(ComplexF64, n_state, n_bnd)
+    Q = spzeros(ComplexF64, n_state, n_bnd)
     t_leg, w_leg = Ferrite.getpoints(Ferrite.QuadratureRule{Ferrite.RefLine}(3)),
     Ferrite.getweights(Ferrite.QuadratureRule{Ferrite.RefLine}(3))
     t_nodes = [0.5 * (t[1] + 1.0) for t in t_leg]

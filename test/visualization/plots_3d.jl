@@ -61,7 +61,7 @@ BLAS.set_num_threads(1)
         @test_throws ArgumentError plot(kirch_sol; kind = :surface_field)
     end
 
-    @testset "FEMSolution{_ScalarFEMData}: mesh works, surface_field errors naming the gap" begin
+    @testset "Acoustic radial FEM: mesh works, surface_field errors" begin
         fem_sol = AS.fem(sphere, AS.Rigid(), k)
         @test plot(fem_sol; kind = :mesh) isa Makie.FigureAxisPlot
         @test_throws ArgumentError plot(fem_sol; kind = :surface_field)

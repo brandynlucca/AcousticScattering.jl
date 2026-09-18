@@ -1,5 +1,5 @@
 # Kirchhoff (physical-optics) high-frequency baseline: single-highlight backscattering amplitude
-# f = Rc * sqrt(R1*R2) / 2 (MacLennan & Simmonds 2005 Eq. 6.7). KRM baselines not yet implemented.
+# f = Rc * sqrt(R1*R2) / 2. KRM baselines not yet implemented.
 
 using QuadGK: quadgk
 
@@ -50,13 +50,9 @@ sphere (`n̂·k̂ᵢ = cosθ`, `k̂ᵢ·r = a cosθ`, illuminated hemisphere
 `θ ∈ [0,π/2]`) via the substitution `u = cosθ`, an elementary
 `∫u e^{cu}du` integration by parts. The leading term dominates as
 `ka → ∞`, recovering the single-highlight asymptote (`|f| → a/2`,
-`TS → 20log10(a/2)`) exactly as before; the second term is the `O(1/ka)`
-finite-`ka` correction this package's earlier, purely-asymptotic
-implementation omitted entirely (it used the ka-independent leading term
-alone at every `ka`). Verified directly against Francis's published
-Kirchhoff benchmark values (Jech et al. 2015): matches to ≤0.01 dB at
-every frequency checked (`ka` from ~0.5 to ~5), including the low-`ka`
-regime where the old asymptotic-only formula was off by several dB.
+`TS → 20log10(a/2)`). The second term supplies the `O(1/ka)` finite-frequency correction.
+
+Physical-optics reference curves for the sphere are given by Jech et al. (2015).
 """
 function kirchhoff_target_strength(boundary::AbstractBoundaryCondition, k::Real, a::Real)
     x = k * a
@@ -170,12 +166,9 @@ over the cylinder's two illuminated pieces:
   grazing) and the cap term's removable `0/0` (`J₁(x)/x → 1/2`) reduces to
   the classic rigid-piston amplitude `f = Rc·ka²/2·e^{ikL}`.
 
-Validated directly against Francis's published oblique-incidence Kirchhoff
-benchmark values (Jech et al. 2015,
-`Jechetal_allmodels/Figure_07-08_Rigid-Cylinder_angle-038kHz.csv`): matches
-to ≤0.004 dB at every tabulated angle (8°-88°). The high-`ka` scaling
-discussion for the broadside limit (`|I| ~ O(1/√x)`, single-curvature
-cylinder vs. `ka`-independent sphere) is unchanged by this generalization.
+At broadside and high `ka`, `|I| ~ O(1/√x)` reflects the cylinder's single
+curvature; the sphere's corresponding leading amplitude is independent of `ka`.
+For oblique-incidence physical-optics reference curves, see Jech et al. (2015).
 """
 function kirchhoff_form_function(
         boundary::AbstractBoundaryCondition, k::Real, radius::Real, length::Real; angle::Real = π /
@@ -256,7 +249,7 @@ specular point's local curvature and needs `k·sqrt(R1·R2) ≫ 1` to be
 accurate).
 
 Derivation: parametrizing the surface by polar angle `θ` and azimuth `φ`
-(`r = (b sinθ cosφ, b sinθ sinφ, a cosθ)`) gives outward-normal-weighted
+(`r = (a cosθ, b sinθ cosφ, b sinθ sinφ)`) gives outward-normal-weighted
 area element `n̂·k̂ᵢ dS = [A(θ)cosφ + B(θ)]·b sinθ dθdφ` with `A = a sinθ
 sinβ`, `B = b cosθ cosβ` (the `sqrt(a²sin²θ+b²cos²θ)` normal/area factors
 cancel exactly between the two), and phase `k̂ᵢ·r = D(θ)cosφ + C(θ)` with
@@ -271,12 +264,7 @@ Bessel-series closed form (the two illumination/phase coefficient pairs
 it is evaluated numerically (`QuadGK`) rather than as a Bessel series, still *exact* physical optics, not an asymptote, just without an
 elementary antiderivative.
 
-Validated directly against Francis's published oblique-incidence Kirchhoff
-benchmark values (Jech et al. 2015,
-`Jechetal_allmodels/Figure_05_Rigid-Pspheroid_angle-038kHz.csv`): matches
-to ≤0.004 dB at every tabulated angle (0°-88°), a large improvement over
-the single-highlight asymptote, which is off by up to 1.5 dB at this
-body's moderate `k·sqrt(R1·R2) ~ O(1-10)`.
+For spheroid physical-optics reference curves, see Jech et al. (2015).
 """
 function kirchhoff_form_function(
         boundary::AbstractBoundaryCondition, k::Real, body::Spheroid; angle::Real = π /

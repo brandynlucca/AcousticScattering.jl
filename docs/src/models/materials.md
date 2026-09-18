@@ -15,8 +15,10 @@ oblate when it is smaller. Its surface satisfies
 ```
 
 `Cylinder(radius, length; radius_curvature = Inf, endcap_depth = 0.0)` uses meters.
-A finite curvature radius selects bending only in methods that implement it. Its positive
-cap-depth setting selects the smooth-cap MFS construction. It is not a universal shape option.
+A finite curvature radius selects bending in full BEM and the bent approximations.
+Positive cap depth gives smooth half-spheroid ends in full-3D meshes and straight-cylinder
+MFS. Axisymmetric BEM/FEM use flat caps. In full BEM, the bend is fixed in the `xy` plane
+with its midpoint tangent along `+x`; incidence and observation do not alter the geometry.
 
 `Shell(body, thickness)` specifies structural shell geometry. `Shelled` specifies the material
 and interior configuration.

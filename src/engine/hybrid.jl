@@ -1,4 +1,4 @@
-# Coupled shell/fluid axisymmetric scattering, links the axisymmetric BEM and the Hayek & Boisvert
+# Coupled shell/fluid axisymmetric scattering, links the axisymmetric BEM and the thin-
 # shell operator for axial (m = 0) incidence. Interior CBIE has the opposite sign from the exterior.
 
 """
@@ -12,12 +12,12 @@ spheroidal elastic shell (vacuum/air-backed, no interior fluid).
 Returns `(p_scat, dpdn_scat, ps, shell_state, shell)`: the BEM surface
 solution and panel geometry (for [`far_field`](@ref), exactly as
 [`solve_axial`](@ref) returns them) plus the shell displacement state
-`[u; w; β]` and the assembled [`ShellSystem`](@ref).
+`[u; w; l*β]` and the assembled [`ShellSystem`](@ref), where `l` is the midsurface half-length.
 """
 function solve_shell_fluid_coupled(
         geometry::ProlateShellGeometry, material::ElasticFEMLayer,
         exterior_density::Real, exterior_soundspeed::Real, frequency_hz::Real;
-        n_eta::Integer = 65, pole_offset::Real = 1e-4, rtol::Real = 1e-5)
+        n_eta::Integer = 65, pole_offset::Real = 1e-4, rtol::Real = 1e-5, solve_reports = nothing)
     shell = assemble_shell_system(
         geometry, material, frequency_hz; n_eta = n_eta, pole_offset = pole_offset)
     eta = shell.eta
@@ -34,7 +34,7 @@ function solve_shell_fluid_coupled(
     L_b2s = bem_to_shell_interpolation(n_shell)
 
     dpdn_inc = ComplexF64[im * k * p.nz * cis(k * p.zm) for p in ps]
-    z_shell = geometry.focal_radius * geometry.a_shape .* eta
+    z_shell = geometry.semimajor_length .* eta
     p_inc_shell = cis.(k .* z_shell)
 
     n_state = 3 * n_shell
@@ -51,11 +51,12 @@ function solve_shell_fluid_coupled(
     A[(n_bem + 1):(2n_bem), w_rows] = -exterior_density * omega^2 .* L_s2b
     b[(n_bem + 1):(2n_bem)] = -dpdn_inc
 
-    A[w_rows, 1:n_bem] = -Diagonal(shell.load_scale_q) * L_b2s
+    # q_w is outward force per area; external pressure is -p.
+    A[w_rows, 1:n_bem] = Diagonal(shell.load_scale_q) * L_b2s
     A[(2n_bem + 1):(2n_bem + n_state), (2n_bem + 1):(2n_bem + n_state)] = shell.dynamic_matrix
-    b[w_rows] = shell.load_scale_q .* p_inc_shell
+    b[w_rows] = -shell.load_scale_q .* p_inc_shell
 
-    x = A \ b
+    x = _solve_reported(A, b, solve_reports; mode = 0, n_eta, pole_offset, rtol)
     p_scat = x[1:n_bem]
     dpdn_scat = x[(n_bem + 1):(2n_bem)]
     shell_state = x[(2n_bem + 1):end]
@@ -77,13 +78,13 @@ Returns `(p_ext, dpdn_ext, ps_ext, p_int, dpdn_int, ps_int, shell_state, shell)`
 exterior and interior BEM surface solutions and panel geometry (the
 exterior pair usable with [`far_field`](@ref) exactly as
 [`solve_axial`](@ref)'s are) plus the shell displacement state
-`[u; w; β]` and the assembled [`ShellSystem`](@ref).
+`[u; w; l*β]` and the assembled [`ShellSystem`](@ref), where `l` is the midsurface half-length.
 """
 function solve_shell_fluid_filled_coupled(
         geometry::ProlateShellGeometry, material::ElasticFEMLayer,
         exterior_density::Real, exterior_soundspeed::Real,
         interior_density::Real, interior_soundspeed::Real, frequency_hz::Real;
-        n_eta::Integer = 65, pole_offset::Real = 1e-4, rtol::Real = 1e-5)
+        n_eta::Integer = 65, pole_offset::Real = 1e-4, rtol::Real = 1e-5, solve_reports = nothing)
     shell = assemble_shell_system(
         geometry, material, frequency_hz; n_eta = n_eta, pole_offset = pole_offset)
     eta = shell.eta
@@ -103,7 +104,7 @@ function solve_shell_fluid_filled_coupled(
     L_b2s = bem_to_shell_interpolation(n_shell)
 
     dpdn_inc = ComplexF64[im * k_ext * p.nz * cis(k_ext * p.zm) for p in ps_ext]
-    z_shell = geometry.focal_radius * geometry.a_shape .* eta
+    z_shell = geometry.semimajor_length .* eta
     p_inc_shell = cis.(k_ext .* z_shell)
 
     n_state = 3 * n_shell
@@ -126,7 +127,7 @@ function solve_shell_fluid_filled_coupled(
     A[rows, w_rows] = -exterior_density * omega^2 .* L_s2b
     b[rows] = -dpdn_inc
 
-    # Interior CBIE (opposite sign, see file header derivation)
+    # Interior CBIE uses the cavity's outward normal.
     rows = (2n_bem + 1):(3n_bem)
     A[rows, (off_pint + 1):(off_pint + n_bem)] = 0.5I + K_int
     A[rows, (off_dint + 1):(off_dint + n_bem)] = -V_int
@@ -136,13 +137,13 @@ function solve_shell_fluid_filled_coupled(
     A[rows, (off_dint + 1):(off_dint + n_bem)] = I_bem
     A[rows, w_rows] = -interior_density * omega^2 .* L_s2b
 
-    # Shell: net load = outer total pressure minus inner pressure
-    A[w_rows, (off_pext + 1):(off_pext + n_bem)] = -Diagonal(shell.load_scale_q) * L_b2s
-    A[w_rows, (off_pint + 1):(off_pint + n_bem)] = Diagonal(shell.load_scale_q) * L_b2s
+    # Outward shell load q_w = inner pressure - outer total pressure.
+    A[w_rows, (off_pext + 1):(off_pext + n_bem)] = Diagonal(shell.load_scale_q) * L_b2s
+    A[w_rows, (off_pint + 1):(off_pint + n_bem)] = -Diagonal(shell.load_scale_q) * L_b2s
     A[(off_state + 1):(off_state + n_state), (off_state + 1):(off_state + n_state)] = shell.dynamic_matrix
-    b[w_rows] = shell.load_scale_q .* p_inc_shell
+    b[w_rows] = -shell.load_scale_q .* p_inc_shell
 
-    x = A \ b
+    x = _solve_reported(A, b, solve_reports; mode = 0, n_eta, pole_offset, rtol)
     p_ext = x[(off_pext + 1):(off_pext + n_bem)]
     dpdn_ext = x[(off_dext + 1):(off_dext + n_bem)]
     p_int = x[(off_pint + 1):(off_pint + n_bem)]

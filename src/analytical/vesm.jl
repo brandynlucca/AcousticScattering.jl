@@ -1,4 +1,4 @@
-# Viscoelastic Scattering Model (VESM), Feuillade & Nero (1998), JASA 103(6), 3245-3255. Generalizes
+# Viscoelastic Scattering Model (VESM). Generalizes
 # `ElasticLayer` with a viscous flesh layer. Monopole (m=0) only, see `_modal_coefficient`'s `m >= 1` branch.
 # Boundary condition type is `Shelled{LayeredMaterial{ViscousLayer,ElasticLayer},FluidInterior}` (sphere_modal.jl).
 
@@ -14,7 +14,7 @@ function _vesm_solid_displacement_terms(kL::Number, r::Real)
     return x * jsd(0, x), x * ysd(0, x)
 end
 
-# Flesh's complex compressional wavenumber (Eq. 6) and β2 = kL2²/kT2² (Eq. 7), computed via the
+# Flesh's complex compressional wavenumber and β2 = kL2²/kT2², computed via the
 # direct closed form kT2² = iω/ν2 rather than sqrt-then-square, to keep the ν2 → 0 limit exact.
 function _vesm_flesh_wavenumbers(bc::_VESMShell, ω::Real)
     flesh = bc.material.outer
@@ -25,7 +25,7 @@ function _vesm_flesh_wavenumbers(bc::_VESMShell, ω::Real)
     return kL2, β2
 end
 
-# General-m (m >= 1) compressional-potential radial terms, Feuillade & Nero (1998) Eqs. 19-22.
+# General-m (m >= 1) compressional-potential radial terms.
 # Returns (stress_j, disp_j, tang_j, tangdisp_j, stress_y, disp_y, tang_y, tangdisp_y).
 function _vesm_compressional_terms(m::Integer, kL::Number, β::Number, r::Real)
     x = kL * r
@@ -173,7 +173,8 @@ function _modal_coefficient(bc::_VESMShell, m::Integer, k::Real, a::Real)
     A_denominator = copy(A_numerator)
     A_denominator[1:2, 1] = [a11, a21]
 
-    return det(A_numerator) / det(A_denominator)
+    # The replacement column contains the incident field, while the forcing is its negative.
+    return -det(A_numerator) / det(A_denominator)
 end
 
 """

@@ -38,7 +38,7 @@ end
 
 # Solves the ODE with Dirichlet data value_inner/value_outer at the two ends.
 function _solve_dirichlet_basis(dl::Vector{Float64}, d::Vector{Float64}, n_node::Integer,
-        value_inner::Real, value_outer::Real)
+        value_inner::Real, value_outer::Real; solve_reports = nothing, mode = nothing)
     y = zeros(Float64, n_node)
     y[1] = value_inner
     y[end] = value_outer
@@ -57,7 +57,8 @@ function _solve_dirichlet_basis(dl::Vector{Float64}, d::Vector{Float64}, n_node:
     rhs = zeros(Float64, ni)
     rhs[1] -= dl[1] * value_inner
     rhs[end] -= dl[end] * value_outer
-    interior = A \ rhs
+    interior = _solve_reported(A, rhs, solve_reports; mode, component = :radial_basis,
+        n_elements = n_node - 1, value_inner, value_outer)
     y[2:(end - 1)] .= interior
     return y
 end
@@ -115,7 +116,8 @@ end
 # For a solid (regular-at-origin) body: one basis function per potential kind, value=1 at the
 # outer radius, with the origin condition that keeps the solution regular there.
 function _regular_solid_basis_ops(
-        mode::Integer, x_outer::Real, n_elements::Integer, kind::Symbol, λ::Real, μ::Real)
+        mode::Integer, x_outer::Real, n_elements::Integer, kind::Symbol, λ::Real, μ::Real;
+        solve_reports = nothing)
     nodes = collect(range(0.0, x_outer; length = n_elements + 1))
     dl, d = _elastic_radial_mode_matrix(nodes, mode)
     n_node = n_elements + 1
@@ -136,17 +138,18 @@ function _regular_solid_basis_ops(
         A[1, 1] = 1.0
         rhs[1] = 0.0
     end
-    values = A \ rhs
+    values = _solve_reported(
+        A, rhs, solve_reports; mode, component = :radial_basis, kind, n_elements)
     deriv_outer = _boundary_derivative(nodes, values, :outer)
     ops = kind === :longitudinal ?
           _longitudinal_ops(mode, x_outer, values[end], deriv_outer, λ, μ) :
           _shear_ops(mode, x_outer, values[end], deriv_outer)
-    return ops
+    return (; ops, nodes, values)
 end
 
-# Raw modal scattering coefficient bₙ for a solid elastic sphere, mode `mode`, via the radial FEM above.
+# Retain the radial potentials and convert the interface coefficient to an outgoing Rayleigh wave.
 function _solid_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real,
-        density_contrast::Real, cL::Real, cT::Real, n_elements::Integer)
+        density_contrast::Real, cL::Real, cT::Real, n_elements::Integer; solve_reports = nothing)
     μ = density_contrast * cT^2
     λ = density_contrast * cL^2 - 2μ
     kL, kT = k / cL, k / cT
@@ -158,51 +161,63 @@ function _solid_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real,
     α11 = ρ_ratio * hs(mode, x1a)
     α21 = x1a * hsd(mode, x1a)
 
-    long_ops = _regular_solid_basis_ops(mode, xLa, n_elements, :longitudinal, λ, μ)
+    long = _regular_solid_basis_ops(
+        mode, xLa, n_elements, :longitudinal, λ, μ; solve_reports)
+    long_ops = long.ops
+    prefactor = (2mode + 1) * im^mode
 
     if mode == 0
         M = ComplexF64[α11 long_ops.stress; α21 long_ops.radial]
         r = ComplexF64[a1, a2]
-        return (M \ r)[1]
+        x = _solve_reported(M, r, solve_reports; mode, component = :interface)
+        return (; coefficient = -prefactor * x[1], order = 1,
+            elastic = (; radii = long.nodes ./ kL,
+                longitudinal = prefactor * x[2] .* long.values, shear = nothing),
+            interior = nothing)
     end
 
-    shear_ops = _regular_solid_basis_ops(mode, xTa, n_elements, :shear, λ, μ)
+    shear = _regular_solid_basis_ops(mode, xTa, n_elements, :shear, λ, μ; solve_reports)
+    shear_ops = shear.ops
     M = ComplexF64[α11 long_ops.stress shear_ops.stress
                    α21 long_ops.radial shear_ops.radial
                    0.0 long_ops.shear shear_ops.shear]
     r = ComplexF64[a1, a2, 0.0]
-    return (M \ r)[1]
+    x = _solve_reported(M, r, solve_reports; mode, component = :interface)
+    return (; coefficient = -prefactor * x[1], order = 1,
+        elastic = (; radii = long.nodes ./ kL,
+            longitudinal = prefactor * x[2] .* long.values,
+            shear = prefactor * x[3] .* shear.values), interior = nothing)
 end
 
 # Same idea as _regular_solid_basis_ops, but for a finite-thickness shell: needs TWO independent
 # basis functions (outer-anchored and inner-anchored), returned at both boundaries.
 function _shell_basis_ops(mode::Integer, x_inner::Real, x_outer::Real, n_elements::Integer,
-        kind::Symbol, λ::Real, μ::Real)
+        kind::Symbol, λ::Real, μ::Real; solve_reports = nothing)
     nodes = collect(range(x_inner, x_outer; length = n_elements + 1))
     dl, d = _elastic_radial_mode_matrix(nodes, mode)
     n_node = n_elements + 1
-    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0)
-    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0)
+    outer_vals = _solve_dirichlet_basis(dl, d, n_node, 0.0, 1.0; solve_reports, mode)
+    inner_vals = _solve_dirichlet_basis(dl, d, n_node, 1.0, 0.0; solve_reports, mode)
     d_outer_at_outer = _boundary_derivative(nodes, outer_vals, :outer)
     d_outer_at_inner = _boundary_derivative(nodes, outer_vals, :inner)
     d_inner_at_outer = _boundary_derivative(nodes, inner_vals, :outer)
     d_inner_at_inner = _boundary_derivative(nodes, inner_vals, :inner)
     opsfn = kind === :longitudinal ? (x, v, dv) -> _longitudinal_ops(mode, x, v, dv, λ, μ) :
             (x, v, dv) -> _shear_ops(mode, x, v, dv)
-    return (
+    return (;
         outer_at_outer = opsfn(x_outer, outer_vals[end], d_outer_at_outer),
         outer_at_inner = opsfn(x_inner, outer_vals[1], d_outer_at_inner),
         inner_at_outer = opsfn(x_outer, inner_vals[end], d_inner_at_outer),
-        inner_at_inner = opsfn(x_inner, inner_vals[1], d_inner_at_inner)
+        inner_at_inner = opsfn(x_inner, inner_vals[1], d_inner_at_inner),
+        nodes, outer_vals, inner_vals
     )
 end
 
-# Raw modal scattering coefficient bₙ for an elastic-shelled sphere via the shell radial FEM
-# above. Only `interior_coupling=:generalized` is implemented.
+# Elastic shell state with generalized fluid coupling at the inner interface.
 function _shelled_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real, b::Real,
         density_shell_contrast::Real, cL::Real, cT::Real,
         density_interior_contrast::Real, c_interior::Real,
-        n_elements::Integer)
+        n_elements::Integer; solve_reports = nothing)
     μ = density_shell_contrast * cT^2
     λ = density_shell_contrast * cL^2 - 2μ
     kL, kT = k / cL, k / cT
@@ -221,7 +236,8 @@ function _shelled_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real, b::Re
     a46 = ρ_int_over_shell * js(mode, k3b)
     a56 = k3b * jsd(mode, k3b)
 
-    long = _shell_basis_ops(mode, xLb, xLa, n_elements, :longitudinal, λ, μ)
+    long = _shell_basis_ops(mode, xLb, xLa, n_elements, :longitudinal, λ, μ; solve_reports)
+    prefactor = (2mode + 1) * im^mode
 
     if mode == 0
         M = ComplexF64[α11 long.outer_at_outer.stress long.inner_at_outer.stress 0.0
@@ -229,10 +245,17 @@ function _shelled_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real, b::Re
                        0.0 long.outer_at_inner.stress long.inner_at_inner.stress a46
                        0.0 long.outer_at_inner.radial long.inner_at_inner.radial a56]
         r = ComplexF64[a1, a2, 0.0, 0.0]
-        return (M \ r)[1]
+        x = _solve_reported(M, r, solve_reports; mode, component = :interface)
+        return (; coefficient = -prefactor * x[1], order = 1,
+            elastic = (; radii = long.nodes ./ kL,
+                longitudinal = prefactor .*
+                               (x[2] .* long.outer_vals .+ x[3] .* long.inner_vals),
+                shear = nothing),
+            interior = (; coefficient = -prefactor * density_interior_contrast * x[end],
+                wavenumber = k / c_interior, radius = b))
     end
 
-    shear = _shell_basis_ops(mode, xTb, xTa, n_elements, :shear, λ, μ)
+    shear = _shell_basis_ops(mode, xTb, xTa, n_elements, :shear, λ, μ; solve_reports)
     M = ComplexF64[α11 long.outer_at_outer.stress shear.outer_at_outer.stress long.inner_at_outer.stress shear.inner_at_outer.stress 0.0
                    α21 long.outer_at_outer.radial shear.outer_at_outer.radial long.inner_at_outer.radial shear.inner_at_outer.radial 0.0
                    0.0 long.outer_at_outer.shear shear.outer_at_outer.shear long.inner_at_outer.shear shear.inner_at_outer.shear 0.0
@@ -240,7 +263,14 @@ function _shelled_elastic_radial_fem_mode(mode::Integer, k::Real, a::Real, b::Re
                    0.0 long.outer_at_inner.radial shear.outer_at_inner.radial long.inner_at_inner.radial shear.inner_at_inner.radial a56
                    0.0 long.outer_at_inner.shear shear.outer_at_inner.shear long.inner_at_inner.shear shear.inner_at_inner.shear 0.0]
     r = ComplexF64[a1, a2, 0.0, 0.0, 0.0, 0.0]
-    return (M \ r)[1]
+    x = _solve_reported(M, r, solve_reports; mode, component = :interface)
+    return (; coefficient = -prefactor * x[1], order = 1,
+        elastic = (; radii = long.nodes ./ kL,
+            longitudinal = prefactor .*
+                           (x[2] .* long.outer_vals .+ x[4] .* long.inner_vals),
+            shear = prefactor .* (x[3] .* shear.outer_vals .+ x[5] .* shear.inner_vals)),
+        interior = (; coefficient = -prefactor * density_interior_contrast * x[end],
+            wavenumber = k / c_interior, radius = b))
 end
 
 """
@@ -255,21 +285,23 @@ controls the 1D radial mesh resolution within the shell (shared by every
 mode).
 """
 function elastic_shell_sphere_radial_fem_target_strength(k::Real, a::Real;
+        kwargs...)
+    return target_strength(_radial_fem_amplitude(
+        _elastic_shell_sphere_radial_fem_modes(k, a; kwargs...), k))
+end
+
+function _elastic_shell_sphere_radial_fem_modes(k::Real, a::Real;
         density_shell_contrast::Real, speed_longitudinal_contrast::Real,
         speed_transversal_contrast::Real, radius_ratio::Real,
         density_interior_contrast::Real, soundspeed_interior_contrast::Real,
         n_elements::Integer = 320,
-        m_max::Integer = _default_mode_count(k * a))
+        m_max::Integer = _default_mode_count(k * a), solve_reports = nothing)
     b = radius_ratio * a
-    total = zero(ComplexF64)
-    for m in 0:m_max
-        bm = _shelled_elastic_radial_fem_mode(
-            m, k, a, b, density_shell_contrast, speed_longitudinal_contrast,
-            speed_transversal_contrast, density_interior_contrast, soundspeed_interior_contrast, n_elements)
-        total += (2m + 1) * legendre_p(m, -1.0) * bm
-    end
-    f = -im / k * total
-    return target_strength(f)
+    return NamedTuple[_shelled_elastic_radial_fem_mode(
+                          m, k, a, b, density_shell_contrast, speed_longitudinal_contrast,
+                          speed_transversal_contrast, density_interior_contrast,
+                          soundspeed_interior_contrast, n_elements;
+                          solve_reports) for m in 0:m_max]
 end
 
 """
@@ -285,17 +317,18 @@ this, rather than a genuine 2D meridian FEM, is used here. `n_elements`
 controls the 1D radial mesh resolution (shared by every mode).
 """
 function solid_elastic_sphere_radial_fem_target_strength(k::Real, a::Real;
+        kwargs...)
+    return target_strength(_radial_fem_amplitude(
+        _solid_elastic_sphere_radial_fem_modes(k, a; kwargs...), k))
+end
+
+function _solid_elastic_sphere_radial_fem_modes(k::Real, a::Real;
         density_contrast::Real, speed_longitudinal_contrast::Real,
         speed_transversal_contrast::Real,
         n_elements::Integer = 320,
-        m_max::Integer = _default_mode_count(k * a))
-    total = zero(ComplexF64)
-    for m in 0:m_max
-        bm = _solid_elastic_radial_fem_mode(
-            m, k, a, density_contrast, speed_longitudinal_contrast,
-            speed_transversal_contrast, n_elements)
-        total += (2m + 1) * legendre_p(m, -1.0) * bm
-    end
-    f = -im / k * total
-    return target_strength(f)
+        m_max::Integer = _default_mode_count(k * a), solve_reports = nothing)
+    return NamedTuple[_solid_elastic_radial_fem_mode(
+                          m, k, a, density_contrast, speed_longitudinal_contrast,
+                          speed_transversal_contrast, n_elements; solve_reports)
+                      for m in 0:m_max]
 end

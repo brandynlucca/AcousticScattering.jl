@@ -42,7 +42,7 @@ scattered field and outer-mesh panel geometry, usable with
 """
 function solve_axial(boundary::Shelled{FluidLayer, FluidInterior}, k::Real,
         mesh_outer::MeridianMesh, mesh_inner::MeridianMesh;
-        rtol::Real = 1e-6)
+        rtol::Real = 1e-6, solve_reports = nothing)
     k2 = k / boundary.material.soundspeed_contrast
     k3 = k / boundary.interior.soundspeed_contrast
     g_shell = boundary.material.density_contrast
@@ -115,7 +115,7 @@ function solve_axial(boundary::Shelled{FluidLayer, FluidInterior}, k::Real,
     A[rows, (off_dsi + 1):(off_dsi + ni)] = Ii ./ g_shell
     A[rows, (off_dint + 1):(off_dint + ni)] = -Ii ./ g_int
 
-    x = A \ b
+    x = _solve_reported(A, b, solve_reports; mode = 0, rtol)
     p_scat = x[(off_pe + 1):(off_pe + no)]
     dpdn_scat = x[(off_de + 1):(off_de + no)]
     return p_scat, dpdn_scat, ps_o
@@ -133,7 +133,7 @@ unknown there is the shell's own inner-surface `∂p/∂n`.
 """
 function solve_axial(
         boundary::Shelled{FluidLayer, VacuumInterior}, k::Real, mesh_outer::MeridianMesh, mesh_inner::MeridianMesh;
-        rtol::Real = 1e-6)
+        rtol::Real = 1e-6, solve_reports = nothing)
     k2 = k / boundary.material.soundspeed_contrast
     g_shell = boundary.material.density_contrast
 
@@ -183,7 +183,7 @@ function solve_axial(
     A[rows, (off_dso + 1):(off_dso + no)] = -Io ./ g_shell
     b[rows] = -dpdn_inc
 
-    x = A \ b
+    x = _solve_reported(A, b, solve_reports; mode = 0, rtol)
     p_scat = x[(off_pe + 1):(off_pe + no)]
     dpdn_scat = x[(off_de + 1):(off_de + no)]
     return p_scat, dpdn_scat, ps_o
