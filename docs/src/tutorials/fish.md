@@ -15,7 +15,7 @@ All media are homogeneous, lossless fluids; the bladder wall has no elastic stif
 
 ## Construct and solve
 
-```@example fish
+```julia
 using AcousticScattering
 using CairoMakie: plot, save
 
@@ -34,6 +34,10 @@ solution = bem(surfaces, materials, k; parents=[0,1], incidence_angle=pi/2)
 target_strength(solution)
 ```
 
+```
+-37.88780582080883
+```
+
 Region 0 is exterior water, region 1 flesh and region 2 gas. `parents=[0,1]` places
 flesh in water and gas in flesh. All material contrasts refer to exterior water.
 Incidence is along `+y`, broadside to the long `x` axis; `z` measures height/depth.
@@ -44,14 +48,13 @@ Physical edge sizes depend on stretching. `qorder` controls quadrature independe
 
 ## View geometry and pressure
 
-```@example fish
+```julia
 geometry = plot(solution; kind=:mesh,
     wireframe_interfaces=[1], interface_colors=[(:steelblue,0.5), :orange],
     interface_labels=["Flesh / water", "Gas / flesh"])
 pressure = plot(solution; kind=:surface_field, interfaces=[2])
 save("fish_geometry.png", geometry)
 save("fish_pressure.png", pressure)
-nothing # hide
 ```
 
 ![Complete translucent flesh mesh surrounding the displaced bladder.](fish_geometry.png)
@@ -73,19 +76,18 @@ in exterior water, preserving its position, material, incidence and phase origin
 The coherent sum adds the isolated **complex amplitudes**, omitting their mutual
 interactions. Adding target strengths in dB would lose phase.
 
-```@example fish
+```julia
 compare(k; beta=pi/2) = components(
     bem(surfaces, materials, k; parents=[0,1], incidence_angle=beta);
     labels=["flesh", "bladder"])
 
-spectrum = frequency_sweep(compare, [1500.0,2250.0,3000.0], sound_speed)
-aspect = incidence_angle_sweep(surfaces, materials, k, deg2rad.([60,90,120]);
+spectrum = frequency_sweep(compare, [1500.0,2250.0], sound_speed)
+aspect = incidence_angle_sweep(surfaces, materials, k, deg2rad.([60,90]);
     parents=[0,1], components=true, labels=["flesh", "bladder"])
 pattern = bistatic_sweep(components(solution; labels=["flesh", "bladder"]),
     range(0,2pi; length=121))
 comparison = plot(spectrum, aspect, pattern)
 save("fish_comparison.png", comparison)
-nothing # hide
 ```
 
 ![Coupled and isolated strengths and phases over frequency, incidence and observation.](fish_comparison.png)
@@ -113,9 +115,13 @@ Use `angle(a/b)` for a phase difference between amplitudes.
 For the 500 Hz gas-inclusion case, check the transmission solution with independent
 mesh and quadrature refinements:
 
-```@example fish
-low = bem(fish_surfaces(), materials, 2pi * 500 / sound_speed; parents = [0, 1])
+```julia
+low = bem(surfaces, materials, 2pi * 500 / sound_speed; parents = [0, 1])
 target_strength(low)
+```
+
+```
+-33.41997878290374
 ```
 
 The default Müller formulation combines pressure and normal-derivative equations.
@@ -124,18 +130,22 @@ equations can have fictitious eigenfrequencies. A successful check at one freque
 does not establish accuracy through resonance. See [Boundary methods](@ref boundary-theory)
 for formulation choices.
 
-Three frequency samples do not resolve the bladder's low-frequency resonance.
+Two frequency samples do not resolve the bladder's low-frequency resonance.
 A resonance study needs its own frequency sampling and independent mesh/quadrature
 refinement. The settings above establish neither resonance accuracy nor a bound at
 all observation angles.
 
 For example, compare a finer mesh at the same frequency and incidence:
 
-```@example fish
-refined = bem(fish_surfaces(; resolution=0.36), materials, k; parents=[0,1])
+```julia
+refined = bem(fish_surfaces(; resolution=0.38), materials, k; parents=[0,1])
 a, b = scattering_amplitude(solution), scattering_amplitude(refined)
 (; change_db=abs(target_strength(a)-target_strength(b)),
     relative_amplitude_change=abs(a-b)/abs(b))
+```
+
+```
+(change_db = 0.004457772914733482, relative_amplitude_change = 0.0005185601692003247)
 ```
 
 Repeat with `fish_surfaces(; qorder=7)` to refine quadrature independently, and at

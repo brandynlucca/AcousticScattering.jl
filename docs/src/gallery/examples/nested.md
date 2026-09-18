@@ -2,7 +2,7 @@
 
 A complete translucent outer mesh reveals an offset gas-filled interior. The long axis is x, width is y, and height is z. These are illustrative shapes and visualization meshes.
 
-```@example gallery_nested
+```julia
 using AcousticScattering
 using CairoMakie: plot, save
 
@@ -18,7 +18,6 @@ fig = plot(solution; kind=:mesh, wireframe_interfaces=[1],
     figure=(size=(900, 560), figure_padding=(70, 20, 20, 20)),
     axis=(xlabel="x (m)", ylabel="y (m)", zlabel="z (m)"))
 save("nested.png", fig)
-nothing # hide
 ```
 
 ![Complete outer mesh surrounding an offset gas cavity.](nested.png)
@@ -30,11 +29,10 @@ Use `target_strength(solution)` for the coupled response. The [fish tutorial](@r
 Color the complete outer surface by total pressure magnitude, normalized by incident amplitude.
 This includes the gas cavity's contribution to the coupled field.
 
-```@example gallery_nested
+```julia
 fig = plot(solution; kind=:surface_field, interfaces=[1], field=:pressure_magnitude,
     colormap=:viridis, figure=(size=(900, 560), figure_padding=(70, 20, 20, 20)))
 save("nested_pressure.png", fig)
-nothing # hide
 ```
 
 ![Total pressure magnitude on the outer surface of the coupled body.](nested_pressure.png)
