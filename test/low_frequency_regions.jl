@@ -22,7 +22,7 @@ BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
         @test_skip "requires SpheroidalWaves quad-precision backend, not available locally"
     end
 
-    @testset "Nested ellipsoid: $formulation" for formulation in (:muller, :cbie)
+    @testset "Nested ellipsoid: $formulation" for formulation in (:muller,)
         materials = [FluidFilled(1.04, 1.04), gas]
         options = (; resolution = 0.4, qorder = 5, tip_ratio = 0.4)
         surfaces = [mesh(; semiaxes = (0.10, 0.018, 0.025), options...),

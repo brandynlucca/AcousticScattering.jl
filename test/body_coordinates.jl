@@ -11,7 +11,7 @@ BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
     @test AS._bem3d_incidence_direction(pi/2, pi/2) ≈ [0, 0, 1] atol=1e-15
     for body in (Spheroid(0.06, 0.02), Cylinder(0.02, 0.12; endcap_depth = 0.02))
         for method in (:axisymmetric, :full)
-            surface = mesh(body; method, resolution = method === :full ? 0.3 : 40)
+            surface = mesh(body; method, resolution = method === :full ? 0.05 : 40)
             points = if method === :full
                 AS.coordinates(surface)
             else

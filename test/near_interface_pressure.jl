@@ -32,8 +32,8 @@ end
                       (; compression = (method = :hmatrix, tol = 1e-7),
                 gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
             solution = bem(body, boundary, k; method = :full,
-                meshsize = boundary isa Rigid ? 0.3 : 0.35,
-                mesh_order = 3, qorder = 5, incidence_angle = beta, incidence_azimuth = 0.4,
+                meshsize = boundary isa Rigid ? 0.25 : 0.3,
+                mesh_order = 3, qorder = 7, incidence_angle = beta, incidence_azimuth = 0.4,
                 options...)
             compare_near_pressure(pressure(solution, points; field = :scattered),
                 pressure(reference, near_reference_points(points, beta, 0.4); field = :scattered))
@@ -60,7 +60,7 @@ end
     peaks, references = Float64[], Float64[]
     for k in (0.0137, 0.0138, 0.0139)
         reference = modal(body, gas, k; m_max = 8)
-        solution = bem(body, gas, k; method = :full, meshsize = 0.3,
+        solution = bem(body, gas, k; method = :full, meshsize = 0.22,
             mesh_order = 3, qorder = 5, incidence_angle = beta, incidence_azimuth = alpha,
             condition_limit = 0)
         @testset "k=$k" begin

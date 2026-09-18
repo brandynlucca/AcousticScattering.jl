@@ -15,8 +15,8 @@ end
     body = Cylinder(0.5, 1.0; endcap_depth = 0.5)
     points = [(1.0, 0.0, 0.0), (1+1e-8, 0.0, 0.0), (1.2, 0.0, 0.0),
         (0.0, 0.3, 0.4), (0.0, 0.3*(1+1e-8), 0.4*(1+1e-8)), (0.3, 0.36, 0.48)]
-    surface = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 4)
-    sources = mesh(body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 1)
+    surface = mesh(body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 4)
+    sources = mesh(body; method = :full, resolution = 0.2, mesh_order = 3, qorder = 1)
     for boundary in (Rigid(), FluidFilled(1.2, 1.1))
         reference = mfs(body, boundary, 0.5; n = 256, oversampling = 2, offset = 0.12,
             incidence_angle = pi/3, m_max = 6, condition_limit = 0)
@@ -24,7 +24,7 @@ end
         options = boundary isa FluidFilled ? (; condition_limit = 0) :
                   (; compression = (method = :hmatrix, tol = 1e-7),
             gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
-        h = boundary isa FluidFilled ? 0.25 : 0.28
+        h = boundary isa FluidFilled ? 0.17 : 0.2
         solution = bem(body, boundary, 0.5; method = :full, meshsize = h, mesh_order = 3,
             qorder = 5, incidence_angle = pi/3, options...)
         @testset "$(typeof(boundary))" begin
