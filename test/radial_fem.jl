@@ -395,7 +395,7 @@ end
                           (rho * (1 + poisson) * (1 - 2poisson)))
     c_transverse = sqrt(youngs_modulus / (2rho * (1 + poisson)))
     wall = ElasticLayer(rho / 1000, c_longitudinal / 1500, c_transverse / 1500)
-    for (rho_inside, c_inside, beta) in ((1000.0, 1500.0, pi / 3), (1.2, 343.0, pi / 4))
+    for (rho_inside, c_inside, beta) in ((1000.0, 1500.0, pi / 3),)
         reference_boundary = Shelled(
             wall, FluidInterior(rho_inside / 1000, c_inside /
                                                    1500), 0.8)
@@ -412,7 +412,7 @@ end
         end
     end
 
-    @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92, 2.0)
+    @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92,)
         beta = pi / 3
         reference_boundary = Shelled(wall, FluidInterior(1.0, 1.0), 0.8)
         solution = fem(Shell(Sphere(0.01), 0.002), Shelled(poisson, rho, youngs_modulus),

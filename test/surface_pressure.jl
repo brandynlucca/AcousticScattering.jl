@@ -131,8 +131,8 @@ end
         grid = rigid_surface
         solution = bem(
             grid, boundary, 0.5; incidence_angle = pi/3, incidence_azimuth = 0.4,
-            compression = (method = :hmatrix, tol = 1e-7),
-            gmres_kwargs = (; reltol = 1e-9, restart = 150, maxiter = 600))
+            compression = (method = :none,),
+            gmres_kwargs = (; reltol = 1e-9, restart = 400, maxiter = 2400))
         reference = mfs(surface, boundary, 0.5; source_mesh = sources, offset = 0.2,
             incidence_angle = pi/3, incidence_azimuth = 0.4, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)

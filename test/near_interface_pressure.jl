@@ -29,8 +29,8 @@ end
             compare_near_pressure(pressure(solution, points; field = :scattered),
                 pressure(reference, near_reference_points(points, beta, 0.0); field = :scattered))
             options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                      (; compression = (method = :hmatrix, tol = 1e-7),
-                gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
+                      (; compression = (method = :none,),
+                gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))
             solution = bem(body, boundary, k; method = :full,
                 meshsize = boundary isa Rigid ? 0.25 : 0.3,
                 mesh_order = 3, qorder = 7, incidence_angle = beta, incidence_azimuth = 0.4,

@@ -173,14 +173,13 @@ end
     end
 
     @testset "geometry preservation: every element sits on the sphere's own surface" begin
-        for (rho, z) in AS.coordinates(m)
-            @test hypot(rho, z) ≈ a atol = 1e-3 * a
-        end
+        @test all(((rho, z),) -> isapprox(hypot(rho, z), a; atol = 1e-3 * a),
+            AS.coordinates(m))
     end
 
     @testset "orientation: outward normal has positive radial component (convex body about the origin)" begin
-        for ((rho, z), (nrho, nz)) in zip(AS.coordinates(m), AS.normals(m))
-            @test nrho * rho + nz * z > 0
+        @test all(zip(AS.coordinates(m), AS.normals(m))) do ((rho, z), (nrho, nz))
+            nrho * rho + nz * z > 0
         end
     end
 
@@ -188,9 +187,8 @@ end
         a2, b2 = 0.05, 0.02
         spheroid = AS.Spheroid(a2, b2)
         m2 = AS.mesh(spheroid; resolution = 30)
-        for (rho, z) in AS.coordinates(m2)
-            @test (rho / b2)^2 + (z / a2)^2 ≈ 1.0 atol = 1e-2
-        end
+        @test all(((rho, z),) -> isapprox((rho / b2)^2 + (z / a2)^2, 1.0; atol = 1e-2),
+            AS.coordinates(m2))
     end
 
     @testset "full 3D mesh element counts and geometry" begin
@@ -201,9 +199,7 @@ end
         # Gmsh's triangulated quadrature nodes approximate the sphere, they don't sit exactly on
         # it — a coarse mesh at this resolution deviates from `a` by ~1-2%, not the 0.1% the
         # axisymmetric meridian mesh above achieves, so this tolerance is deliberately looser.
-        for c in AS.coordinates(m3)
-            @test hypot(c...) ≈ a atol = 0.03 * a
-        end
+        @test all(c -> isapprox(hypot(c...), a; atol = 0.03 * a), AS.coordinates(m3))
     end
 
     # Round-trip mesh I/O is genuinely untestable, not merely unwritten: `src/ecosystem/mesh_io.jl`

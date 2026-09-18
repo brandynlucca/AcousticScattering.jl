@@ -22,8 +22,8 @@ end
             incidence_angle = pi/3, m_max = 6, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)
         options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                  (; compression = (method = :hmatrix, tol = 1e-7),
-            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
+                  (; compression = (method = :none,),
+            gmres_kwargs = (reltol = 1e-9, restart = 400, maxiter = 2400))
         h = boundary isa FluidFilled ? 0.17 : 0.2
         solution = bem(body, boundary, 0.5; method = :full, meshsize = h, mesh_order = 3,
             qorder = 5, incidence_angle = pi/3, options...)
