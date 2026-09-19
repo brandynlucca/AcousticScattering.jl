@@ -13,8 +13,9 @@ const TEST_GROUP_SPEC = get(ENV, "GROUP", isempty(ARGS) ? "All" : only(ARGS))
 const REQUESTED_GROUPS = Set(split(TEST_GROUP_SPEC, ','))
 all(g -> g in ("All", "Core", TEST_GROUPS...), REQUESTED_GROUPS) ||
     throw(ArgumentError("Unknown test group in: $TEST_GROUP_SPEC. Choose All, Core, or a comma-separated list from: $(join(TEST_GROUPS, ", "))."))
-_wants(name; core = true) =
+function _wants(name; core = true)
     any(g -> g == "All" || (core && g == "Core") || g == name, REQUESTED_GROUPS)
+end
 
 if _wants("Analytical")
     @time @safetestset "Analytical" include("analytical.jl")
