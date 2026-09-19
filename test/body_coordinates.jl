@@ -5,7 +5,7 @@ using Test
 const AS = AcousticScattering
 BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
 
-@testset "Body coordinates and directions" begin
+@time @testset "Body coordinates and directions" begin
     @test AS._bem3d_incidence_direction(0.0, 0.0) ≈ [1, 0, 0]
     @test AS._bem3d_incidence_direction(pi/2, 0.0) ≈ [0, 1, 0] atol=1e-15
     @test AS._bem3d_incidence_direction(pi/2, pi/2) ≈ [0, 0, 1] atol=1e-15
@@ -27,7 +27,7 @@ BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
     end
 end
 
-@testset "Rotated geometry preserves complex amplitudes" begin
+@time @testset "Rotated geometry preserves complex amplitudes" begin
     original = mesh(; semiaxes = (0.06, 0.018, 0.025), resolution = 0.8, qorder = 5, tip_ratio = 0.4)
     angle = 0.37
     rotation = [cos(angle) -sin(angle) 0; sin(angle) cos(angle) 0; 0 0 1]

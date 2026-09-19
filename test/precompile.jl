@@ -35,7 +35,7 @@ using PrecompileTools: workload_enabled
 using Test: @test, @testset
 
 enabled = parse(Bool, only(ARGS))
-@testset "Installed package (workload enabled: $enabled)" begin
+@time @testset "Installed package (workload enabled: $enabled)" begin
     @test workload_enabled(AcousticScattering) == enabled
     wavenumber = 2pi * 38000.0 / 1477.4
     @test isapprox(target_strength(modal(Sphere(0.01), Rigid(), wavenumber)),

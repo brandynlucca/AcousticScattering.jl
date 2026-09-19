@@ -7,7 +7,7 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@testset "meridian FEM (sphere, 2D r-θ mesh)" begin
+@time @testset "meridian FEM (sphere, 2D r-θ mesh)" begin
     a = 0.01
     c_water = 1477.4
     freq = 38000.0
@@ -30,7 +30,7 @@ BLAS.set_num_threads(1)
     @test ts_2d_pr ≈ ts_modal_pr atol = 0.05
 end
 
-@testset "Spheroid meridian FEM (Rigid, independent benchmark)" begin
+@time @testset "Spheroid meridian FEM (Rigid, independent benchmark)" begin
     a_major, b_minor = 0.07, 0.01
     c_water = 1477.3
     k = 2pi * 38000.0 / c_water
@@ -44,6 +44,6 @@ end
     @test ts_fem ≈ ts_benchmark atol = 0.1
 end
 
-@testset "Spheroid meridian FEM (oblate, Rigid, vs own modal series)" begin
+@time @testset "Spheroid meridian FEM (oblate, Rigid, vs own modal series)" begin
     @test_skip "requires SpheroidalWaves backend, not available locally"
 end

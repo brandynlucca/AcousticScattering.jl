@@ -11,7 +11,7 @@ include("public_api.jl")
 include("diagnostics.jl")
 include("workflow.jl")
 
-@testset "Solution interface contract (every concrete AbstractSolution type)" begin
+@time @testset "Solution interface contract (every concrete AbstractSolution type)" begin
     a = 0.01
     c_water = 1477.4
     k = 2pi * 38000.0 / c_water
@@ -23,13 +23,13 @@ include("workflow.jl")
     bem_sol = AS.bem(sphere, AS.Rigid(), k; n = 16)
     mfs_sol = AS.mfs(sphere, AS.Rigid(), k; n = 16)
 
-    @testset "target_strength works with no keywords on every concrete type" begin
+    @time @testset "target_strength works with no keywords on every concrete type" begin
         for sol in (modal_sol, kirch_sol, fem_sol, bem_sol, mfs_sol)
             @test AS.target_strength(sol) isa Float64
         end
     end
 
-    @testset "Complex amplitude and scalar-only FEM fallback" begin
+    @time @testset "Complex amplitude and scalar-only FEM fallback" begin
         for sol in (modal_sol, kirch_sol, fem_sol, bem_sol, mfs_sol)
             @test AS.scattering_amplitude(sol) isa Complex
         end
@@ -38,7 +38,7 @@ include("workflow.jl")
         @test_throws ArgumentError AS.scattering_amplitude(scalar)
     end
 
-    @testset "angle/azimuth keywords: supported where a real bistatic query exists, explicit error otherwise" begin
+    @time @testset "angle/azimuth keywords: supported where a real bistatic query exists, explicit error otherwise" begin
         # These result paths reject unsupported observation queries.
         @test_throws ArgumentError AS.target_strength(modal_sol; angle = 0.3)
         @test_throws ArgumentError AS.scattering_amplitude(modal_sol; angle = 0.3)
@@ -52,12 +52,12 @@ include("workflow.jl")
     end
 end
 
-@testset "Visualization sampling (frequency/incidence-angle sweeps)" begin
+@time @testset "Visualization sampling (frequency/incidence-angle sweeps)" begin
     a = 0.01
     c_water = 1477.4
     sphere = AS.Sphere(a)
 
-    @testset "frequency_sweep: shape, k conversion, endpoint agreement" begin
+    @time @testset "frequency_sweep: shape, k conversion, endpoint agreement" begin
         freqs = 20e3:10e3:60e3
         sweep = AS.frequency_sweep(k -> AS.modal(sphere, AS.Rigid(), k), freqs, c_water)
         @test sweep.frequencies == collect(freqs)
@@ -71,19 +71,19 @@ end
         @test single.target_strength[1] == ts_direct
     end
 
-    @testset "incidence_angle_sweep: shape, endpoint agreement" begin
+    @time @testset "incidence_angle_sweep: shape, endpoint agreement" begin
         @test_skip "requires SpheroidalWaves backend, not available locally"
     end
 end
 
-@testset "Visualization sampling (bistatic sweep/map)" begin
+@time @testset "Visualization sampling (bistatic sweep/map)" begin
     a = 0.01
     c_water = 1477.4
     k = 2pi * 38000.0 / c_water
     sphere = AS.Sphere(a)
     bem_sol = AS.bem(sphere, AS.Rigid(), k; n = 16)
 
-    @testset "bistatic_sweep: shape, endpoint agreement, azimuthal periodicity" begin
+    @time @testset "bistatic_sweep: shape, endpoint agreement, azimuthal periodicity" begin
         angles = 0:(pi / 4):pi
         sweep = AS.bistatic_sweep(bem_sol, angles)
         @test sweep.angles == collect(angles)
@@ -98,7 +98,7 @@ end
         @test sweep_0.target_strength[1] ≈ sweep_2pi.target_strength[1] atol = 1e-8
     end
 
-    @testset "bistatic_sweep/BistaticSweep records the solution's actual incidence angle" begin
+    @time @testset "bistatic_sweep/BistaticSweep records the solution's actual incidence angle" begin
         β = deg2rad(30.0)
         spheroid = AS.Spheroid(0.02, 0.01)
         sol = AS.bem(spheroid, AS.Rigid(), k; incidence_angle = β, m_max = 8, n = 16)
@@ -106,7 +106,7 @@ end
         @test sweep.incidence_angle == β
     end
 
-    @testset "bistatic_map: shape, endpoint agreement" begin
+    @time @testset "bistatic_map: shape, endpoint agreement" begin
         thetas = 0:(pi / 4):pi
         phis = 0:(pi / 2):(2pi)
         map_result = AS.bistatic_map(bem_sol, thetas, phis)
@@ -115,7 +115,7 @@ end
               AS.target_strength(bem_sol; angle = thetas[2], azimuth = phis[3])
     end
 
-    @testset "axisymmetric vs full-BEM cross-validation (coordinate convention correctness)" begin
+    @time @testset "axisymmetric vs full-BEM cross-validation (coordinate convention correctness)" begin
         full_sol = AS.bem(sphere, AS.Rigid(), k; method = :full,
             meshsize = AS.bem3d_elements_per_wavelength(k))
         thetas = [0.0, pi / 2, pi]
@@ -129,13 +129,13 @@ end
     end
 end
 
-@testset "Visualization sampling (revolve_panels)" begin
+@time @testset "Visualization sampling (revolve_panels)" begin
     a = 0.01
     c_water = 1477.4
     k = 2pi * 38000.0 / c_water
     sphere = AS.Sphere(a)
 
-    @testset "shape, radius, and z agree with panel midpoints" begin
+    @time @testset "shape, radius, and z agree with panel midpoints" begin
         bem_sol = AS.bem(sphere, AS.Rigid(), k; n = 16)
         d = bem_sol.data
         ps = AS.panels(d.mesh)
@@ -148,7 +148,7 @@ end
         @test all(surf.x[i, j] == ps[j].zm for i in 1:36, j in eachindex(ps))
     end
 
-    @testset "axisymmetric (m=0-only) field is constant across azimuth" begin
+    @time @testset "axisymmetric (m=0-only) field is constant across azimuth" begin
         bem_axial = AS.bem(sphere, AS.Rigid(), k; n = 16, incidence_angle = 0.0)
         d = bem_axial.data
         @test length(d.p_scat_modes) == 1
@@ -159,31 +159,31 @@ end
     end
 end
 
-@testset "Mesh interface: geometry preservation, orientation, element counts" begin
+@time @testset "Mesh interface: geometry preservation, orientation, element counts" begin
     a = 0.01
     n = 40
     sphere = AS.Sphere(a)
     m = AS.mesh(sphere; resolution = n)
 
-    @testset "element counts match requested resolution" begin
+    @time @testset "element counts match requested resolution" begin
         @test AS.element_count(m) == n
         @test length(AS.elements(m)) == n
         @test length(AS.coordinates(m)) == n
         @test length(AS.normals(m)) == n
     end
 
-    @testset "geometry preservation: every element sits on the sphere's own surface" begin
+    @time @testset "geometry preservation: every element sits on the sphere's own surface" begin
         @test all(((rho, z),) -> isapprox(hypot(rho, z), a; atol = 1e-3 * a),
             AS.coordinates(m))
     end
 
-    @testset "orientation: outward normal has positive radial component (convex body about the origin)" begin
+    @time @testset "orientation: outward normal has positive radial component (convex body about the origin)" begin
         @test all(zip(AS.coordinates(m), AS.normals(m))) do ((rho, z), (nrho, nz))
             nrho * rho + nz * z > 0
         end
     end
 
-    @testset "spheroid geometry preservation" begin
+    @time @testset "spheroid geometry preservation" begin
         a2, b2 = 0.05, 0.02
         spheroid = AS.Spheroid(a2, b2)
         m2 = AS.mesh(spheroid; resolution = 30)
@@ -191,7 +191,7 @@ end
             AS.coordinates(m2))
     end
 
-    @testset "full 3D mesh element counts and geometry" begin
+    @time @testset "full 3D mesh element counts and geometry" begin
         k = 2pi * 38000.0 / 1477.4
         m3 = AS.mesh(sphere; k = k, method = :full)
         @test AS.element_count(m3) == length(AS.coordinates(m3)) ==
@@ -206,7 +206,7 @@ end
     # is a stub ("Mesh import (.stl/.msh/.vtk). Not yet implemented."), so there is no I/O
     # capability to round-trip yet. Flagged here rather than silently skipped from the suite.
 
-    @testset "bent cylinder geometry is rejected, not silently straightened" begin
+    @time @testset "bent cylinder geometry is rejected, not silently straightened" begin
         bent = AS.Cylinder(0.01, 0.07; radius_curvature = 0.20)
         @test_throws ArgumentError AS.mesh(bent; resolution = 20)
         @test_throws ArgumentError AS.mesh(bent; k = 2pi * 38000.0 / 1477.4)
@@ -214,7 +214,7 @@ end
         @test_throws ArgumentError AS.fem(bent, AS.SolidElastic(7.8, 3.7, 1.9), 100.0)
     end
 
-    @testset "resolution/thickness sanity checks" begin
+    @time @testset "resolution/thickness sanity checks" begin
         @test_throws ArgumentError AS.sphere_mesh(0.01, 2)
         @test_throws ArgumentError AS.spheroid_mesh(0.05, 0.02, 2)
         @test_throws ArgumentError AS.Shell(AS.Sphere(0.01), 5.0)

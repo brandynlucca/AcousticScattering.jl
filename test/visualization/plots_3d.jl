@@ -8,13 +8,13 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@testset "Makie visualization: 3D model plots" begin
+@time @testset "Makie visualization: 3D model plots" begin
     a = 0.01
     c_water = 1477.4
     k = 2pi * 38000.0 / c_water
     sphere = AS.Sphere(a)
 
-    @testset "axisymmetric BEM: mesh and surface_field" begin
+    @time @testset "axisymmetric BEM: mesh and surface_field" begin
         bem_sol = AS.bem(sphere, AS.Rigid(), k; n = 16, m_max = 2)
         @test plot(bem_sol; kind = :mesh) isa Makie.FigureAxisPlot
         @test plot(bem_sol; kind = :surface_field) isa Makie.FigureAxisPlot
@@ -22,7 +22,7 @@ BLAS.set_num_threads(1)
               Makie.FigureAxisPlot
     end
 
-    @testset "spheroid, straight cylinder, and shell FEM geometries" begin
+    @time @testset "spheroid, straight cylinder, and shell FEM geometries" begin
         spheroid = AS.Spheroid(0.05, 0.02)
         sph_sol = AS.bem(spheroid, AS.Rigid(), k; n = 16, m_max = 2)
         @test plot(sph_sol; kind = :mesh) isa Makie.FigureAxisPlot
@@ -42,7 +42,7 @@ BLAS.set_num_threads(1)
         @test plot(shell_sol; kind = :surface_field) isa Makie.FigureAxisPlot
     end
 
-    @testset "bent-cylinder MFS: both :mesh and :surface_field render as point clouds over the real solved points" begin
+    @time @testset "bent-cylinder MFS: both :mesh and :surface_field render as point clouds over the real solved points" begin
         bent = AS.Cylinder(0.01, 0.1; radius_curvature = 0.5)
         k_bent = 2pi * 20000.0 / c_water
         mfs_sol = AS.mfs(bent, AS.Rigid(), k_bent; n_s = 8, n_φ = 8)
@@ -52,7 +52,7 @@ BLAS.set_num_threads(1)
         @test plot(mfs_sol; kind = :surface_field) isa Makie.FigureAxisPlot
     end
 
-    @testset "ModalSolution/KirchhoffSolution: mesh works, surface_field errors" begin
+    @time @testset "ModalSolution/KirchhoffSolution: mesh works, surface_field errors" begin
         modal_sol = AS.modal(sphere, AS.Rigid(), k)
         kirch_sol = AS.kirchhoff(sphere, AS.Rigid(), k)
         @test plot(modal_sol; kind = :mesh) isa Makie.FigureAxisPlot
@@ -61,7 +61,7 @@ BLAS.set_num_threads(1)
         @test_throws ArgumentError plot(kirch_sol; kind = :surface_field)
     end
 
-    @testset "Acoustic radial FEM: mesh works, surface_field errors" begin
+    @time @testset "Acoustic radial FEM: mesh works, surface_field errors" begin
         fem_sol = AS.fem(sphere, AS.Rigid(), k)
         @test plot(fem_sol; kind = :mesh) isa Makie.FigureAxisPlot
         @test_throws ArgumentError plot(fem_sol; kind = :surface_field)

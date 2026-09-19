@@ -4,7 +4,7 @@ using LinearAlgebra: BLAS, norm
 
 BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
 
-@testset "Ellipsoid construction and complex sweeps" begin
+@time @testset "Ellipsoid construction and complex sweeps" begin
     surface = mesh(; semiaxes = (0.3, 0.4, 0.6), center = (0.1, -0.2, 0.3),
         rotation = (axis = (0, 1, 0), angle = pi / 2), resolution = 0.8)
     nodes = surface.body.nodes

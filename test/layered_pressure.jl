@@ -3,7 +3,7 @@ using Test
 using LinearAlgebra: BLAS
 BLAS.set_num_threads(1)
 
-@testset "Elastic and layered spherical pressure against radial FEM" begin
+@time @testset "Elastic and layered spherical pressure against radial FEM" begin
     body = Sphere(1.0)
     cases = (
         (SolidElastic(2.7, 4.0, 2.0), (0.4, 1.6, 3.2), 640),
@@ -56,7 +56,7 @@ BLAS.set_num_threads(1)
     end
 end
 
-@testset "Layer regions, identical media and interface selection" begin
+@time @testset "Layer regions, identical media and interface selection" begin
     body, k = Sphere(1.0), 1.6
     for solve in (modal, fem)
         wall = Shelled(FluidLayer(1.2, 1.1), FluidInterior(1.2, 1.1), 0.8)
@@ -91,7 +91,7 @@ end
     end
 end
 
-@testset "Layered pressure refinement and far-field limit" begin
+@time @testset "Layered pressure refinement and far-field limit" begin
     body, k = Sphere(1.0), 1.8
     for layer in (FluidLayer(1.04, 1.04), ElasticLayer(2.7, 4.0, 2.0))
         boundary = Shelled(layer, FluidInterior(1.0, 1.0), 0.8)

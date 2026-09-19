@@ -4,10 +4,10 @@ using LinearAlgebra: BLAS
 
 BLAS.set_num_threads(1)
 
-@testset "Low-frequency fluid regions" begin
+@time @testset "Low-frequency fluid regions" begin
     k = 2pi * 500 / 1477.4
     gas = GasFilled(0.00129, 0.23)
-    @testset "Oblique gas spheroid against modal expansion" begin
+    @time @testset "Oblique gas spheroid against modal expansion" begin
         body = Spheroid(0.025, 0.0075)
         surface = mesh(; semiaxes = (0.025, 0.0075, 0.0075),
             resolution = 0.55, tip_ratio = 0.4, qorder = 5)
@@ -22,7 +22,7 @@ BLAS.set_num_threads(1)
         @test_skip "requires SpheroidalWaves quad-precision backend, not available locally"
     end
 
-    @testset "Nested ellipsoid: $formulation" for formulation in (:muller,)
+    @time @testset "Nested ellipsoid: $formulation" for formulation in (:muller,)
         materials = [FluidFilled(1.04, 1.04), gas]
         options = (; resolution = 0.4, qorder = 4, tip_ratio = 0.4)
         surfaces = [mesh(; semiaxes = (0.10, 0.018, 0.025), options...),
