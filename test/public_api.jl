@@ -1,5 +1,5 @@
 # Included by the Interfaces group; calls below deliberately use ordinary user imports.
-@testset "Public exports and source docstrings" begin
+@time @testset "Public exports and source docstrings" begin
     expected = Set((:Rigid, :PressureRelease, :FluidFilled, :GasFilled, :SolidElastic,
         :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer, :LayeredMaterial,
         :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
@@ -25,7 +25,7 @@
     @test_throws ArgumentError mesh(body; resolution = 12, k = 100.0)
 end
 
-@testset "Bent MFS ASCII grid controls" begin
+@time @testset "Bent MFS ASCII grid controls" begin
     body = Cylinder(0.01, 0.07; radius_curvature = 0.20)
     ascii = mfs(body, PressureRelease(), 100.0; n_s = 6, n_phi = 8, offset = 0.003)
     legacy = mfs(body, PressureRelease(), 100.0; n_s = 6, n_φ = 8, offset = 0.003)
@@ -36,7 +36,7 @@ end
     @test_throws ArgumentError mfs(body, Rigid(), 100.0; n_s = 0)
 end
 
-@testset "Full BEM diagnostics survive public dispatch" begin
+@time @testset "Full BEM diagnostics survive public dispatch" begin
     body = Sphere(0.01)
     k = 100.0
     options = (reltol = 1e-8, restart = 150, maxiter = 1200)

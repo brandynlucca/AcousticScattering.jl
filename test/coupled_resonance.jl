@@ -4,7 +4,7 @@ using Test
 
 BLAS.set_num_threads(1)
 
-@testset "Nested ellipsoids across gas resonance" begin
+@time @testset "Nested ellipsoids across gas resonance" begin
     materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
     beta = pi/3
     direction = [-cos(beta), -sin(beta), 0.0]

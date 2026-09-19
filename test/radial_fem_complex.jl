@@ -1,7 +1,7 @@
 using AcousticScattering
 using Test
 
-@testset "Complex acoustic radial FEM against modal spheres" begin
+@time @testset "Complex acoustic radial FEM against modal spheres" begin
     body = Sphere(1.0)
     for boundary in (Rigid(), PressureRelease()), k in (0.4, 4.0), order in (1, 2)
         solution = fem(body, boundary, k; R = 3.0, n_elements = 200, order)
@@ -40,7 +40,7 @@ using Test
     end
 end
 
-@testset "Adaptive radial FEM retains the final complex solution" begin
+@time @testset "Adaptive radial FEM retains the final complex solution" begin
     body, k = Sphere(1.0), 1.0
     for (boundary, element_options) in ((Rigid(), (; order = 1)),
         (PressureRelease(), (; order = 1)), (FluidFilled(1.2, 1.1), (;)))
@@ -72,7 +72,7 @@ end
     end
 end
 
-@testset "Radial FEM complex frequency sweeps" begin
+@time @testset "Radial FEM complex frequency sweeps" begin
     body, boundary = Sphere(0.01), Rigid()
     solve = k -> fem(body, boundary, k; order = 2, n_elements = 40)
     sweep = frequency_sweep(solve, [12000.0, 38000.0, 80000.0], 1500.0)

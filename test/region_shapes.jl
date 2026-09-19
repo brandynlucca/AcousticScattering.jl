@@ -18,13 +18,13 @@ function ellipsoid_surface(axes, center; resolution, qorder)
     end
 end
 
-@testset "Nonspherical fluid regions" begin
+@time @testset "Nonspherical fluid regions" begin
     beta, alpha = pi / 3, 0.4
     incident = [cos(beta), sin(beta) * cos(alpha), sin(beta) * sin(alpha)]
     observations = (-incident, incident, [0.0, 0.0, 1.0])
     materials = [FluidFilled(1.05, 1.02), GasFilled(0.0012, 0.23)]
 
-    @testset "Independent geometry and quadrature" begin
+    @time @testset "Independent geometry and quadrature" begin
         for (name, body, axes, center) in (
             (:displaced, Spheroid(1.4, 1.0), (0.35, 0.35, 0.35), (0.3, 0.2, 0.1)),
             (:bent, Cylinder(0.7, 1.6; radius_curvature = 3.0, endcap_depth = 0.7),
@@ -41,7 +41,7 @@ end
         end
     end
 
-    @testset "Sibling interfaces and exterior interactions" begin
+    @time @testset "Sibling interfaces and exterior interactions" begin
         outer = mesh(
             Sphere(1.0); method = :full, resolution = 0.6, mesh_order = 3, qorder = 4)
         left = ellipsoid_surface((0.15, 0.15, 0.15), (0.0, -0.4, 0.0); resolution = 0.09, qorder = 4)

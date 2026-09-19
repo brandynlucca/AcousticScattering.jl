@@ -11,7 +11,7 @@ function fish_surfaces(; resolution = 0.6, qorder = 4)
             rotation = (axis = (0, 0, 1), angle = deg2rad(10)), options...)]
 end
 
-@testset "Synthetic fish and displaced bladder" begin
+@time @testset "Synthetic fish and displaced bladder" begin
     materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
     surfaces = fish_surfaces()
     beta = deg2rad(90.0)

@@ -1,4 +1,4 @@
-@testset "Curved surface bounds" begin
+@time @testset "Curved surface bounds" begin
     for (x, y) in ((0.1, 0.2), (nextfloat(1.0), prevfloat(1.0)),
             (floatmin(Float64), floatmin(Float64)), (1e100, -1e100)),
         operation in (+, -, *)
