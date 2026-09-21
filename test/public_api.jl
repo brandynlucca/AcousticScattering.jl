@@ -3,8 +3,8 @@
     expected = Set((:Rigid, :PressureRelease, :FluidFilled, :GasFilled, :SolidElastic,
         :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer, :LayeredMaterial,
         :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
-        :Shell, :AbstractSolution, :ModalSolution, :KirchhoffSolution, :FEMSolution,
-        :BEMSolution, :MFSSolution, :modal, :kirchhoff, :fem, :bem, :mfs,
+        :Shell, :Irregular, :AbstractSolution, :ModalSolution, :KirchhoffSolution, :FEMSolution,
+        :BEMSolution, :MFSSolution, :FMSolution, :modal, :kirchhoff, :fem, :bem, :mfs, :fourier,
         :target_strength, :scattering_amplitude, :pressure, :diagnostics, :Mesh, :mesh,
         :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
     @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
