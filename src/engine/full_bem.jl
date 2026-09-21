@@ -152,7 +152,7 @@ function _assemble_full_boundary(boundary::Union{Rigid, PressureRelease}, k::Rea
             LinearMap{ComplexF64}((y, x) -> (mul!(y, K, x); y .= 0.5 .* x .- y), length(quad)) :
             S
         return (; A, S, D = nothing, K, H = nothing, boundary, k, quad,
-            coupling = 0.0im, formulation, compression, correction)
+            coupling = 0.0im, formulation, compression, correction, Pl = nothing)
     end
     S, D = Inti.single_double_layer(;
         op, target = quad, source = quad, compression, correction)
@@ -163,6 +163,10 @@ function _assemble_full_boundary(boundary::Union{Rigid, PressureRelease}, k::Rea
         K, H = Inti.adj_double_layer_hypersingular(;
             op, target = quad, source = quad, compression, correction)
     end
+
+    # Calderon preconditioning (Pl=lu(H)) cuts PressureRelease/burton_miller far-field error on ill-conditioned rims. The dual (Pl=lu(S)) worsens Rigid, so it stays one-sided (docs/DEVELOPMENT_PRIORITIES.md #4c).
+    Pl = boundary isa PressureRelease && formulation == :burton_miller &&
+         compression.method === :none ? lu(H) : nothing
 
     if boundary isa Rigid
         if formulation == :burton_miller
@@ -188,7 +192,7 @@ function _assemble_full_boundary(boundary::Union{Rigid, PressureRelease}, k::Rea
         end
     end
     return (; A, S, D, K, H, boundary, k, quad, coupling,
-        formulation, compression, correction)
+        formulation, compression, correction, Pl)
 end
 
 function _solve_full_boundary(system;
@@ -196,7 +200,7 @@ function _solve_full_boundary(system;
         gmres_kwargs = (reltol = 1e-4, restart = 150, maxiter = 1200),
         return_diagnostics::Bool = true, _density = nothing)
     (; A, S, D, K, H, boundary, k, quad, coupling,
-        formulation, compression, correction) = system
+        formulation, compression, correction, Pl) = system
     direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
     n = length(quad)
     p_inc = ComplexF64[cis(k * dot(direction, q.coords)) for q in quad]
@@ -215,7 +219,9 @@ function _solve_full_boundary(system;
             rhs .+= coupling .* (H * (-p_inc))
         end
     end
-    x, hist = IterativeSolvers.gmres(A, rhs; log = true, gmres_kwargs...)
+    preconditioner_kwargs = Pl === nothing ? (;) : (; Pl)
+    x, hist = IterativeSolvers.gmres(
+        A, rhs; log = true, merge(preconditioner_kwargs, gmres_kwargs)...)
     hist.isconverged ||
         @warn "solve_full_bem: GMRES did not converge to the requested tolerance, result may be inaccurate" boundary formulation iters = hist.iters
     p_scat = boundary isa Rigid ? x : -p_inc
