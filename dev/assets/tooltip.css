@@ -1,0 +1,133 @@
+[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  left: auto;
+  bottom: calc(100% + 0.45rem);
+  transform: translateY(0.25rem);
+  width: max-content;
+  max-width: 22rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: #182531;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 30;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Columns near the table's left edge grow rightward instead of leftward,
+   so their tooltips don't clip against the viewport/table edge. */
+.solver-table td:nth-child(2) [data-tooltip]::after,
+.solver-table td:nth-child(3) [data-tooltip]::after,
+.solver-table td:nth-child(4) [data-tooltip]::after,
+.solver-table th:nth-child(2)[data-tooltip]::after,
+.solver-table th:nth-child(3)[data-tooltip]::after,
+.solver-table th:nth-child(4)[data-tooltip]::after {
+  left: 0;
+  right: auto;
+}
+
+.hint {
+  display: inline-block;
+  margin-left: 0.1rem;
+  font-style: normal;
+  color: #64748b;
+}
+
+.solver-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.solver-table th {
+  border: none !important;
+  border-bottom: 2px solid rgba(120, 130, 140, 0.6) !important;
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+}
+
+.solver-table tbody td {
+  border: 1px solid rgba(120, 130, 140, 0.35) !important;
+  padding: 0.5rem 0.65rem;
+  vertical-align: top;
+}
+
+.page-toc {
+  display: none;
+}
+
+@media (min-width: 1400px) {
+  .page-toc {
+    display: block;
+    position: fixed;
+    top: 5rem;
+    right: 1.5rem;
+    width: 15rem;
+    max-height: calc(100vh - 7rem);
+    overflow-y: auto;
+    padding-left: 0.75rem;
+    border-left: 1px solid rgba(120, 130, 140, 0.35);
+    font-size: 0.82rem;
+    z-index: 10;
+  }
+}
+
+.page-toc-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  color: #64748b;
+  margin: 0 0 0.5rem 0;
+}
+
+.page-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.page-toc li {
+  margin: 0.25rem 0;
+}
+
+.page-toc a {
+  color: inherit;
+  opacity: 0.7;
+  text-decoration: none;
+  display: block;
+  border-left: 2px solid transparent;
+  padding-left: 0.6rem;
+  margin-left: -0.76rem;
+}
+
+.page-toc a:hover {
+  opacity: 1;
+}
+
+.page-toc a.active {
+  opacity: 1;
+  border-left-color: currentColor;
+  font-weight: 600;
+}
