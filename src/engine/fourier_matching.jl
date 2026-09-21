@@ -13,8 +13,9 @@ A body of revolution about the z axis, for smooth irregular shapes between the c
 [`fourier`](@ref).
 
 The first form Fourier-fits a harmonic `order` series to a user-supplied meridian profile
-function `r(theta)` [m] (radial distance from the origin, not from the symmetry axis, at polar
-angle `theta`), evaluated over a full `2*pi` period even though only `theta in [0,pi]` is
+function `r(theta)` in m, the radial distance from the origin, not from the symmetry axis, at
+polar angle `theta`. It is evaluated over a full `2*pi` period even though only `theta in [0,pi]`
+is
 physically part of the meridian (`theta=0` and `theta=pi` are the two poles on the axis of
 symmetry). The full-period definition lets the fit use ordinary (mutually orthogonal on
 `[0,2*pi]`) trigonometric projection, via direct numerical quadrature with `npoints` nodes. The
@@ -55,8 +56,8 @@ end
 """
     profile_radius(body, theta)
 
-Evaluate an [`Irregular`](@ref)'s meridian profile `R(theta)` [m] (Eq. (21)) at polar angle
-`theta` [rad].
+Evaluate an [`Irregular`](@ref)'s meridian profile `R(theta)` in m (Eq. (21)) at polar angle
+`theta` in rad.
 """
 function profile_radius(body::Irregular, theta::Real)
     r = body.a
@@ -90,7 +91,7 @@ end
 """
     mapping_theta(mapping, w)
 
-Evaluate `theta(w)` [rad] (Eq. (29)) for the solved [`ConformalMapping`](@ref).
+Evaluate `theta(w)` in rad (Eq. (29)) for the solved `ConformalMapping`.
 """
 function mapping_theta(mapping::ConformalMapping, w::Real)
     theta = w
@@ -245,7 +246,7 @@ end
     _incident_coefficients(n_max, m_max, k, incidence_angle)
 
 Incident-wave modal coefficients `a[n+1,m+1]` (Eq. (35)) for a unit-amplitude plane wave from
-polar angle `incidence_angle` [rad] (`theta_0`, measured from the axis of symmetry, where `0` is
+polar angle `incidence_angle` in rad (`theta_0`, measured from the axis of symmetry, where `0` is
 end-on incidence along `+z`) at azimuth `0`, truncated to `n=0:n_max`, `m=0:m_max`
 (`m_max <= n_max`, and entries with `m>n` are `0`).
 """
@@ -365,9 +366,9 @@ end
 """
     fourier_matching_amplitude(b, k, angle, azimuth=0.0)
 
-Far-field scattering amplitude [m] (Eq. (43)) at observation polar angle `angle` [rad] and
-azimuth `azimuth` [rad], from the coefficient matrix `b` returned by any Fourier-matching solver
-([`solve_pressure_release`](@ref), [`solve_rigid`](@ref), ...). Eq. (43) is the same formula
+Far-field scattering amplitude in m (Eq. (43)) at observation polar angle `angle` in rad and
+azimuth `azimuth` in rad, from the coefficient matrix `b` returned by any Fourier-matching solver
+(`solve_pressure_release`, `solve_rigid`, ...). Eq. (43) is the same formula
 for every boundary condition, and only `b` differs. The `1/k` here comes from the standard
 large-argument spherical Hankel asymptotic `h_n^(1)(kr) ~ (-i)^(n+1) e^(ikr)/(kr)` (the argument is
 `kr`, not `r`) used to extract `f_s` from Eq. (40)'s `P^scat ~ P^inc e^(ikr)/r * f_s` (Eq. (42)).

@@ -2,69 +2,27 @@
     pressure(solution, point; field=:total, region=nothing)
     pressure(solution, points; field=:total, region=nothing)
 
-Complex acoustic pressure divided by incident pressure amplitude, under the
-`exp(-iωt)` convention. Supported solutions are modal and radial FEM spheres
-with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic`, fluid shells
-with fluid/vacuum interiors, or elastic shells with fluid interiors. Axisymmetric/full
-BEM and axisymmetric MFS support spheres and straight cylinders with rigid,
-pressure-release and fluid-filled boundaries; full MFS supports their rigid and
-pressure-release boundaries. Full BEM/MFS also support closed bent cylinders and supplied
-meshes with those respective boundary conditions. Coupled fluid BEM supports nested,
-branched and disconnected regions. Coordinates are in meters. Spheres
-are centered at the origin and straight cylinders align with x; supplied meshes retain
-their coordinates. Modal/FEM incidence is along +x;
-BEM/MFS incidence follows the solve's `incidence_angle` and, for full solves,
-`incidence_azimuth`.
+Complex acoustic pressure divided by incident pressure amplitude, under the `exp(-iωt)`
+convention. Coordinates are in meters.
 
-`point` is a three-coordinate tuple or vector. A collection of such points
-returns an array of the same shape. A real `3×N` matrix stores points in columns
-and returns a vector of length `N`.
+`point` is a three-coordinate tuple or vector. A collection of points returns an array of the
+same shape. A real `3×N` matrix stores points in columns and returns a vector of length `N`.
 
-- `field=:total` returns incident plus scattered pressure outside the body,
-  or total transmitted pressure in a fluid interior or shell.
-- `field=:scattered` is defined on and outside the body only.
-- `field=:incident` returns the unperturbed plane wave at any point.
-- `field=:interior` returns total pressure in a homogeneous fluid body, a shell's fluid
-  cavity, or a bounded coupled fluid region, including the inner interface trace.
-- `field=:shell` returns total pressure in a fluid shell, including both of its
-  surface traces. It is not defined in elastic material.
+`field` selects:
+- `:total`: incident plus scattered pressure outside the body, or total transmitted pressure
+  inside a fluid interior or shell.
+- `:scattered`: defined on and outside the body only.
+- `:incident`: the unperturbed plane wave at any point.
+- `:interior`: total pressure inside a homogeneous fluid body, a shell's fluid cavity, or a
+  bounded coupled fluid region.
+- `:shell`: total pressure in a fluid shell, including both surface traces.
 
-For spherical shells, at the outer surface, `:total` uses the exterior trace. At an inner interface it
-selects the fluid cavity, or the fluid shell's trace for a vacuum cavity. Points within
-eight floating-point spacings of either radius are treated as interface points.
-Rigid, pressure-release, elastic and vacuum regions have no acoustic pressure field.
-For elastic shells, `interior_coupling=:identical_fluid` uses exterior-fluid properties
-in the cavity. `modal(...; angle)` selects a far-field
-observation and does not rotate this incident wave. Evaluation retains the solve's
-modal cutoff; refine it and the FEM radial mesh when approaching a surface.
+`region` selects a specific fluid region for coupled fluid BEM (`region=0` is the unbounded
+exterior, `region=i` the fluid inside interface `i`). It is ignored otherwise.
 
-For coupled fluid BEM, `region=nothing` selects the containing fluid automatically.
-`region=0` selects the unbounded exterior; `region=i` selects the fluid immediately
-inside interface `i`, excluding its children. Points must belong to that region.
-At an interface, either adjacent region may be requested; without `region`, `:total`
-selects the parent side and `:interior` selects the child side. `:interior` is valid
-throughout any bounded fluid region, `:scattered` only in the unbounded exterior,
-and `:shell` is unavailable. Region selection follows the solved polynomial meshes.
-`:incident` remains the unperturbed exterior-medium plane wave; an explicit `region`
-also checks its query points. The `region` keyword is exclusive to coupled fluid BEM.
-
-Radial FEM uses its linear/quadratic nodal fields inside the exterior annulus
-and linear fields in a fluid interior or shell. Elastic and layered FEM spheres use
-retained spherical-wave coefficients in the exterior and cavity; acoustic FEM uses
-outgoing coefficients beyond its truncation radius. This function does not evaluate
-elastic stress/displacement, viscous layers, spheroids,
-or pressure in nonfluid regions. Full BEM uses density-interpolation quadrature;
-axisymmetric BEM subtracts the constant Laplace double layer before adaptive integration.
-MFS evaluates its solved outgoing source fields. Refine the surface mesh, quadrature
-order and MFS source spacing/offset to check convergence. Axisymmetric BEM retains
-piecewise-constant traces: near-surface accuracy depends on meridian position as well
-as panel count. Spheres and straight cylinders use analytic body dimensions for region
-selection. Bent and supplied surfaces use the solved polynomial mesh, with adaptive
-ray crossings; unresolved locations raise `ArgumentError`. Surface points use the
-exterior trace for `:total` and the fluid-side trace for `:interior`. The geometric
-stopping tolerance is 512 floating-point spacings at the largest absolute Bernstein
-coordinate. Axisymmetric cylinder BEM uses flat ends; full BEM and MFS honor
-`endcap_depth`. Lateral-only bent-cylinder MFS does not support this query.
+Not every solver/geometry/boundary combination supports every `field`/`region` option. See
+[BEM and MFS](@ref boundary-theory) and [FEM and shell coupling](@ref fem-theory) for solver
+support and numerical caveats.
 
 # Example
 ```julia

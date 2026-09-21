@@ -26,19 +26,16 @@ struct PressureRelease <: AbstractBoundaryCondition end
 """
     FluidFilled(density_contrast, soundspeed_contrast; coupling=:full)
 
-Homogeneous fluid transmission boundary condition. The sphere modal solution follows
-Anderson (1950); other supported geometries use their corresponding solver. Gas-filled
-bodies use the same boundary conditions with different material contrasts.
+Homogeneous fluid transmission boundary condition (Anderson, 1950). Gas-filled bodies use the
+same boundary condition with different material contrasts.
 
-- `density_contrast`: g = ρ_interior / ρ_exterior
-- `soundspeed_contrast`: h = c_interior / c_exterior
-- `coupling`: for the spheroid modal series only (ignored for the sphere,
-  which is diagonal exactly by symmetry, see sphere_modal.jl and
-  spheroid_modal.jl). `:full` solves the complete off-diagonal boundary
-  coupling (Furusawa 1988, Eq. 4). `:diagonal` uses the cheaper, less
-  accurate closed-form approximation (Eq. 5) that ignores mode coupling
-  between the interior and exterior angular functions, with accuracy
-  degrading at higher `ka` and larger eccentricity.
+- `density_contrast` is ρ_interior/ρ_exterior.
+- `soundspeed_contrast` is c_interior/c_exterior.
+- `coupling` affects the spheroid modal series only (the sphere is diagonal by symmetry).
+  `:full` solves the complete off-diagonal boundary coupling. `:diagonal` uses a cheaper
+  approximation that degrades at higher `ka` and larger eccentricity.
+
+See [Modal series](@ref modal-theory).
 """
 struct FluidFilled <: AbstractBoundaryCondition
     density_contrast::Float64
@@ -87,29 +84,13 @@ end
 """
     FluidLayer(density_contrast, soundspeed_contrast)
 
-A *fluid* spherical shell layer (no shear waves, just an ordinary fluid layer with its own
-density/sound-speed, e.g. a swim bladder wall modeled as a fluid layer rather than solid tissue).
-`density_contrast` = ρ_shell/ρ_exterior, `soundspeed_contrast` = c_shell/c_exterior, both relative
-to the *exterior* medium (not to each other). Pair with [`VacuumInterior`](@ref) for a
-pressure-release interior or [`FluidInterior`](@ref) for a fluid interior, including
-gas-filled and weakly scattering shells with different material contrasts. See [`Shelled`](@ref).
-These fluid-shell configurations are described by Jech et al. (2015).
+A fluid spherical shell layer (no shear waves), e.g. a swim bladder wall modeled as fluid rather
+than solid tissue (Jech et al., 2015). `density_contrast` is ρ_shell/ρ_exterior and
+`soundspeed_contrast` is c_shell/c_exterior, both relative to the exterior medium. Pair with
+[`VacuumInterior`](@ref) for a pressure-release interior or [`FluidInterior`](@ref) for a fluid
+interior, via [`Shelled`](@ref).
 
-Derivation (vacuum interior): two fluid regions (exterior `r>a`, shell `b<r<a`), the shell's
-general solution `Cⱼₗ(k₂r) + Dyₗ(k₂r)` (both spherical Bessel kinds, since the shell doesn't
-include the origin) closed at `r=b` by `p(b)=0`, which gives `D/C` in closed form. Pressure/
-velocity continuity at `r=a` then gives `Aₘ` by the same ratio-elimination algebra already used
-for [`FluidFilled`](@ref), confirmed directly (not just by construction) to reduce to the exact
-[`PressureRelease`](@ref) coefficient in the `radius_ratio → 1` (vanishing shell) limit, an
-analytically exact check (a 0/0 cancellation that works out exactly, not merely numerically
-close).
-
-Derivation (fluid interior): three fluid regions. The interior (`r<b`) must be regular at the
-origin (`jₗ(k₃r)` only, no `yₗ`), giving a closed-form pressure/velocity-continuity ratio at `r=b`
-that plays exactly the role the vacuum interior's `p(b)=0` condition does. Both reduce to a single
-`D/C` ratio feeding the same outer (`r=a`) algebra, which is why the two interior kinds share their
-outer-boundary code. Confirmed directly to reduce to the exact [`FluidFilled`](@ref) coefficient
-(with the interior contrasts) in the `radius_ratio → 1` limit.
+See [Modal series](@ref modal-theory) for the boundary-matching derivation.
 """
 struct FluidLayer <: AbstractShellMaterial
     density_contrast::Float64
@@ -126,44 +107,17 @@ end
 """
     ElasticLayer(density_contrast, speed_longitudinal_contrast, speed_transversal_contrast; interior_coupling=:generalized)
 
-An isotropic elastic spherical shell layer (Goodman & Stern 1962), paired with a
-[`FluidInterior`](@ref) via [`Shelled`](@ref) (former `ElasticShell`). All material properties are
-*contrasts* relative to the exterior medium (matching [`FluidFilled`](@ref)'s convention), so
-`form_function`/`target_strength`'s `k` needs only the exterior medium's wavenumber, not its
-absolute density/soundspeed.
+An isotropic elastic spherical shell layer (Goodman and Stern, 1962), paired with a
+[`FluidInterior`](@ref) via [`Shelled`](@ref). All contrasts are relative to the exterior medium.
 
-- `density_contrast` = ρ_shell / ρ_ext
-- `speed_longitudinal_contrast` = c_L / c_ext, `speed_transversal_contrast` = c_T / c_ext, the
-  shell's longitudinal and shear wave speeds, related to Lamé parameters `λ, G` and shell density
-  `ρ_shell` by `c_L = √((λ+2G)/ρ_shell)`, `c_T = √(G/ρ_shell)`.
+- `density_contrast` is ρ_shell/ρ_ext.
+- `speed_longitudinal_contrast` and `speed_transversal_contrast` are c_L/c_ext and c_T/c_ext,
+  the shell's longitudinal and shear wave speeds.
+- `interior_coupling`: `:generalized` (default) uses the interior fluid's own wavenumber and
+  density. `:identical_fluid` uses the exterior fluid's properties at the inner radius instead
+  (Stanton, 1990), agreeing with `:generalized` only when the interior and exterior fluids match.
 
-Uses the Goodman & Stern (1962) boundary-matching determinant, with the inner-boundary terms
-(`a46`, `a56`) evaluated using the interior fluid's own wavenumber/density (not the exterior
-medium's), which is what radial-displacement and radial-stress continuity at the shell/interior-
-fluid interface actually require. Each mode's coefficient `b_m` is computed as a genuine complex
-determinant ratio `-det(A_numerator)/det(A_denominator)`, preserving phase for the coherent modal
-sum.
-
-Validated (see test/runtests.jl): the stiff/dense-shell limit recovers (to ~0.003 dB at realistic
-contrast) the already-validated `Rigid` result regardless of interior-fluid properties. The
-complementary thin-shell limit (`radius_ratio → 1` on the enclosing [`Shelled`](@ref), shell
-properties matched to make it acoustically near-transparent) trends the right direction but
-converges slowly and becomes numerically delicate before fully resolving, the same class of
-direct/unnormalized-radial-function fragility documented for the liquid-filled spheroid coupling
-in spheroid_modal.jl, not a separate concern.
-
-## Interior coupling
-
-`interior_coupling` selects the material properties in the inner-boundary terms (`a46`, `a56`):
-
-- `:generalized` (default): use the interior fluid's own wavenumber and density.
-- `:identical_fluid`: use the exterior fluid's wavenumber and density at the inner radius,
-  ignoring the enclosing [`Shelled`](@ref)'s [`FluidInterior`](@ref) contrasts.
-
-Both forms agree when the interior density and sound-speed contrasts are `1`.
-Use `:generalized` when the interior and exterior fluids differ.
-Goodman & Stern (1962) assume identical interior and exterior fluids; Stanton (1990,
-section I.A) describes the generalized determinant for distinct fluids.
+See [Modal series](@ref modal-theory) for the boundary-matching determinant.
 """
 struct ElasticLayer <: AbstractShellMaterial
     density_contrast::Float64
@@ -190,21 +144,16 @@ end
     ViscousLayer(soundspeed_exterior, density_contrast, soundspeed_contrast,
                  kinematic_viscosity_compressional, kinematic_viscosity_shear)
 
-A viscous fluid-like shell layer (Feuillade & Nero 1998), e.g. the flesh surrounding a fish's
-swimbladder. Used as the outer layer of a [`LayeredMaterial`](@ref) (see [`Shelled`](@ref)),
-former `ViscoelasticShell`.
+A viscous fluid-like shell layer (Feuillade and Nero, 1998), e.g. the flesh surrounding a fish's
+swimbladder. Used as the outer layer of a [`LayeredMaterial`](@ref).
 
-- `soundspeed_exterior` [m/s]: the exterior medium's actual sound speed, needed only to recover
-  the angular frequency `ω = k·c1` for this layer's frequency-dependent complex wavenumbers;
-  the material contrasts below are relative to the exterior medium, matching
-  [`ElasticLayer`](@ref).
-- `density_contrast`, `soundspeed_contrast`: lossless reference density/compressional-speed
-  contrasts, `ρ2/ρ1`, `c2/c1`.
-- `kinematic_viscosity_compressional` = `ξ2/ρ2` [m²/s] (`ξ2 = η2+4μ2/3`, the combined
-  bulk+shear viscosity) and `kinematic_viscosity_shear` = `μ2/ρ2` [m²/s] (shear viscosity alone),
-  both *kinematic* (already divided by this layer's density) so they combine with
-  `soundspeed_contrast` and `ω` without needing the absolute density separately. Set both to `0.0`
-  to recover the lossless (purely elastic, real wavenumbers) limit.
+- `soundspeed_exterior` is the exterior medium's sound speed in m/s.
+- `density_contrast` and `soundspeed_contrast` are lossless reference density/compressional-speed
+  contrasts, `ρ2/ρ1`, `c2/c1`, relative to the exterior medium.
+- `kinematic_viscosity_compressional` and `kinematic_viscosity_shear` are the kinematic bulk and
+  shear viscosities in m²/s. Set both to `0.0` for the lossless (purely elastic) limit.
+
+See [Modal series](@ref modal-theory).
 """
 struct ViscousLayer <: AbstractShellMaterial
     soundspeed_exterior::Float64
@@ -234,13 +183,16 @@ end
 """
     LayeredMaterial(outer, inner, radius_ratio)
 
-Two concentric shell material layers: `outer` ([`ViscousLayer`](@ref) or [`ElasticLayer`](@ref))
-enclosing `inner` ([`ElasticLayer`](@ref)), with `radius_ratio` = the inner layer's own outer
-radius over the outer layer's outer radius ∈ (0,1). Used as the `material` of a [`Shelled`](@ref)
-whose `interior` is enclosed by *two* layers rather than one, e.g. Feuillade & Nero (1998)'s
-viscous-flesh-over-elastic-wall swimbladder model (former `ViscoelasticShell`,
-`Shelled(LayeredMaterial(ViscousLayer(...), ElasticLayer(...), radius_ratio_wall),
-FluidInterior(...), radius_ratio_core)`).
+Two concentric shell material layers, `outer` ([`ViscousLayer`](@ref) or [`ElasticLayer`](@ref))
+enclosing `inner` ([`ElasticLayer`](@ref)). `radius_ratio` is the inner layer's own outer radius
+over the outer layer's outer radius, in (0,1). Used as the `material` of a [`Shelled`](@ref)
+whose `interior` is enclosed by two layers rather than one, e.g. a viscous-flesh-over-elastic-wall
+swimbladder model (Feuillade and Nero, 1998):
+
+```julia
+Shelled(LayeredMaterial(ViscousLayer(...), ElasticLayer(...), radius_ratio_wall),
+    FluidInterior(...), radius_ratio_core)
+```
 """
 struct LayeredMaterial{L1 <: AbstractShellMaterial, L2 <: AbstractShellMaterial} <:
        AbstractShellMaterial
@@ -260,14 +212,13 @@ end
 """
     ElasticFEMLayer(poisson, density, youngs_modulus)
 
-Full through-thickness elastic shell material (absolute, not contrast, values), used only by
-[`fem`](@ref)`(::Shell, ::Shelled, ...)`'s 2D shell-FEM solve (`method=:thin`/`:general`), where
-the shell's own absolute stiffness matters, not a ratio to the exterior fluid. Construct via
-[`Shelled`](@ref)`(poisson, density, youngs_modulus)`, former `ShellMaterial`/`ShellFEMMaterial`.
+Full through-thickness elastic shell material, using absolute (not contrast) values. Used only by
+[`fem`](@ref)`(::Shell, ::Shelled, ...)`'s 2D shell-FEM solve. Construct via
+[`Shelled`](@ref)`(poisson, density, youngs_modulus)`.
 
-- `poisson`: Poisson's ratio (dimensionless, `< 0.5`).
-- `density` [kg/m³]: absolute shell density.
-- `youngs_modulus` [Pa]: absolute Young's modulus.
+- `poisson` is Poisson's ratio (dimensionless, `< 0.5`).
+- `density` is the absolute shell density in kg/m³.
+- `youngs_modulus` is the absolute Young's modulus in Pa.
 """
 struct ElasticFEMLayer <: AbstractShellMaterial
     poisson::Float64
@@ -286,31 +237,24 @@ end
     Shelled(material, interior, radius_ratio)
     Shelled(poisson, density, youngs_modulus)
 
-Unified thin-shell boundary condition/material — the single public type for every shell concept in
-this package, replacing the former `ShellSoft`, `ShellFluidFilled`, `ElasticShell`,
-`ViscoelasticShell`, and `ShellMaterial`/`ShellFEMMaterial`.
+The single boundary condition/material type for every shell in this package.
 
-The three-argument form is a `material` layer ([`FluidLayer`](@ref), [`ElasticLayer`](@ref), or a
-[`LayeredMaterial`](@ref) of two layers) enclosing either a [`VacuumInterior`](@ref)
-(void/pressure-release interior) or a [`FluidInterior`](@ref) (fluid/gas-filled interior), for use
-as a boundary condition with [`modal`](@ref)/[`kirchhoff`](@ref)/[`fem`](@ref)`(::Sphere/Cylinder,
-...)`:
-- former `ShellSoft`: `Shelled(FluidLayer(...), VacuumInterior(), radius_ratio)`
-- former `ShellFluidFilled`: `Shelled(FluidLayer(...), FluidInterior(...), radius_ratio)`
-- former `ElasticShell`: `Shelled(ElasticLayer(...), FluidInterior(...), radius_ratio)`
-- former `ViscoelasticShell`: `Shelled(LayeredMaterial(ViscousLayer(...), ElasticLayer(...),
-  radius_ratio_wall), FluidInterior(...), radius_ratio_core)`
+The three-argument form pairs a `material` layer ([`FluidLayer`](@ref), [`ElasticLayer`](@ref),
+or a [`LayeredMaterial`](@ref) of two layers) with either a [`VacuumInterior`](@ref) or a
+[`FluidInterior`](@ref), for use as a boundary condition with
+[`modal`](@ref)/[`kirchhoff`](@ref)/[`fem`](@ref)`(::Sphere/Cylinder, ...)`. Examples:
+- `Shelled(FluidLayer(...), VacuumInterior(), radius_ratio)`
+- `Shelled(FluidLayer(...), FluidInterior(...), radius_ratio)`
+- `Shelled(ElasticLayer(...), FluidInterior(...), radius_ratio)`
+- `Shelled(LayeredMaterial(ViscousLayer(...), ElasticLayer(...), radius_ratio_wall),
+  FluidInterior(...), radius_ratio_core)`
 
-`radius_ratio` = inner/outer shell surface radius ∈ (0,1) (`a` in every
-`target_strength`/`form_function` call is the shell's *outer* radius); when `material` is a
-`LayeredMaterial`, its own `radius_ratio` (the two layers' interface) must be strictly greater
-than the enclosing `Shelled`'s `radius_ratio` (the interior boundary), matching the physical
-ordering exterior > outer layer > inner layer > interior.
+`radius_ratio` is the inner/outer shell surface radius, in (0,1). `a` in every
+`target_strength`/`form_function` call is the shell's outer radius. When `material` is a
+`LayeredMaterial`, its own `radius_ratio` must be strictly greater than the enclosing `Shelled`'s.
 
 The one-argument-triple form `Shelled(poisson, density, youngs_modulus)` instead builds an
-[`ElasticFEMLayer`](@ref) with no `interior`/`radius_ratio` (`nothing` for both — the full shell
-FEM solve gets its geometry from the `Shell` body and its exterior/interior fluid properties from
-[`fem`](@ref)'s own arguments, so neither concept applies here), for use with
+`ElasticFEMLayer` with no `interior`/`radius_ratio`, for use with
 [`fem`](@ref)`(::Shell, ::Shelled, ...)`.
 """
 struct Shelled{M <: AbstractShellMaterial, I <: Union{Nothing, AbstractShellInterior}} <:
@@ -574,9 +518,9 @@ end
 """
     form_function(boundary::AbstractBoundaryCondition, k, a; angle=π, m_max=default)
 
-Far-field scattering amplitude f(θ) [m] of a sphere of radius `a` [m] in a
-medium with wavenumber `k` [1/m], evaluated at scattering angle `angle`
-[rad] (default π = backscatter). `m_max` truncates the modal sum; the
+Far-field scattering amplitude f(θ) in m of a sphere of radius `a` in m in a
+medium with wavenumber `k` in 1/m, evaluated at scattering angle `angle`
+in rad (default π, backscatter). `m_max` truncates the modal sum. The
 default grows with `ka` and can be overridden for tighter/looser
 convergence control.
 """

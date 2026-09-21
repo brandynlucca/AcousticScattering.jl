@@ -93,56 +93,24 @@ end
         correction=(method=:dim,), formulation=:muller, validation=(;))
 
 Coupled fluid transmission across closed, disjoint full-3D interface meshes. Surface `i`
-encloses region `i`; `parents[i]` identifies the region immediately outside it, with `0`
-denoting the unbounded exterior. Parents must precede their children. The default is a
-nested chain; for two inclusions in one body use `parents=[0,1,1]`.
-Each normal points from the enclosed region into its parent. Every interface enforces
-continuity of pressure and normal velocity. All material density and sound-speed contrasts
-are relative to the unbounded exterior, including materials of nested regions.
+encloses region `i`. `parents[i]` is the region immediately outside it, with `0` denoting the
+unbounded exterior. The default `parents` is a nested chain. `materials[i]` gives that region's
+density and sound-speed contrasts relative to the unbounded exterior. Only homogeneous, lossless
+scalar fluids are supported.
 
-Meshes may have independent shapes, origins and orientations. Intersecting/touching surfaces,
-inconsistent containment and unresolved geometry checks raise `ArgumentError`.
-`validation=(maxdepth=20, maxwork=200000)` controls the separation checks.
-Only homogeneous, lossless scalar fluids are supported; elastic and viscous walls need
-their corresponding structural or constitutive equations.
+Meshes may have independent shapes, origins and orientations, but must not intersect or touch.
+`validation=(maxdepth=20, maxwork=200000)` controls the geometry checks.
 
-The default dense Müller system has two unknowns per quadrature node. All interfaces bounding
-each region interact. `correction` controls singular and near-singular integration;
-density interpolation receives the target's location from the region topology.
-Refine geometry and quadrature independently, especially at small gaps and resonances.
-Regular-wave quadrature requires regional `k*radius <= 1` and `2k*rms_radius <= 1`
-in every medium. Both radius bounds include all boundary nodes of each region and
-each interface separately. Radii use the corresponding mean node position, with
-surface area weights for the RMS. This choice is shared across all media to preserve
-cancellation at weak-contrast interfaces. Otherwise, pressure operators use direct
-density interpolation. Separately, self normal derivatives follow from Calderón
-identities when regional `k*radius <= π/2` in every medium. This reconstruction uses
-the selected pressure operators; other derivatives use direct density interpolation.
-Diagnostics record each derivative route in `derivative_evaluation`.
+Returns a [`BEMSolution`](@ref). Post-process with `scattering_amplitude(sol; direction)` or
+`target_strength(sol; direction)`.
 
-`formulation=:cbie` instead enforces the pressure representation on both sides of each
-interface, with the same shared pressure and density-scaled derivative unknowns. It avoids
-hypersingular operators and is useful for low-frequency, strong-contrast fluids. This
-conventional formulation has no general protection against fictitious eigenfrequencies;
-check against an independent method when extending its frequency range.
+See [Coupled fluid regions](@ref coupled-fluid-regions) for the coupling equations,
+`formulation` and `correction` tradeoffs, and diagnostics fields.
 
-Returns a [`BEMSolution`](@ref). `sol.data.interfaces[i]` contains the `surface`, `interior`
-and `exterior` region indices, complex total `pressure`, and `normal_derivative_interior`
-and `normal_derivative_exterior`, both measured along the stored outward normal.
-[`diagnostics`](@ref) includes separate pressure and density-scaled derivative representation
-residuals on each side of every interface. Continuity is built into the shared unknowns;
-representation residuals measure a different discretization error from the linear residual.
-Reconstructed flux residuals depend on the same pressure operators, so they do not
-provide an independent check of quadrature accuracy.
-For `:cbie`, the pressure representations are the solved equations themselves; their
-residuals are algebraic checks, and unsampled flux representation residuals are `nothing`.
-Post-process with `scattering_amplitude(sol; direction)` or `target_strength(sol; direction)`.
-[`pressure`](@ref) samples the total field in the containing fluid; `region=i` restricts
-queries to one region and selects either adjacent trace at an interface.
-
-For concentric spheres, `[FluidFilled(g_shell,h_shell), FluidFilled(g_core,h_core)]`
-corresponds to `Shelled(FluidLayer(g_shell,h_shell), FluidInterior(g_core,h_core), b/a)`.
-The supplied meshes define `a` and `b`; general interfaces need no radius ratio.
+# Example
+```julia
+bem(surfaces, materials, k; parents = [0, 1, 1])
+```
 """
 function bem(
         surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k::Real;

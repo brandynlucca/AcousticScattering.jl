@@ -37,8 +37,8 @@ end
     gmsh_spheroid_mesh(a, b; meshsize, qorder=4, mesh_order=2)
 
 Full 3D triangulated surface quadrature for a prolate/oblate spheroid with
-semi-axis `a` [m] along the x axis of symmetry and equatorial semi-axis `b`
-[m] (matching [`Spheroid`](@ref)'s convention: prolate if `a > b`, oblate
+semi-axis `a` in m along the x axis of symmetry and equatorial semi-axis `b`
+in m, matching [`Spheroid`](@ref)'s convention (prolate if `a > b`, oblate
 if `a < b`), via Gmsh (a unit sphere, non-uniformly scaled with OpenCASCADE's
 `dilate`). `mesh_order=2` uses curved quadratic triangles; `mesh_order=1` uses
 flat triangles and `mesh_order=3` uses cubic triangles. `qorder` controls integration separately.
@@ -98,7 +98,7 @@ end
 Solve a boundary integral equation for a rigid or pressure-release scatterer over the
 full 3D surface `quad` (from [`gmsh_sphere_mesh`](@ref)/
 [`gmsh_spheroid_mesh`](@ref)) at a unit-amplitude plane wave arriving from
-`incidence_angle`/`incidence_azimuth` [rad] (see [`_bem3d_incidence_direction`](@ref)),
+`incidence_angle`/`incidence_azimuth` in rad (see `_bem3d_incidence_direction`),
 using Inti operators and GMRES, with optional H-matrix compression.
 `formulation=:burton_miller` combines the pressure and normal-derivative equations
 with coupling `im/k` for the outgoing `exp(im*k*r)` kernel and outward body normals.

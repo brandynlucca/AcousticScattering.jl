@@ -7,7 +7,7 @@
     Sphere(radius)
 
 A sphere of positive `radius` [m]. Monostatic scattering is independent of orientation.
-Sphere `modal` and `kirchhoff` calls do not take `incidence_angle`; numerical BEM/MFS
+Sphere `modal` and `kirchhoff` calls do not take `incidence_angle`. Numerical BEM/MFS
 solvers accept it to set the incident direction for directional field queries.
 """
 struct Sphere <: AbstractBody
@@ -23,23 +23,17 @@ end
 
 A finite circular cylinder of the given `radius` and `length` [m].
 
-- `radius_curvature` [m]: `Inf` (default) is straight. Full BEM fixes the bend in
-  the `xy` plane, with midpoint at the origin and midpoint tangent along `+x`.
-  The centerline is `(R*sin(s/R), R*(1-cos(s/R)), 0)`, `s ∈ [-length/2,length/2]`.
-  Incidence varies independently of this geometry. `modal` uses a near-broadside
-  correction; `kirchhoff` and `mfs(body, ...)` describe the lateral surface without
-  caps. These bent approximations measure incidence from the chord in the bend plane.
+- `radius_curvature` [m]: `Inf` (default) is straight. A finite value bends the cylinder in the
+  `xy` plane, with midpoint at the origin and midpoint tangent along `+x`. `modal` applies a
+  near-broadside correction. `kirchhoff` and `mfs(body, ...)` describe the lateral surface only.
   Use `bem(...; method=:full)` or `mfs(mesh(...; method=:full), ...)` for closed surfaces.
-- `endcap_depth` [m]: `0.0` (default) uses flat end caps; a positive value
-  caps the cylinder with half-spheroid domes of that depth
-  instead, matching the cylinder's radius at the join so the surface
-  normal stays continuous there. Each dome extends beyond the cylindrical side's
-  length along its endpoint tangent. Full BEM and straight-cylinder MFS honor this
-  field; axisymmetric BEM and FEM use flat ends. Normal-offset MFS requires smooth
-  ends for reliable source placement.
+- `endcap_depth` [m]: `0.0` (default) uses flat end caps. A positive value caps the cylinder
+  with half-spheroid domes of that depth instead. Full BEM and straight-cylinder MFS honor
+  this field. Axisymmetric BEM and FEM always use flat ends.
 
-Full meshing requires `radius_curvature > radius`, an arc shorter than a full circle,
-and nonintersecting ends. Unresolved curved-element validation raises `ArgumentError`.
+Full meshing requires `radius_curvature > radius`, an arc shorter than a full circle, and
+nonintersecting ends. See [Closed bent cylinders](@ref bent-cylinder-tutorial) for the
+bent-geometry conventions.
 """
 struct Cylinder <: AbstractBody
     radius::Float64
@@ -65,8 +59,7 @@ _iscapped(body::Cylinder) = body.endcap_depth > 0
 A structural shell of positive `thickness` [m] inside the outer surface of a
 [`Sphere`](@ref) or [`Spheroid`](@ref). For a prolate spheroid, thickness is measured
 at the equator and the inner surface is confocal. Solve with [`fem`](@ref) and a
-structural [`Shelled`](@ref) material. The thickness must be smaller than the body's radius;
-unsupported base geometries and invalid thicknesses throw `ArgumentError`.
+structural [`Shelled`](@ref) material. The thickness must be smaller than the body's radius.
 """
 struct Shell <: AbstractBody
     body::AbstractBody
@@ -266,7 +259,7 @@ end
 
 Result of [`mfs`](@ref). Axisymmetric body solves use
 [`target_strength`](@ref)`(sol; angle, azimuth)`. Full closed-surface solves use
-`target_strength(sol; direction)`; the default is backscatter. The lateral-only bent-body
+`target_strength(sol; direction)`, defaulting to backscatter. The lateral-only bent-body
 overload returns a monostatic result, evaluated with `target_strength(sol)`.
 """
 struct MFSSolution{D} <: AbstractSolution
@@ -281,13 +274,11 @@ end
 """
     modal(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2, kwargs...)
 
-Modal-series result, returns a [`ModalSolution`](@ref). Dispatches on `body`'s concrete type,
-`Sphere` (backscatter is angle-independent, so no `incidence_angle`
-keyword), `Spheroid`, or `Cylinder` (straight: plain finite-cylinder
-modal series; bent, i.e. finite `radius_curvature`: automatically applies
-the Fresnel bend-coherence correction, formerly `bcms_target_strength`, see [`Cylinder`](@ref)).
-Post-process with [`target_strength`](@ref)`(sol)` [dB re 1 m²] or [`scattering_amplitude`](@ref)`(sol)`
-[m] (the complex scattering amplitude).
+Modal-series result, returns a [`ModalSolution`](@ref). Dispatches on `body`'s concrete type.
+`Sphere` backscatter is angle-independent, with no `incidence_angle` keyword. A bent `Cylinder`
+automatically applies the Fresnel bend-coherence correction (see [`Cylinder`](@ref)).
+Post-process with [`target_strength`](@ref)`(sol)` in dB re 1 m² or [`scattering_amplitude`](@ref)`(sol)`,
+the complex scattering amplitude in m.
 """
 function modal(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
     f = form_function(boundary, k, body.radius; kwargs...)
@@ -359,7 +350,7 @@ end
     kirchhoff(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2)
 
 High-frequency (physical-optics) result, returns a [`KirchhoffSolution`](@ref). Same `body`-type
-dispatch and bend-auto-detection as [`modal`](@ref); post-process with [`target_strength`](@ref)`(sol)`
+dispatch and bend-auto-detection as [`modal`](@ref). Post-process with [`target_strength`](@ref)`(sol)`
 or [`scattering_amplitude`](@ref)`(sol)`.
 """
 function kirchhoff(body::Sphere, boundary::AbstractBoundaryCondition, k::Real)
@@ -404,30 +395,23 @@ end
 """
     fem(body::AbstractBody, boundary::AbstractBoundaryCondition, k; method=:radial, R=1.2*characteristic_radius, incidence_angle=π/2, adaptive=false, kwargs...)
 
-Finite-element result, returns a [`FEMSolution`](@ref); post-process with [`target_strength`](@ref)`(sol)`
-[dB re 1 m²]. `method`:
-- `:radial`, radial FEM + exact Dirichlet-to-Neumann closure (`Sphere`
-  only; angle-independent, no `incidence_angle` keyword; also covers
-  `SolidElastic`/`Shelled{ElasticLayer}`/`Shelled{FluidLayer}`
-  boundaries on a `Sphere`, and `SolidElastic`/`Shelled{ElasticLayer}` on a
-  `Cylinder`). `adaptive=true` (only for `Rigid`/`PressureRelease`/
-  `FluidFilled`) self-checks by doubling mesh resolution until
-  `target_tol` is met, instead of a fixed `n_elements`.
-- `:meridian`, genuine 2D (ρ,z) meridian FEM, angular part discretized.
-  `Sphere` supports only axial incidence (no `incidence_angle` keyword,
-  matching the underlying method's own scope); `Cylinder`/`Spheroid`
-  support general `incidence_angle` (default broadside).
-`R` [m] is the Dirichlet-to-Neumann truncation radius, default `1.2` times
-the body's own characteristic radius. See the `fem(shell::Shell, ...)` method for the
-elastic-shell/fluid-coupling case (`method=:thin`/`:general`).
+Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
+[`target_strength`](@ref)`(sol)` in dB re 1 m².
 
-All supported radial spheres also support
-[`scattering_amplitude`](@ref)`(sol)` in complex meters and phase-aware frequency sweeps.
-Acoustic fields are normalized to unit incident pressure. Fluid shells retain total
-pressure fields; elastic bodies retain longitudinal/shear potentials and their fluid
-interiors' regular pressure coefficients. Adaptive stopping, available for
-`Rigid`/`PressureRelease`/`FluidFilled`, checks target strength in dB; check
-complex-amplitude refinement separately when phase matters.
+`method`:
+- `:radial`: radial FEM with an exact Dirichlet-to-Neumann closure. `Sphere` only, angle
+  independent. Covers `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic`, and elastic or
+  fluid `Shelled` boundaries on a `Sphere`, plus `SolidElastic`/elastic `Shelled` on a `Cylinder`.
+  `adaptive=true` refines `n_elements` until `target_tol` is met (`Rigid`/`PressureRelease`/
+  `FluidFilled` only).
+- `:meridian`: 2D (ρ,z) meridian FEM with the angular part discretized. `Sphere` supports only
+  axial incidence. `Cylinder`/`Spheroid` support general `incidence_angle`.
+
+`R` is the Dirichlet-to-Neumann truncation radius in m, default `1.2` times the body's
+characteristic radius. See `fem(shell::Shell, ...)` for the elastic-shell/fluid-coupling case.
+
+Supported radial spheres also support [`scattering_amplitude`](@ref)`(sol)` in complex meters.
+See [FEM and shell coupling](@ref fem-theory) for field normalization and per-boundary support.
 """
 function fem(body::Sphere, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :radial, R::Real = 1.2body.radius, adaptive::Bool = false, kwargs...)
@@ -566,17 +550,11 @@ _axisymmetric_mesh(body::Cylinder, n::Integer) = cylinder_mesh(body.radius, body
 """
     Mesh
 
-A discretized surface mesh, returned by [`mesh`](@ref) — the single public mesh type, whether the
+A discretized surface mesh, returned by [`mesh`](@ref). The single public mesh type, whether the
 underlying representation is an axisymmetric meridian curve (`method=:axisymmetric`) or a full 3D
-triangulated surface (`method=:full`); a result's type never depends on which one produced it.
-For supplied surfaces, `body` stores nodal coordinates, connectivity, labels, units, orientation
-and provenance; `resolution` is the maximum corner-edge length in metres.
-`body`/`method`/`resolution` record what `mesh(...)` was actually called with (`resolution` is
-always the concrete value used, even when derived from `k` rather than passed directly) — the
-dimension, coordinate system, and element type are already fully determined by `method` together
-with `typeof(mesh).parameters[1]` (`MeridianMesh` for `:axisymmetric`, an `Inti.Quadrature` for
-`:full`), so aren't duplicated as separate fields. Inspect with [`coordinates`](@ref),
-[`normals`](@ref), [`elements`](@ref), and [`element_count`](@ref).
+triangulated surface (`method=:full`). `body`/`method`/`resolution` record what `mesh(...)` was
+called with. `resolution` is the maximum corner-edge length in metres. Inspect the surface with
+`coordinates`, `normals`, `elements`, and `element_count`.
 """
 struct Mesh{D}
     data::D
@@ -589,12 +567,9 @@ end
     mesh(body::AbstractBody; resolution=nothing, k=nothing, method=:axisymmetric,
          qorder=4, mesh_order=2)
 
-Build a [`Mesh`](@ref) for `body`, consolidating `sphere_mesh`/`spheroid_mesh`/`cylinder_mesh`
-(`method=:axisymmetric`, default) and closed surface meshes (`method=:full`,
-`Sphere`/`Spheroid`/`Cylinder`) behind one name and one return type, the same construction `bem`/`mfs` do
-internally. Exactly one of `resolution` or `k` must be given: `resolution` sets panel count
-(`:axisymmetric`) or target element edge length [m] (`:full`) directly; `k` [1/m] derives a
-wavenumber-appropriate default via [`bem_panel_count`](@ref)/`bem3d_elements_per_wavelength`.
+Build a [`Mesh`](@ref) for `body`, the same construction `bem`/`mfs` use internally. Exactly one
+of `resolution` or `k` must be given. `resolution` sets panel count (`:axisymmetric`) or target
+element edge length in m (`:full`) directly. `k` in 1/m derives a wavenumber-appropriate default.
 For full surfaces, `mesh_order` (1, 2 or 3) controls triangle geometry and `qorder` controls
 quadrature. Supplied surfaces use `mesh(path)`, `mesh(generate)` or `mesh(nodes, triangles)`.
 """
@@ -666,23 +641,21 @@ element_count(m::Mesh{<:Inti.Quadrature}) = length(m.data)
 """
     bem(body::AbstractBody, boundary::AbstractBoundaryCondition, k; method=:axisymmetric, incidence_angle=π/2, kwargs...)
 
-Boundary-element solve, returns a [`BEMSolution`](@ref)
-(`method=:axisymmetric`, `Sphere`/`Spheroid`/straight `Cylinder`, or
-`method=:full`, generated `Sphere`/`Spheroid`/`Cylinder` or a supplied `Mesh`). Post-
-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
-[`target_strength`](@ref)`(sol; direction)` (full 3D). A bent
-`Cylinder` (finite `radius_curvature`) requires `method=:full`, including both end caps.
-Full cylinder geometry honors `endcap_depth`; the axisymmetric route uses flat caps.
+Boundary-element solve, returns a [`BEMSolution`](@ref). `method=:axisymmetric` supports
+`Sphere`/`Spheroid`/straight `Cylinder`. `method=:full` supports a generated
+`Sphere`/`Spheroid`/`Cylinder` or a supplied `Mesh`, and is required for a bent `Cylinder`.
+Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
+[`target_strength`](@ref)`(sol; direction)` (full 3D).
 
-Full BEM accepts `meshsize` [m], geometry `mesh_order` (1, 2 or 3, default 2),
-quadrature `qorder` (default 4) and `correction` settings.
-Rigid/soft full BEM uses `formulation=:burton_miller` by default; `:cbie` selects
-the conventional equation, which can be singular at fictitious interior frequencies.
-It also accepts `compression` and `gmres_kwargs` named tuples.
-Fluid full BEM defaults to `formulation=:muller` with a dense two-trace solve;
-`:cbie` selects the four-trace system. `equilibrate=true` scales the matrix before
-factorization. `condition_limit=512` bounds the optional SVD condition-number calculation.
-Use [`diagnostics`](@ref) to inspect convergence, residuals and the settings used.
+Full BEM accepts `meshsize` in m, geometry `mesh_order` (1, 2 or 3, default 2), quadrature
+`qorder` (default 4), `correction`, `compression` and `gmres_kwargs`. Rigid/soft full BEM
+defaults to `formulation=:burton_miller` (`:cbie` selects the conventional equation). Fluid
+full BEM defaults to `formulation=:muller` (`:cbie` selects the four-trace system).
+`equilibrate=true` scales the matrix before factorization. `condition_limit=512` bounds the
+optional SVD condition-number calculation.
+
+See [BEM and MFS](@ref boundary-theory) for the underlying formulations and
+[`diagnostics`](@ref) for convergence and residual checks.
 """
 function bem(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
@@ -803,30 +776,19 @@ end
 """
     mfs(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2, offset=0.3*characteristic_radius, kwargs...)
 
-Method-of-fundamental-solutions solve, returns an [`MFSSolution`](@ref),
-axisymmetric for `Sphere`/`Spheroid`/straight `Cylinder`, or a lateral-only
-3D point-source solve for a bent `Cylinder` (finite `radius_curvature`).
-The bent-body overload omits end caps. Use `mfs(mesh(body; method=:full, ...), ...)`
-for closed-surface conditions and general observation directions.
-A straight `Cylinder` with `endcap_depth > 0` uses smooth half-spheroid caps
-instead of flat caps (see [`Cylinder`](@ref)). Flat caps have sharp rims;
-the meridian mesh clusters panels there, and local source offsets are limited
-to half the distance from the panel midpoint to the corner. Thus `offset`
-is a maximum source displacement. Refine both panel count and offset when
-sampling near a rim.
+Method-of-fundamental-solutions solve, returns an [`MFSSolution`](@ref). Axisymmetric for
+`Sphere`/`Spheroid`/straight `Cylinder`. Lateral-only 3D point sources for a bent `Cylinder`
+(omits end caps). Use `mfs(mesh(body; method=:full, ...), ...)` for closed-surface conditions
+and general observation directions. `offset` is a maximum source displacement in m from the
+surface, reduced near flat-cap rims.
 
-For bent cylinders use `n_s` (default 40) and `n_phi` (default 32) for the axial and
-azimuthal source-grid counts. Both must be integers at least 3. The legacy `n_φ`
-spelling is accepted for compatibility; supplying both spellings throws `ArgumentError`.
+For bent cylinders, `n_s`/`n_phi` (defaults 40/32, at least 3) set the axial and azimuthal
+source-grid counts. `oversampling` (integer, default 1) multiplies the collocation budget while
+keeping the source grid fixed. Values above 1 give a least-squares solve.
 
-`oversampling` is an integer at least one (default 1). It multiplies the
-collocation panel budget while keeping the source grid fixed; bent cylinders multiply
-both collocation grid dimensions. Values above one give a least-squares solve.
-[`diagnostics`](@ref) includes residuals at independent boundary points and singular-value
-estimates of conditioning and rank. These checks require additional assembly and an SVD.
-`condition_limit=512` bounds the number of unknowns for the SVD; larger systems report
-`conditioning=:not_computed` and `nothing` for condition/rank fields. Raise the limit
-to request an SVD for larger systems, or set it to zero to skip that calculation.
+See [BEM and MFS](@ref boundary-theory) for source placement guidance and
+[`diagnostics`](@ref) for residuals, conditioning and rank (`condition_limit=512` bounds the
+SVD size, 0 skips it).
 """
 function mfs(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
@@ -958,24 +920,20 @@ end
     fem(shell::Shell, boundary::Shelled, ext_density, ext_soundspeed, int_density, int_soundspeed, k;
         method=:general, incidence_angle=π/2, kwargs...)
 
-Elastic-shell/fluid coupling, returns a [`FEMSolution`](@ref); post-process with
+Elastic-shell/fluid coupling, returns a [`FEMSolution`](@ref). Post-process with
 [`target_strength`](@ref)`(sol; angle, azimuth)`. `boundary` is built via
-[`Shelled`](@ref)`(poisson, density, youngs_modulus)`. `k`'s
-own medium is the exterior fluid; `ext_density`/`ext_soundspeed` are that
-fluid's absolute density [kg/m³] and sound speed [m/s] (not contrasts, to
-match the underlying frequency-domain solve), `int_density`/
-`int_soundspeed` the interior's. With `method=:thin`, pass `int_density=0`
-for a vacuum-backed shell (no interior coupling).
+[`Shelled`](@ref)`(poisson, density, youngs_modulus)`. `ext_density`/`ext_soundspeed` and
+`int_density`/`int_soundspeed` are the absolute density [kg/m³] and sound speed in m/s of the
+exterior and interior fluids, not contrasts.
 
-`method=:thin`, the axisymmetric reduction of Hayek & Boisvert's (2003) midsurface theory. Only
-`shell.body isa Spheroid` (prolate) is supported, and only axial
-incidence (`incidence_angle` must be `0.0`). This reduction retains only `m = 0`.
+`method=:thin` is an axisymmetric reduction, `shell.body isa Spheroid` only, axial incidence
+only (`incidence_angle = 0.0`). Pass `int_density=0` for a vacuum-backed shell.
 
-`method=:general` (default), full through-thickness 2D solid-elasticity
-shell FEM, general incidence, `shell.body isa Union{Sphere,Spheroid}`,
-always fluid-filled (pass a small `int_density`/`int_soundspeed` rather
-than `0` if you want a near-vacuum limit, no dedicated vacuum-backed
-path exists for this method).
+`method=:general` (default) is a full through-thickness 2D shell FEM, general incidence,
+`shell.body isa Union{Sphere,Spheroid}`, always fluid-filled. Use a small `int_density`/
+`int_soundspeed` for a near-vacuum limit.
+
+See [FEM and shell coupling](@ref fem-theory) for the shell theory.
 """
 function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
         ext_density::Real, ext_soundspeed::Real,
@@ -1069,7 +1027,7 @@ profile to a coordinate system where the mapped surface is exactly circular, the
 boundary condition using spherical wave functions. See [Fourier matching](@ref
 fourier-matching-theory). Supports [`Rigid`](@ref), [`PressureRelease`](@ref) and
 [`FluidFilled`](@ref) boundaries. `mapping_order` and `continuation_steps` control the conformal
-mapping (see [`solve_mapping`](@ref)). `m_max`/`n_max` truncate the modal series and `rtol`/
+mapping (see `solve_mapping`). `m_max`/`n_max` truncate the modal series and `rtol`/
 `maxevals` control the boundary-matching quadrature. Post-process with
 [`target_strength`](@ref)`(sol; angle, azimuth)` or [`scattering_amplitude`](@ref)`(sol; angle,
 azimuth)`, defaulting to backscatter.
@@ -1097,11 +1055,10 @@ Convenience overloads for the canonical bodies, matching [`bem`](@ref)/[`mfs`](@
 coverage. Both convert `body` to an equivalent [`Irregular`](@ref) internally and solve with
 [`fourier`](@ref). [`modal`](@ref) is exact and cheaper for these bodies. These overloads exist
 for interface consistency and cross-checking, not as the recommended solver. The returned
-[`FMSolution`](@ref) keeps the original `Sphere`/`Spheroid` in its `body` field. `Spheroid`'s
-default `mapping_order` scales with aspect ratio, since a higher aspect ratio needs more
-harmonics to represent the ellipse profile accurately, but the default `m_max`/`n_max` (inherited
-from [`fourier`](@ref)'s sphere-calibrated heuristic) is only validated up to about `2`:`1` aspect
-ratio (see [Fourier matching](@ref fourier-matching-theory)'s numerical-conditioning notes).
+[`FMSolution`](@ref) keeps the original `Sphere`/`Spheroid` in its `body` field.
+
+See [Fourier matching](@ref fourier-matching-theory) for `mapping_order`/`m_max`/`n_max`
+defaults and their validated aspect-ratio range.
 """
 function fourier(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
     irregular_body = Irregular(body.radius, Float64[], Float64[])
@@ -1173,40 +1130,21 @@ target_strength
 """
     diagnostics(solution)
 
-Return a named tuple of diagnostics for BEM, MFS and FEM. Modal and Kirchhoff
-solutions return `nothing`; a missing report does not imply convergence.
+Return a named tuple of solver diagnostics for BEM, MFS and FEM. Modal and Kirchhoff solutions
+return `nothing`.
 
-Full-3D BEM fields include `method`, `converged`, `iterations`, `absolute_residual`,
-`relative_residual`, `residual_history`, `unknown_count`, `quadrature_nodes`, `meshsize`,
-`quadrature_order`, `compression`, `correction` and `solver_options`. Residuals are recomputed against the
-assembled (possibly compressed) linear system; relative residual is `norm(A*x-b)/norm(b)`.
-For zero right-hand sides it is zero only for a zero residual, and `Inf` otherwise.
-GMRES history contains residual estimates in the solver's norm (preconditioned when a left
-preconditioner is supplied). Direct solves have no iteration history or
-iterative convergence flag (`iterations = converged = nothing`).
-Linear residuals do not measure geometry, quadrature, conditioning or physical-model error.
+Full-3D BEM reports `converged`, `iterations`, `relative_residual`, `residual_history`,
+`unknown_count`, `meshsize`, `quadrature_order`, and the solver settings used. Axisymmetric
+BEM/MFS/FEM report per-system entries in `systems`. MFS systems also report source counts,
+`condition_number`, `numerical_rank` and a held-out `boundary_residual`.
 
-Axisymmetric BEM, MFS and FEM retain per-system reports in `systems`, with mode,
-matrix dimensions, residuals and numerical controls. Summary residuals and dimensions
-are the maxima over those systems, including every adaptive refinement. `solver_options`
-retains public solve settings; per-system fields describe the actual discretizations.
-Adaptive radial FEM reports `refinement = (converged, change_db, target_tol, n_elements)`;
-this tests successive target strengths, not accuracy against an independent solution.
+See [BEM and MFS](@ref boundary-theory) for field definitions and what each residual does and
+does not measure.
 
-MFS systems also retain source offsets/counts, `condition_number`, `numerical_rank`,
-`rank_tolerance` and a `boundary_residual` measured away from the collocation points.
-Axisymmetric checks use quarter-panel points on the same piecewise-linear geometry;
-they do not measure geometric error. Transmission includes separate `pressure_residual`
-and `velocity_residual` checks because the joint system mixes equation units. Source
-counts include both source sets for transmission. Bent-cylinder checks cover its
-lateral surface. Conditioning and rank refer to the unscaled collocation matrix;
-they are `nothing` when its unknown count exceeds `condition_limit` (see [`mfs`](@ref)).
-
-# Examples
+# Example
 ```julia
 solution = bem(Sphere(0.01), Rigid(), 100.0; method = :full, meshsize = 0.01)
-report = diagnostics(solution)
-report.converged
+diagnostics(solution).converged
 ```
 """
 diagnostics(::AbstractSolution) = nothing

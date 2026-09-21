@@ -93,8 +93,8 @@ end
 """
     spheroid_mesh(a, b, n)
 
-Meridian mesh for a spheroid with semi-axis `a` [m] along the axis of
-symmetry and equatorial semi-axis `b` [m] (prolate if `a > b`, oblate if
+Meridian mesh for a spheroid with semi-axis `a` in m along the axis of
+symmetry and equatorial semi-axis `b` in m (prolate if `a > b`, oblate if
 `a < b`, matching [`Spheroid`](@ref)'s convention), discretized into `n`
 panels from the north pole (ρ=0, z=a) to the south pole (ρ=0, z=-a). `a =
 b` reduces exactly to [`sphere_mesh`](@ref).
@@ -148,7 +148,7 @@ end
     cylinder_mesh(radius, length, n)
 
 Meridian mesh for a finite right circular cylinder of the given `radius`
-and `length` [m] (axis of symmetry along Cartesian x), discretized into approximately
+and `length` in m (axis of symmetry along Cartesian x), discretized into approximately
 `n` panels total, distributed across the three meridian segments (top cap,
 side, bottom cap) in proportion to their arc length. Traversed from the top
 cap's center (ρ=0, z=length/2) outward across the cap, down the side, and

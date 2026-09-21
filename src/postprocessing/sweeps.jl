@@ -147,8 +147,8 @@ Reuse layer operators, their compression and the system operator within this cal
 Each angle gets an independent GMRES solve with the supplied tolerances.
 
 Accepts `formulation`, `compression`, `correction` and `gmres_kwargs` as in [`bem`](@ref).
-Returns an [`IncidenceAngleSweep`](@ref) retaining amplitudes and strengths. Operators
-are discarded after sampling; subsequent calls assemble from their own inputs.
+Returns an `IncidenceAngleSweep` retaining amplitudes and strengths. Operators are discarded
+after sampling. Subsequent calls assemble from their own inputs.
 """
 function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature},
         boundary::Union{Rigid, PressureRelease}, k::Real, angles::AbstractVector{<:Real};
@@ -183,8 +183,8 @@ The multiple-interface overload also accepts `parents` and `validation`. With
 coherent complex sum, using the same solver options. `labels` supplies one name per
 interface. Each system is sampled separately to limit retained matrix storage.
 
-Returns an [`IncidenceAngleSweep`](@ref) containing complex amplitudes and target
-strengths; dense solution state is discarded after sampling.
+Returns an `IncidenceAngleSweep` containing complex amplitudes and target strengths. Dense
+solution state is discarded after sampling.
 
 # Examples
 ```julia
@@ -251,7 +251,7 @@ angle then only needs a cheap incident-coefficient recompute and matrix-vector s
 expensive boundary-matching quadrature that dominates a single [`fourier`](@ref) call.
 
 Accepts `continuation_steps`, `mapping_order`, `m_max`, `n_max`, `rtol` and `maxevals` as in
-[`fourier`](@ref). Returns an [`IncidenceAngleSweep`](@ref).
+[`fourier`](@ref). Returns an `IncidenceAngleSweep`.
 """
 function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondition,
         k::Real, angles::AbstractVector{<:Real};
