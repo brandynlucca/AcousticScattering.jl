@@ -19,19 +19,31 @@ end
 
 @time @testset "Closed flat cylinder against axisymmetric BEM" begin
     body = Cylinder(0.5, 2.0)
-    for (boundary, meshsize) in ((Rigid(), 0.25), (FluidFilled(1.05, 1.02), 0.22))
+    for (boundary, meshsize) in ((Rigid(), 0.25), (PressureRelease(), 0.25),
+        (FluidFilled(1.05, 1.02), 0.22))
         k = boundary isa FluidFilled && boundary.density_contrast < 0.01 ? 0.1 : 1.0
         qorder = boundary isa FluidFilled ? 5 : 4
-        options = boundary isa FluidFilled ? (; condition_limit = 0) :
-                  (; compression = (method = :none,),
-            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
+        options = if boundary isa FluidFilled
+            (; condition_limit = 0)
+        elseif boundary isa PressureRelease
+            # This flat cylinder's sharp rim ill-conditions burton_miller (cond~6.6e5, GMRES stalls near 20%). :cbie plateaus near 0.24% without reaching reltol, so convergence is checked on the residual reached, not diagnostics(...).converged.
+            (; formulation = :cbie, compression = (method = :none,),
+                gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
+        else
+            (; compression = (method = :none,),
+                gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
+        end
         solution = bem(body, boundary, k; method = :full, meshsize, mesh_order = 3,
             qorder, incidence_angle = pi / 3, options...)
         reference = bem(body, boundary, k; n = 160, m_max = 6, incidence_angle = pi / 3)
         expected = [scattering_amplitude(reference; angle = t, azimuth = p)
                     for (t, p) in ((2pi / 3, pi), (pi / 3, 0.0), (pi / 2, pi / 2))]
         check_cylinder_amplitudes(cylinder_amplitudes(solution, pi / 3, 0.0), expected)
-        boundary isa FluidFilled || @test diagnostics(solution).converged
+        if boundary isa Rigid
+            @test diagnostics(solution).converged
+        elseif boundary isa PressureRelease
+            @test diagnostics(solution).relative_residual < 0.01
+        end
     end
 end
 
@@ -100,8 +112,7 @@ end
     reference60 = [-0.2798784736915524 - 0.03732557787576306im,
         0.1148429765445959 + 0.02836089828639042im,
         -0.04491043881999867 + 0.01607119990249349im]
-    # NOTE: (2.0, pi/3) dropped from this sweep to cut cost; (2.0, pi/6) keeps the R=2.0
-    # golden-reference check and (4.0, pi/3) keeps curvature diversity.
+    # (2.0, pi/3) dropped from this sweep to cut cost. (2.0, pi/6) keeps the R=2.0 golden-reference check and (4.0, pi/3) keeps curvature diversity.
     for (R, beta) in ((2.0, pi / 6), (4.0, pi / 3))
         body = Cylinder(0.5, 2.0; radius_curvature = R, endcap_depth = 0.5)
         collocation = mesh(body; method = :full, resolution = 0.3, mesh_order = 3)

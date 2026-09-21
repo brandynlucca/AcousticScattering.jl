@@ -4,8 +4,8 @@ const TEST_GROUPS = (
     "Analytical", "RadialFEM", "MeridianFEM", "Boundary", "FullBEM",
     "CylinderBEM", "RegionBEM", "NearPressure", "Spheroidal",
     "RegionShapes", "FishBEM", "LowFrequencyRegions", "GasResonance",
-    "CoupledResonance", "Oblique", "Interfaces", "Plots1D",
-    "Plots2D", "Plots3DModels", "Plots3DFull")
+    "CoupledResonance", "Oblique", "Interfaces", "FourierMatching",
+    "Plots1D", "Plots2D", "Plots3DModels", "Plots3DFull")
 const TEST_GROUP_SPEC = get(ENV, "GROUP", isempty(ARGS) ? "All" : only(ARGS))
 # A comma-separated GROUP (e.g. "RadialFEM,Boundary") runs several groups in one process,
 # letting a single CI job batch groups together (see the macOS-specific job in CI.yml,
@@ -87,6 +87,11 @@ end
 if _wants("Interfaces")
     @time @safetestset "Interfaces" include("interfaces.jl")
     @time @safetestset "BodyCoordinates" include("body_coordinates.jl")
+end
+
+if _wants("FourierMatching")
+    @time @safetestset "FourierMatching geometry" include("fourier_matching_geometry.jl")
+    @time @safetestset "FourierMatching boundary" include("fourier_matching_boundary.jl")
 end
 
 if _wants("Plots1D"; core = false)
