@@ -74,6 +74,7 @@ makedocs(
             "Kirchhoff physical optics" => "models/kirchhoff.md",
             "BEM and MFS" => "models/boundary_methods.md",
             "FEM and shell coupling" => "models/fem.md",
+            "Fourier matching" => "models/fourier_matching.md",
             "References" => "models/references.md"
         ],
         "API Reference" => "api.md",
