@@ -1040,6 +1040,100 @@ function fem(s::Shell, boundary::Shelled{ElasticFEMLayer, Nothing},
     return FEMSolution(s, boundary, k, method, data)
 end
 
+# --- `fourier`: conformal-mapping semi-analytic method for bodies of revolution -----
+
+"""
+    FMSolution
+
+Result of [`fourier`](@ref). Post-process with [`target_strength`](@ref)`(sol; angle,
+azimuth)` or [`scattering_amplitude`](@ref)`(sol; angle, azimuth)` (backscatter by default, same
+convention as axisymmetric [`bem`](@ref)/[`mfs`](@ref)). [`diagnostics`](@ref) reports the
+conformal mapping's admissibility and the truncation orders used.
+"""
+struct FMSolution <: AbstractSolution
+    body::AbstractBody
+    boundary::AbstractBoundaryCondition
+    k::Float64
+    mapping::ConformalMapping
+    b::Matrix{ComplexF64}
+    incidence_angle::Float64
+end
+
+"""
+    fourier(body::Irregular, boundary::AbstractBoundaryCondition, k;
+           incidence_angle=π/2, continuation_steps=8, mapping_order=length(body.rc),
+           m_max=_default_mode_count(k*body.a), n_max=m_max, rtol=1e-6, maxevals=1000)
+
+Fourier-matching result, returns an [`FMSolution`](@ref). Conformally maps `body`'s meridian
+profile to a coordinate system where the mapped surface is exactly circular, then matches the
+boundary condition using spherical wave functions. See [Fourier matching](@ref
+fourier-matching-theory). Supports [`Rigid`](@ref), [`PressureRelease`](@ref) and
+[`FluidFilled`](@ref) boundaries. `mapping_order` and `continuation_steps` control the conformal
+mapping (see [`solve_mapping`](@ref)). `m_max`/`n_max` truncate the modal series and `rtol`/
+`maxevals` control the boundary-matching quadrature. Post-process with
+[`target_strength`](@ref)`(sol; angle, azimuth)` or [`scattering_amplitude`](@ref)`(sol; angle,
+azimuth)`, defaulting to backscatter.
+"""
+function fourier(body::Irregular, boundary::AbstractBoundaryCondition, k::Real;
+        incidence_angle::Real = π / 2, continuation_steps::Integer = 8,
+        mapping_order::Integer = max(length(body.rc), 1),
+        m_max::Integer = _default_mode_count(k * body.a), n_max::Integer = m_max,
+        rtol::Real = 1e-6, maxevals::Integer = 1000)
+    mapping = solve_mapping(body, mapping_order; continuation_steps)
+    is_admissible(mapping) || throw(ArgumentError(
+        "Irregular's conformal mapping is inadmissible (Jacobian vanishes somewhere). " *
+        "Try a higher mapping_order or more continuation_steps"))
+    transition = _boundary_transition(mapping, k, boundary; m_max, n_max, rtol, maxevals)
+    a = _incident_coefficients(n_max, m_max, k, incidence_angle)
+    b = _apply_transition(transition, a, n_max, m_max)
+    return FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle))
+end
+
+"""
+    fourier(body::Sphere, boundary, k; kwargs...)
+    fourier(body::Spheroid, boundary, k; mapping_order=..., kwargs...)
+
+Convenience overloads for the canonical bodies, matching [`bem`](@ref)/[`mfs`](@ref)'s body-type
+coverage. Both convert `body` to an equivalent [`Irregular`](@ref) internally and solve with
+[`fourier`](@ref). [`modal`](@ref) is exact and cheaper for these bodies. These overloads exist
+for interface consistency and cross-checking, not as the recommended solver. The returned
+[`FMSolution`](@ref) keeps the original `Sphere`/`Spheroid` in its `body` field. `Spheroid`'s
+default `mapping_order` scales with aspect ratio, since a higher aspect ratio needs more
+harmonics to represent the ellipse profile accurately, but the default `m_max`/`n_max` (inherited
+from [`fourier`](@ref)'s sphere-calibrated heuristic) is only validated up to about `2`:`1` aspect
+ratio (see [Fourier matching](@ref fourier-matching-theory)'s numerical-conditioning notes).
+"""
+function fourier(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
+    irregular_body = Irregular(body.radius, Float64[], Float64[])
+    sol = fourier(irregular_body, boundary, k; kwargs...)
+    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle)
+end
+
+function fourier(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
+        mapping_order::Integer = clamp(
+            round(Int, 6 * max(body.a, body.b) / min(body.a, body.b)), 8, 64),
+        kwargs...)
+    irregular_body = Irregular(mapping_order) do theta
+        1 / sqrt((cos(theta) / body.a)^2 + (sin(theta) / body.b)^2)
+    end
+    sol = fourier(irregular_body, boundary, k; mapping_order, kwargs...)
+    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle)
+end
+
+function target_strength(sol::FMSolution; angle::Real = π - sol.incidence_angle, azimuth::Real = π)
+    return target_strength(scattering_amplitude(sol; angle, azimuth))
+end
+
+function scattering_amplitude(
+        sol::FMSolution; angle::Real = π - sol.incidence_angle, azimuth::Real = π)
+    return fourier_matching_amplitude(sol.b, sol.k, angle, azimuth)
+end
+
+function diagnostics(sol::FMSolution)
+    (; admissible = is_admissible(sol.mapping),
+        m_max = size(sol.b, 2) - 1, n_max = size(sol.b, 1) - 1)
+end
+
 # --- `target_strength`/`scattering_amplitude` on `AbstractSolution`s -----------------------
 # `scattering_amplitude` is the solution-level replacement for the low-level, unexported
 # `form_function(boundary, k, ...)` family: the complex amplitude [m], pre-dB-conversion.

@@ -241,6 +241,37 @@ function incidence_angle_sweep(surfaces::AbstractVector{<:Mesh},
         amplitudes, response_labels)
 end
 
+"""
+    incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondition, k, angles; kwargs...)
+
+Sample Fourier-matching backscatter at fixed exterior wavenumber `k`, reusing the conformal
+mapping and the boundary-matching transition operator (see [Fourier matching](@ref
+fourier-matching-theory)) across all `angles`, since neither depends on incidence angle. Each
+angle then only needs a cheap incident-coefficient recompute and matrix-vector solve, not the
+expensive boundary-matching quadrature that dominates a single [`fourier`](@ref) call.
+
+Accepts `continuation_steps`, `mapping_order`, `m_max`, `n_max`, `rtol` and `maxevals` as in
+[`fourier`](@ref). Returns an [`IncidenceAngleSweep`](@ref).
+"""
+function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondition,
+        k::Real, angles::AbstractVector{<:Real};
+        continuation_steps::Integer = 8, mapping_order::Integer = max(length(body.rc), 1),
+        m_max::Integer = _default_mode_count(k * body.a), n_max::Integer = m_max,
+        rtol::Real = 1e-6, maxevals::Integer = 1000)
+    isempty(angles) && throw(ArgumentError("a sweep needs at least one sample"))
+    all(isfinite, angles) || throw(ArgumentError("sweep coordinates must be finite"))
+    mapping = solve_mapping(body, mapping_order; continuation_steps)
+    is_admissible(mapping) || throw(ArgumentError(
+        "Irregular's conformal mapping is inadmissible (Jacobian vanishes somewhere). " *
+        "Try a higher mapping_order or more continuation_steps"))
+    transition = _boundary_transition(mapping, k, boundary; m_max, n_max, rtol, maxevals)
+    return incidence_angle_sweep(angles) do incidence_angle
+        a = _incident_coefficients(n_max, m_max, k, incidence_angle)
+        b = _apply_transition(transition, a, n_max, m_max)
+        FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle))
+    end
+end
+
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
     FEMSolution{_ShellFEMSurfaceData}}

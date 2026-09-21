@@ -12,6 +12,8 @@ using Gmsh: gmsh
 using HMatrices: HMatrices
 using LinearMaps: LinearMap
 using IterativeSolvers: IterativeSolvers
+using NLsolve: NLsolve
+using ForwardDiff: ForwardDiff
 using StaticArrays: SVector, SMatrix
 using PrecompileTools: @compile_workload
 
@@ -39,6 +41,7 @@ include("analytical/high_frequency.jl")
 include("analytical/bent_cylinder.jl")
 
 include("engine/axisymmetric_bem.jl")
+include("engine/fourier_matching.jl")
 include("engine/shell_bem.jl")
 include("engine/radial_fem.jl")
 include("engine/meridian_fem.jl")
@@ -76,10 +79,10 @@ include("postprocessing/revolution.jl")
 export Rigid, PressureRelease, FluidFilled, GasFilled, SolidElastic
 export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumInterior,
        FluidInterior
-export AbstractBody, Sphere, Cylinder, Spheroid, Shell
+export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
 export AbstractSolution, ModalSolution, KirchhoffSolution, FEMSolution, BEMSolution,
-       MFSSolution
-export modal, kirchhoff, fem, bem, mfs
+       MFSSolution, FMSolution
+export modal, kirchhoff, fem, bem, mfs, fourier
 export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
