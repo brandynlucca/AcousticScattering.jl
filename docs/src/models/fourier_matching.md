@@ -7,13 +7,17 @@ the canonical (sphere/spheroid) and general numerical (BEM/MFS/FEM) solvers. See
 [Reeder and Stanton (2004)](https://doi.org/10.1121/1.1648681), extending
 [DiPerna and Stanton (1994)](https://doi.org/10.1121/1.411243)'s two-dimensional method.
 
-A meridian profile is represented as an `Irregular`, solved with `fourier` against a `Rigid`,
-`PressureRelease` or `FluidFilled` boundary, returning an `FMSolution`. This is the same calling
-convention as `modal`, `bem` and `mfs`. `fourier` also accepts `Sphere` and `Spheroid` directly,
-converting to an equivalent `Irregular` internally, though `modal` is exact and cheaper for those
-bodies. `incidence_angle_sweep(body::Irregular, boundary, k, angles)` builds the conformal
-mapping and boundary-matching transition operator once and reuses both across all `angles`,
-since neither depends on incidence angle.
+```julia
+fourier(Irregular(profile), boundary, k)               # Rigid, PressureRelease or FluidFilled
+fourier(Sphere(a), boundary, k)                        # converts to an equivalent Irregular
+incidence_angle_sweep(body::Irregular, boundary, k, angles)
+```
+
+`fourier` returns an `FMSolution`, the same calling convention as `modal`, `bem` and `mfs`.
+Converting a `Sphere`/`Spheroid` to `Irregular` works, but `modal` is exact and cheaper for
+those bodies. `incidence_angle_sweep` builds the conformal mapping and boundary-matching
+transition operator once and reuses it across all `angles`, since neither depends on incidence
+angle.
 
 ## Conformal mapping
 
@@ -93,4 +97,5 @@ spheroids up to 10:1 aspect ratio (against the exact ellipse equation). All thre
 conditions are checked against the exact sphere modal solution and, for a prolate spheroid at
 oblique incidence up to 1.5:1 aspect ratio, against independent axisymmetric BEM, at backscatter,
 forward scatter and off-plane bistatic angles. The fluid boundary is checked at both weak
-(density and sound-speed contrasts near ``1``) and gas (strong) contrast.
+(density and sound-speed contrasts near ``1``) and gas (strong) contrast. [Reeder et al.
+(2004)](https://doi.org/10.1121/1.1648318) validate the method against measured fish morphology.

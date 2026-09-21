@@ -3,29 +3,23 @@ using AcousticScattering
 # Initialize plotting extensions before Documenter evaluates example blocks.
 using CairoMakie
 
-# Keep curated prose while requiring a source docstring for every exported binding.
-for name in names(AcousticScattering)
-    name === :AcousticScattering && continue
-    haskey(Base.Docs.meta(AcousticScattering), Base.Docs.Binding(AcousticScattering, name)) ||
-        error("Exported name AcousticScattering.$name has no source docstring")
-end
-
 DocMeta.setdocmeta!(AcousticScattering, :DocTestSetup, :(using AcousticScattering);
     recursive = true)
 
 makedocs(
     sitename = "AcousticScattering.jl",
     modules = [AcousticScattering],
-    # The API reference uses curated prose rather than source-docstring inclusion.
-    # Doctests, examples, and cross-references still fail the build on errors.
-    checkdocs = :none,
+    # The API reference is generated from source docstrings via @docs blocks.
+    # checkdocs=:exports fails the build if an exported name is missing from api.md.
+    checkdocs = :exports,
     doctest = true,
     warnonly = false,
     authors = "AcousticScattering contributors",
     repo = "https://github.com/brandynlucca/AcousticScattering.jl/blob/{commit}{path}#{line}",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        assets = ["assets/gallery.css", "assets/branding.css", "assets/favicon.ico"],
+        assets = ["assets/gallery.css", "assets/branding.css", "assets/tooltip.css",
+            "assets/page_toc.js", "assets/favicon.ico"],
         sidebar_sitename = false,
         footer = "Powered by [Documenter.jl](https://github.com/JuliaDocs/Documenter.jl). " *
                  "[Logo attribution and license](" *

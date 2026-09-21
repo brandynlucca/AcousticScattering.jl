@@ -17,13 +17,19 @@ R_c = \frac{gh-1}{gh+1},
 
 Rigid and pressure-release boundaries use `+1` and `-1`. A fluid-shell sphere uses a
 frequency- and thickness-dependent two-interface reflection approximation. There is no
-general implemented elastic-material Kirchhoff reflection law.
+general implemented elastic-material Kirchhoff reflection law. This is the physical-optics
+approximation used for swimbladdered fish targets ([Foote,
+1985](https://doi.org/10.1121/1.392438)).
 
 For a sphere, the finite-frequency expression used by the solver is
 
 ```math
 f_s = R_c a\left[-\frac{i}{2}e^{2ika}
 +\frac{e^{2ika}-1}{4ka}\right].
+```
+
+```julia
+kirchhoff(Sphere(a), Rigid(), k)
 ```
 
 Its leading magnitude tends to `abs(R_c) * a / 2` at high frequency. The correction term is

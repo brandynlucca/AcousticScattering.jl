@@ -31,10 +31,15 @@ when the modal DtN condition is exact. Check element refinement and modal cutoff
 
 ## Complex radial sphere results
 
+```julia
+solution = fem(Sphere(a), Rigid(), k; method = :radial)
+scattering_amplitude(solution)   # complex meters
+target_strength(solution)        # dB re 1 m²
+```
+
 For `Sphere` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` or supported
-`Shelled` boundaries, radial FEM supports
-`scattering_amplitude(solution)` in complex meters and `target_strength(solution)` in dB re 1 m².
-Both return backscatter without observation keywords. The result retains radial coefficients
+`Shelled` boundaries, radial FEM supports both calls above, returning backscatter without
+observation keywords. The result retains radial coefficients
 and pressure fields: exterior **scattered** pressure and, for a fluid interior, interior
 **total** pressure, normalized to unit incident pressure. Their complex phase follows the
 time convention in [Conventions](@ref conventions). Fluid shells retain total pressure

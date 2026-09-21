@@ -22,8 +22,16 @@ A_\ell^{\mathrm{rigid}}=-\frac{j_\ell'(ka)}{{h_\ell^{(1)}}'(ka)},
 A_\ell^{\mathrm{soft}}=-\frac{j_\ell(ka)}{h_\ell^{(1)}(ka)}.
 ```
 
-Fluid coefficients match pressure and density-weighted normal derivatives. Elastic coefficients
-also match displacement and stress.
+Fluid coefficients match pressure and density-weighted normal derivatives ([Anderson,
+1950](https://doi.org/10.1121/1.1906621)). Solid-elastic coefficients also match displacement
+and stress ([Hickling, 1962](https://doi.org/10.1121/1.1909055)).
+
+```julia
+modal(Sphere(a), Rigid(), k; m_max = 40)
+modal(Sphere(a), FluidFilled(g, h), k)
+modal(Sphere(a), SolidElastic(g, hl, ht), k)
+```
+
 Increase `m_max` to test truncation. The keyword uses “m” although the sum here uses
 spherical degree. Highly resonant or extreme-contrast cases can be ill-conditioned.
 
@@ -55,11 +63,13 @@ f_{\mathrm{bs}}\propto L\,
 \sum_m B_m(k a\sin\beta).
 ```
 
-This describes the lateral finite-length approximation and omits end-cap scattering.
-It is not an exact solution for a closed finite cylinder, particularly near end-on incidence.
+This describes the lateral finite-length approximation and omits end-cap scattering ([Stanton,
+1988](https://doi.org/10.1121/1.396184)). It is not an exact solution for a closed finite
+cylinder, particularly near end-on incidence.
 
-For curvature radius `rho_c`, the bent-cylinder model multiplies the straight amplitude
-by `L_effective / L`, with
+For curvature radius `rho_c`, the bent-cylinder model ([Stanton,
+1989](https://doi.org/10.1121/1.398193)) multiplies the straight amplitude by `L_effective / L`,
+with
 
 ```math
 L_{\mathrm{effective}} =
@@ -71,15 +81,29 @@ z_{\max}=\rho_c\left(1-\cos\frac{L}{2\rho_c}\right).
 
 This correction applies near broadside and does not account for all effects of curvature.
 
+```julia
+modal(Cylinder(a, L), Rigid(), k)                                # straight
+modal(Cylinder(a, L; radius_curvature = rho_c), Rigid(), k)      # bent, near broadside
+```
+
 ## Shells and viscosity
 
-Fluid-shell coefficients match two interfaces. Elastic-shell coefficients use coupled
-displacement/traction determinants. `ElasticLayer` defaults to `interior_coupling = :generalized`,
-using the actual cavity fluid. `:identical_fluid` instead uses the exterior medium in the
-original inner-boundary terms, ignoring differing cavity contrasts. Choose it only to reproduce
-that restricted formulation. See the Goodman–Stern reference in [References](@ref references).
+Fluid-shell coefficients match pressure and normal velocity across two interfaces ([Jech et al.,
+2015](https://doi.org/10.1121/1.4937607)). Elastic-shell coefficients use the Goodman and Stern
+boundary-matching determinant ([Goodman and Stern,
+1962](https://doi.org/10.1121/1.1928120)), which assumes identical interior and exterior fluids.
 
-The viscous-elastic model represents a viscous outer layer,
-elastic wall, and fluid core. Viscosity introduces frequency-dependent complex wavenumbers.
-Only its monopole is supported.
-Use this model only in its low-frequency, monopole regime.
+```julia
+modal(Sphere(a), Shelled(FluidLayer(g, h), FluidInterior(g_i, h_i), b_a), k)
+modal(Sphere(a), Shelled(ElasticLayer(g, cl, ct), FluidInterior(g_i, h_i), b_a), k)
+```
+
+`ElasticLayer` defaults to `interior_coupling = :generalized`, using the actual cavity fluid
+([Stanton, 1990](https://doi.org/10.1121/1.400321)). `:identical_fluid` instead reproduces the
+original Goodman-Stern inner-boundary terms, ignoring differing cavity contrasts. Choose it only
+to reproduce that restricted formulation.
+
+The viscous-elastic model ([Feuillade and Nero,
+1998](https://doi.org/10.1121/1.423076)) represents a viscous outer layer, elastic wall, and
+fluid core. Viscosity introduces frequency-dependent complex wavenumbers. Only its monopole is
+supported. Use this model only in its low-frequency, monopole regime.
