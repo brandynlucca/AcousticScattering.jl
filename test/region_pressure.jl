@@ -16,7 +16,7 @@ function modal_region_points(points, direction)
     [(dot(direction, p), sqrt(max(0, norm(p)^2-dot(direction, p)^2)), 0.0) for p in points]
 end
 
-@time @testset "Disconnected and branched fluid pressure" begin
+@time "Disconnected and branched fluid pressure" @testset "Disconnected and branched fluid pressure" begin
     beta, alpha, k = pi/3, 0.4, 0.6
     direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
     center = [-0.35, 0.0, 0.0]
@@ -38,7 +38,7 @@ end
         [FluidFilled(1, 1), material, FluidFilled(1, 1)], [0, 1, 1], 2, 3))
         solution = bem(surfaces, materials, k; parents, incidence_angle = beta,
             incidence_azimuth = alpha, condition_limit = 0)
-        @time @testset "parents=$parents" begin
+        @time "parents=$parents" @testset "parents=$parents" begin
             compare_region_pressure(pressure(solution, points), expected)
             @test pressure(solution, points[2]; region = active_region) ≈ expected[2] rtol = 1e-3
             @test pressure(solution, points[3]; region = passive_region) ≈ expected[3] rtol = 1e-3
@@ -65,7 +65,7 @@ end
     end
 end
 
-@time @testset "Nested fluid pressure" begin
+@time "Nested fluid pressure" @testset "Nested fluid pressure" begin
     @test_skip "platform-dependent tolerance flake"
     # beta, alpha = pi/3, 0.4
     # direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
@@ -140,7 +140,7 @@ end
     # end
 end
 
-@time @testset "Interacting fluid pressure" begin
+@time "Interacting fluid pressure" @testset "Interacting fluid pressure" begin
     surfaces = [mesh(; semiaxes = (0.2, 0.2, 0.2), center,
                     resolution = 0.6, mesh_order = 3, qorder = 5)
                 for center in ((-0.35, 0.0, 0.0), (0.35, 0.0, 0.0))]

@@ -8,13 +8,13 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "Makie visualization: full 3D BEM and mesh plots" begin
+@time "Makie visualization: full 3D BEM and mesh plots" @testset "Makie visualization: full 3D BEM and mesh plots" begin
     a = 0.01
     c_water = 1477.4
     k = 2pi * 38000.0 / c_water
     sphere = AS.Sphere(a)
 
-    @time @testset "full 3D BEM: mesh and surface_field" begin
+    @time "full 3D BEM: mesh and surface_field" @testset "full 3D BEM: mesh and surface_field" begin
         full_sol = AS.bem(sphere, AS.Rigid(), k; method = :full,
             meshsize = AS.bem3d_elements_per_wavelength(k))
         @test plot(full_sol; kind = :mesh) isa Makie.FigureAxisPlot
@@ -24,14 +24,14 @@ BLAS.set_num_threads(1)
         @test plot(full_sol; kind = :mesh, show_normals = true) isa Makie.FigureAxisPlot
     end
 
-    @time @testset "standalone Mesh: both representations" begin
+    @time "standalone Mesh: both representations" @testset "standalone Mesh: both representations" begin
         m1 = AS.mesh(sphere; k = k)
         m2 = AS.mesh(sphere; k = k, method = :full)
         @test plot(m1) isa Makie.FigureAxisPlot
         @test plot(m2) isa Makie.FigureAxisPlot
     end
 
-    @time @testset "Nested interfaces and cutaway" begin
+    @time "Nested interfaces and cutaway" @testset "Nested interfaces and cutaway" begin
         surfaces = [AS.mesh(AS.Sphere(r); method = :full, resolution = 0.6r,
                         mesh_order = 3, qorder = 4) for r in (1.0, 0.3)]
         solution = bem(surfaces, [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)], 1.0)

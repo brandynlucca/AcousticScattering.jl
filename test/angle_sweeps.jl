@@ -4,7 +4,7 @@ using Test
 
 BLAS.set_num_threads(2)
 
-@time @testset "Reusable fluid incidence sweeps" begin
+@time "Reusable fluid incidence sweeps" @testset "Reusable fluid incidence sweeps" begin
     outer = mesh(; semiaxes = (1.0, 0.7, 0.8), center = (0.2, -0.1, 0.15),
         resolution = 0.9, qorder = 4)
     inner = mesh(; semiaxes = (0.25, 0.16, 0.18), center = (0.3, -0.06, 0.1),

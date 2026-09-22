@@ -1,7 +1,7 @@
 using AcousticScattering
 using Test
 
-@time @testset "Elastic and layered radial FEM complex sphere references" begin
+@time "Elastic and layered radial FEM complex sphere references" @testset "Elastic and layered radial FEM complex sphere references" begin
     body = Sphere(1.0)
     cases = (
         (SolidElastic(2.7, 4.0, 2.0), (0.4, 3.2), 400),
@@ -52,7 +52,7 @@ using Test
     end
 end
 
-@time @testset "Solid sphere complex rigid and shrinking-cavity limits" begin
+@time "Solid sphere complex rigid and shrinking-cavity limits" @testset "Solid sphere complex rigid and shrinking-cavity limits" begin
     body = Sphere(1.0)
     stiff = SolidElastic(5000.0, 40.0, 20.0)
     solid = SolidElastic(2.7, 4.0, 2.0)
@@ -66,7 +66,7 @@ end
     end
 end
 
-@time @testset "Elastic radial refinement and interior coupling" begin
+@time "Elastic radial refinement and interior coupling" @testset "Elastic radial refinement and interior coupling" begin
     body = Sphere(1.0)
     boundary = Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8)
     reference = scattering_amplitude(modal(body, boundary, 1.8; m_max = 12))
@@ -84,7 +84,7 @@ end
           scattering_amplitude(modal(body, identical, 1.6; m_max = 12)) rtol = 0.001
 end
 
-@time @testset "Elastic and layered radial FEM frequency sweeps" begin
+@time "Elastic and layered radial FEM frequency sweeps" @testset "Elastic and layered radial FEM frequency sweeps" begin
     body = Sphere(0.01)
     for boundary in (SolidElastic(2.7, 4.0, 2.0),
         Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8),

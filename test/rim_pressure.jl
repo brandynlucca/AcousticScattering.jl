@@ -4,7 +4,7 @@ using Test
 
 BLAS.set_num_threads(4)
 
-@time @testset "Near-source normal derivatives" begin
+@time "Near-source normal derivatives" @testset "Near-source normal derivatives" begin
     for distance in (1e-3, 1e-5, 1e-7, 1e-9), m in (0, 3)
 
         actual = AcousticScattering._azimuthal_dGdn_field(
@@ -27,7 +27,7 @@ end
 # than the geometry itself), so intensive edge-quadrature validation lives in perf/rim_pressure.jl
 # instead of here; these tests only exercise the cheap axisymmetric BEM/MFS code paths.
 
-@time @testset "Full surface layer evaluation at flat-cylinder rims" begin
+@time "Full surface layer evaluation at flat-cylinder rims" @testset "Full surface layer evaluation at flat-cylinder rims" begin
     body, k = Cylinder(0.5, 1.0), 0.5
     source = (0.1, 0.05, -0.02)
     points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)
@@ -42,7 +42,7 @@ end
     compare_rim_pressure(actual, expected)
 end
 
-@time @testset "Rigid flat-cylinder rim continuity" begin
+@time "Rigid flat-cylinder rim continuity" @testset "Rigid flat-cylinder rim continuity" begin
     body, boundary, k = Cylinder(0.5, 1.0), Rigid(), 0.5
     points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)
               for side in (-1, 1) for delta in (0.0, 1e-8, 1e-4, 0.001, 0.01, 0.05)]
@@ -54,7 +54,7 @@ end
     compare_rim_pressure([far], [scattering_amplitude(solution)])
 end
 
-@time @testset "Fluid-filled flat-cylinder rims" begin
+@time "Fluid-filled flat-cylinder rims" @testset "Fluid-filled flat-cylinder rims" begin
     body, boundary, k = Cylinder(0.5, 1.0), FluidFilled(1.2, 1.1), 0.5
     points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)
               for side in (-1, 1) for delta in (0.0, 1e-8, 1e-4, 0.001, 0.01, 0.05)]
@@ -72,7 +72,7 @@ end
     end
 end
 
-@time @testset "Pressure-release flat-cylinder rims" begin
+@time "Pressure-release flat-cylinder rims" @testset "Pressure-release flat-cylinder rims" begin
     body, boundary, k = Cylinder(0.5, 1.0), PressureRelease(), 0.5
     points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)
               for side in (-1, 1) for delta in (0.0, 1e-8, 1e-4, 0.001, 0.01, 0.05)]

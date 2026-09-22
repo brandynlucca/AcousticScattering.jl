@@ -7,10 +7,10 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "Oblique (multi-Fourier-mode) incidence" begin
+@time "Oblique (multi-Fourier-mode) incidence" @testset "Oblique (multi-Fourier-mode) incidence" begin
     c_water = 1477.4
 
-    @time @testset "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" @testset "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" for boundary in (AS.Rigid(), AS.PressureRelease())
         a = 0.01
         freq = 38000.0
         k = 2pi * freq / c_water
@@ -26,7 +26,7 @@ BLAS.set_num_threads(1)
         end
     end
 
-    @time @testset "no-argument target_strength/scattering_amplitude matches the antipodal backscatter query, at the actual incidence angle used" begin
+    @time "no-argument target_strength/scattering_amplitude matches the antipodal backscatter query, at the actual incidence angle used" @testset "no-argument target_strength/scattering_amplitude matches the antipodal backscatter query, at the actual incidence angle used" begin
         a = 0.01
         freq = 38000.0
         k = 2pi * freq / c_water
@@ -48,7 +48,7 @@ BLAS.set_num_threads(1)
               AS.target_strength(sol_mfs; angle = pi - β, azimuth = pi)
     end
 
-    @time @testset "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" @testset "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" for boundary in (AS.Rigid(), AS.PressureRelease())
         # a, b = 0.05, 0.02
         # spheroid = AS.Spheroid(a, b)
         # freq = 20000.0
@@ -65,7 +65,7 @@ BLAS.set_num_threads(1)
         @test_skip "requires SpheroidalWaves backend, not available locally"
     end
 
-    @time @testset "$(typeof(boundary)): finite cylinder cross-check against FCMS" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time "$(typeof(boundary)): finite cylinder cross-check against FCMS" @testset "$(typeof(boundary)): finite cylinder cross-check against FCMS" for boundary in (AS.Rigid(), AS.PressureRelease())
         radius, length = 0.01, 1.0
         freq = 20000.0
         k = 2pi * freq / c_water
@@ -80,7 +80,7 @@ BLAS.set_num_threads(1)
         @test ts_bem ≈ ts_modal atol = 0.01
     end
 
-    @time @testset "solve_oblique(::FluidFilled,...): reduced 2n×2n system correctness" begin
+    @time "solve_oblique(::FluidFilled,...): reduced 2n×2n system correctness" @testset "solve_oblique(::FluidFilled,...): reduced 2n×2n system correctness" begin
         a_pol, b_eq = 0.01, 0.07
         spheroid = AS.Spheroid(a_pol, b_eq)
         c_med = 1477.3
@@ -112,7 +112,7 @@ BLAS.set_num_threads(1)
         @test_skip "requires SpheroidalWaves quad-precision backend, not available locally"
     end
 
-    @time @testset "_azimuthal_fixed_order: far-pair quadrature converges under mesh refinement" begin
+    @time "_azimuthal_fixed_order: far-pair quadrature converges under mesh refinement" @testset "_azimuthal_fixed_order: far-pair quadrature converges under mesh refinement" begin
         a_pol, b_eq = 0.01, 0.07
         k = 2pi * 38000.0 / 1477.3
         β_r = deg2rad(8.0)

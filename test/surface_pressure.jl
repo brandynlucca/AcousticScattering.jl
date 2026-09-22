@@ -12,7 +12,7 @@ function compare_surface_pressure(actual, expected)
     end
 end
 
-@time @testset "Curved surface point locations" begin
+@time "Curved surface point locations" @testset "Curved surface point locations" begin
     for order in (1, 2, 3)
         surface = mesh(; semiaxes = (1.0, 1.0, 1.0), center = (0.3, -0.2, 0.1),
             resolution = 0.5, mesh_order = order, qorder = 4)
@@ -57,7 +57,7 @@ end
     @test AS._surface_location(patches, q.coords - 1e-8*q.normal) === :inside
 end
 
-@time @testset "Supplied sphere pressure" begin
+@time "Supplied sphere pressure" @testset "Supplied sphere pressure" begin
     center = [0.3, -0.2, 0.1]
     beta, alpha = pi/3, 0.4
     direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
@@ -79,7 +79,7 @@ end
         reference = modal(Sphere(1.0), boundary, k)
         phase = cis(k*dot(direction, center))
         expected = phase .* pressure(reference, reference_points; field = :scattered)
-        @time @testset "$(typeof(boundary)) field" begin
+        @time "$(typeof(boundary)) field" @testset "$(typeof(boundary)) field" begin
             if boundary isa Rigid
                 # Platform-dependent hmatrix-compressed BEM accuracy for this sphere case.
                 @test_skip pressure(solution, points; field = :scattered) == expected
@@ -116,7 +116,7 @@ end
     end
 end
 
-@time @testset "Closed bent cylinder pressure" begin
+@time "Closed bent cylinder pressure" @testset "Closed bent cylinder pressure" begin
     # NOTE: the source-refinement comparison below is platform-dependent and skipped, so
     # the coarse-source MFS solve (only ever used to feed it) isn't computed here.
     body = Cylinder(0.5, 1.0; radius_curvature = 2.0, endcap_depth = 0.5)
@@ -138,11 +138,11 @@ end
         reference = mfs(surface, boundary, 0.5; source_mesh = sources, offset = 0.2,
             incidence_angle = pi/3, incidence_azimuth = 0.4, condition_limit = 0)
         expected = pressure(reference, points; field = :scattered)
-        @time @testset "$(typeof(boundary)) field" begin
+        @time "$(typeof(boundary)) field" @testset "$(typeof(boundary)) field" begin
             # Platform-dependent MFS/BEM discrepancy for this bent-cylinder geometry.
             @test_skip pressure(solution, points; field = :scattered) == expected
         end
-        @time @testset "$(typeof(boundary)) source refinement" begin
+        @time "$(typeof(boundary)) source refinement" @testset "$(typeof(boundary)) source refinement" begin
             # Platform-dependent MFS/BEM discrepancy for this bent-cylinder geometry.
             @test_skip "coarse-source MFS solve not computed (see NOTE above)"
         end

@@ -3,7 +3,7 @@ using Test
 using LinearAlgebra: BLAS
 BLAS.set_num_threads(1)
 
-@time @testset "Pressure sampling and incident coordinates" begin
+@time "Pressure sampling and incident coordinates" @testset "Pressure sampling and incident coordinates" begin
     solution = modal(Sphere(1.0), Rigid(), 1.6)
     point = (1.3, 0.4, -0.2)
     @test pressure(solution, point; field = :incident) ≈ cis(1.6 * point[1])
@@ -34,7 +34,7 @@ BLAS.set_num_threads(1)
         0.0, 0.0, 0.0))
 end
 
-@time @testset "Matched fluid and pressure-release surface" begin
+@time "Matched fluid and pressure-release surface" @testset "Matched fluid and pressure-release surface" begin
     body, k = Sphere(1.0), 1.6
     matched = modal(body, FluidFilled(1.0, 1.0), k)
     points = [(0.0, 0.0, 0.0), (0.23, 0.34, 0.45), (1.0, 0.0, 0.0), (-2.0, 0.5, 0.0)]
@@ -49,7 +49,7 @@ end
         (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)])) < 1e-12
 end
 
-@time @testset "Exterior pressure against radial FEM" begin
+@time "Exterior pressure against radial FEM" @testset "Exterior pressure against radial FEM" begin
     body, k = Sphere(1.0), 1.6
     points = [(r * cos(theta), r * sin(theta), 0.0)
               for r in (1.0, 1 + 1e-8, 1.01, 1.127, 1.2, 1.201, 2.0),
@@ -75,7 +75,7 @@ end
     @test pressure(adaptive, (1.137, 0.0, 0.0)) ≈ reference rtol = 0.001
 end
 
-@time @testset "Fluid interior and interface limits against radial FEM" begin
+@time "Fluid interior and interface limits against radial FEM" @testset "Fluid interior and interface limits against radial FEM" begin
     body = Sphere(1.0)
     for (boundary, k) in ((FluidFilled(1.2, 1.1), 1.6), (GasFilled(0.0012, 0.23), 0.0138))
         reference = modal(body, boundary, k; m_max = 14)
@@ -105,7 +105,7 @@ end
     end
 end
 
-@time @testset "Fluid pressure continuity at the center" begin
+@time "Fluid pressure continuity at the center" @testset "Fluid pressure continuity at the center" begin
     body, boundary, k = Sphere(1.0), FluidFilled(1.2, 1.1), 1.6
     reference = modal(body, boundary, k; m_max = 14)
     solution = fem(body, boundary, k; n_elements_int = 80, n_elements_ext = 80, m_max = 14)
@@ -116,7 +116,7 @@ end
     end
 end
 
-@time @testset "Spherical pressure far-field limit and modal cutoff" begin
+@time "Spherical pressure far-field limit and modal cutoff" @testset "Spherical pressure far-field limit and modal cutoff" begin
     body, k = Sphere(1.0), 1.6
     for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1)),
         theta in (0.0, pi / 3, pi)

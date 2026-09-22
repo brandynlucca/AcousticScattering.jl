@@ -5,7 +5,7 @@ using Test
 const AS = AcousticScattering
 BLAS.set_num_threads(1)
 
-@time @testset "Full BEM at sphere irregular frequencies" begin
+@time "Full BEM at sphere irregular frequencies" @testset "Full BEM at sphere irregular frequencies" begin
     beta, alpha = pi / 3, 0.4
     incident = [cos(beta), sin(beta) * cos(alpha), sin(beta) * sin(alpha)]
     observations = ((pi, -incident), (0.0, incident),
@@ -36,7 +36,7 @@ BLAS.set_num_threads(1)
         k == Float64(pi) && (resonant[typeof(boundary)] = solution)
     end
 
-    @time @testset "Independent mesh and quadrature refinement" begin
+    @time "Independent mesh and quadrature refinement" @testset "Independent mesh and quadrature refinement" begin
         for boundary in (Rigid(), PressureRelease())
             solution = bem(Sphere(1.0), boundary, Float64(pi); method = :full,
                 incidence_angle = beta, incidence_azimuth = alpha, meshsize = 0.4,
@@ -55,7 +55,7 @@ BLAS.set_num_threads(1)
         end
     end
 
-    @time @testset "Conventional equation and compressed operators" begin
+    @time "Conventional equation and compressed operators" @testset "Conventional equation and compressed operators" begin
         stable = resonant[Rigid]
         conventional = bem(Sphere(1.0), Rigid(), Float64(pi); method = :full,
             incidence_angle = beta, incidence_azimuth = alpha, meshsize = 0.4,
@@ -73,7 +73,7 @@ BLAS.set_num_threads(1)
         @test scattering_amplitude(dense) ≈ scattering_amplitude(stable) rtol = 1e-4
     end
 
-    @time @testset "Length scaling and argument checks" begin
+    @time "Length scaling and argument checks" @testset "Length scaling and argument checks" begin
         for boundary in (Rigid(), PressureRelease())
             solution = bem(Sphere(0.01), boundary, pi / 0.01; method = :full,
                 incidence_angle = beta, incidence_azimuth = alpha,
@@ -99,7 +99,7 @@ include("full_bem_transmission.jl")
 include("surface_mesh.jl")
 include("surface_validation.jl")
 
-@time @testset "Full BEM against independent rigid-spheroid outputs" begin
+@time "Full BEM against independent rigid-spheroid outputs" @testset "Full BEM against independent rigid-spheroid outputs" begin
     references = (
         ([-0.5, -sqrt(3) / 2, 0.0], 0.277466754734215 + 0.478594831065819im),
         ([0.5, sqrt(3) / 2, 0.0], 0.544249737180197 + 0.633566137972720im),

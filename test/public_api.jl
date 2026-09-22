@@ -1,5 +1,5 @@
 # Included by the Interfaces group; calls below deliberately use ordinary user imports.
-@time @testset "Public exports and source docstrings" begin
+@time "Public exports and source docstrings" @testset "Public exports and source docstrings" begin
     expected = Set((:Rigid, :PressureRelease, :FluidFilled, :GasFilled, :SolidElastic,
         :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer, :LayeredMaterial,
         :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
@@ -25,7 +25,7 @@
     @test_throws ArgumentError mesh(body; resolution = 12, k = 100.0)
 end
 
-@time @testset "Bent MFS ASCII grid controls" begin
+@time "Bent MFS ASCII grid controls" @testset "Bent MFS ASCII grid controls" begin
     body = Cylinder(0.01, 0.07; radius_curvature = 0.20)
     ascii = mfs(body, PressureRelease(), 100.0; n_s = 6, n_phi = 8, offset = 0.003)
     legacy = mfs(body, PressureRelease(), 100.0; n_s = 6, n_φ = 8, offset = 0.003)
@@ -36,7 +36,7 @@ end
     @test_throws ArgumentError mfs(body, Rigid(), 100.0; n_s = 0)
 end
 
-@time @testset "Full BEM diagnostics survive public dispatch" begin
+@time "Full BEM diagnostics survive public dispatch" @testset "Full BEM diagnostics survive public dispatch" begin
     body = Sphere(0.01)
     k = 100.0
     options = (reltol = 1e-8, restart = 150, maxiter = 1200)
@@ -47,7 +47,10 @@ end
     @test d.method == :gmres
     @test 0 < d.iterations <= options.maxiter
     @test length(d.residual_history) == d.iterations
-    @test d.relative_residual <= 2 * options.reltol
+    # PressureRelease + :burton_miller uses a left preconditioner (Pl=lu(H)); GMRES's
+    # reltol bounds the preconditioned residual, not the raw one recomputed here, so this
+    # cannot be pinned to a small multiple of reltol. See full_bem.jl's Pl construction.
+    @test d.relative_residual <= 1e-5
     @test d.absolute_residual >= 0
     @test d.unknown_count == d.quadrature_nodes == length(solution.data.quad)
     @test d.meshsize == 0.004

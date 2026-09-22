@@ -10,7 +10,7 @@ BLAS.set_num_threads(1)
 include("radial_fem_complex.jl")
 include("layered_radial_fem_complex.jl")
 
-@time @testset "radial FEM (sphere)" begin
+@time "radial FEM (sphere)" @testset "radial FEM (sphere)" begin
     c_water = 1477.4
     a = 0.01
     freq = 38000.0
@@ -56,7 +56,7 @@ include("layered_radial_fem_complex.jl")
     end
 end
 
-@time @testset "elastic sphere/cylinder radial FEM (vs modal series)" begin
+@time "elastic sphere/cylinder radial FEM (vs modal series)" @testset "elastic sphere/cylinder radial FEM (vs modal series)" begin
     freq = 38000.0
     c_ext = 1477.4
     rho_ext = 1026.8
@@ -117,7 +117,7 @@ end
     @test maximum(shell_limit_diffs[2:end]) < 0.05
 end
 
-@time @testset "fluid shell sphere radial FEM (vs modal series)" begin
+@time "fluid shell sphere radial FEM (vs modal series)" @testset "fluid shell sphere radial FEM (vs modal series)" begin
     freq = 38000.0
     c_ext = 1477.4
     rho_ext = 1026.8
@@ -160,10 +160,10 @@ end
     @test ts_ka ≈ ts_modal_hika atol = 0.1
 end
 
-@time @testset "ShellFEM (axisymmetric shell operator)" begin
+@time "ShellFEM (axisymmetric shell operator)" @testset "ShellFEM (axisymmetric shell operator)" begin
     geometry = AS.ProlateShellGeometry(0.035, 0.007, 0.0005)
 
-    @time @testset "geometry" begin
+    @time "geometry" @testset "geometry" begin
         @test geometry.focal_radius ≈ 0.0342928563989645
         @test geometry.semimajor_inner ≈ 0.03490343822605447
         @test geometry.semiminor_inner ≈ 0.006500000000000001
@@ -183,7 +183,7 @@ end
 
     material = AS.Shelled(0.32, 2565.0, 70e9)
 
-    @time @testset "assembled system, freq=$freq" for freq in (12000.0, 38000.0)
+    @time "assembled system, freq=$freq" @testset "assembled system, freq=$freq" for freq in (12000.0, 38000.0)
         sys = AS.assemble_shell_system(geometry, material.material, freq; n_eta = 9)
 
         omega_hat_golden = freq == 12000.0 ? 0.4779315959914645 : 1.5134500539729712
@@ -195,7 +195,7 @@ end
     end
 end
 
-@time @testset "Independent prolate shell frequencies" begin
+@time "Independent prolate shell frequencies" @testset "Independent prolate shell frequencies" begin
     geometry = AS.ProlateShellGeometry(1.0097040331600713, 0.7207583814259635, 0.02745)
     material = Shelled(0.3, 2700.0, 70e9).material
     frequency = AS.extensional_plate_speed(material) / (2pi * geometry.semimajor_mid)
@@ -211,7 +211,7 @@ end
     end
 end
 
-@time @testset "Interior CBIE (closed-form spherical-cavity cross-check)" begin
+@time "Interior CBIE (closed-form spherical-cavity cross-check)" @testset "Interior CBIE (closed-form spherical-cavity cross-check)" begin
     a, k_test = 0.01, 37.5
     mesh = AS.sphere_mesh(a, 20)
     K, V, ps = AS.assemble_cbie_operators(mesh, k_test; rtol = 1e-6)
@@ -228,7 +228,7 @@ end
     @test maximum(abs, dpdn) - minimum(abs, dpdn) < 1e-3 * abs(exact_dpdn)
 end
 
-@time @testset "Coupled shell/fluid axisymmetric scattering" begin
+@time "Coupled shell/fluid axisymmetric scattering" @testset "Coupled shell/fluid axisymmetric scattering" begin
     geometry = AS.ProlateShellGeometry(0.035, 0.007, 0.0005)
     shell_body = AS.Shell(AS.Spheroid(0.035, 0.007), 0.0005)
     rho_ext, c_ext = 1026.8, 1477.3
@@ -236,7 +236,7 @@ end
     freq = 12000.0
     k = 2pi * freq / c_ext
 
-    @time @testset "geometry/interpolation building blocks" begin
+    @time "geometry/interpolation building blocks" @testset "geometry/interpolation building blocks" begin
         eta = AS.uniform_eta_grid(9; pole_offset = 0.001)
         mesh = AS.prolate_confocal_mesh(geometry, eta; surface = :outer)
         ps = AS.panels(mesh)
@@ -260,7 +260,7 @@ end
         @test roundtrip[2:8] ≈ eta[2:8] atol = 1e-12
     end
 
-    @time @testset "rigid limit (independent cross-check against solve_axial)" begin
+    @time "rigid limit (independent cross-check against solve_axial)" @testset "rigid limit (independent cross-check against solve_axial)" begin
         n_eta = 33
         eta = AS.uniform_eta_grid(n_eta; pole_offset = 0.001)
         outer_mesh = AS.prolate_confocal_mesh(geometry, eta; surface = :outer)
@@ -274,7 +274,7 @@ end
         @test abs(AS.target_strength(sol) - ts_rigid) < 0.1
     end
 
-    @time @testset "thin-shell backscatter: mesh and pole refinement below 0.1 dB" begin
+    @time "thin-shell backscatter: mesh and pole refinement below 0.1 dB" @testset "thin-shell backscatter: mesh and pole refinement below 0.1 dB" begin
         # NOTE: the pole-offset refinement comparison (n_eta=257 at two offsets) is covered
         # at full fidelity in perf/radial_fem.jl; here a single configuration checks sanity.
         material = AS.Shelled(0.32, 2565.0, 70e9)
@@ -288,7 +288,7 @@ end
         @test -150.0 < ts < 0.0
     end
 
-    @time @testset "fluid-filled: rigid limit (independent cross-check)" begin
+    @time "fluid-filled: rigid limit (independent cross-check)" @testset "fluid-filled: rigid limit (independent cross-check)" begin
         n_eta = 33
         eta = AS.uniform_eta_grid(n_eta; pole_offset = 0.001)
         outer_mesh = AS.prolate_confocal_mesh(geometry, eta; surface = :outer)
@@ -302,7 +302,7 @@ end
         @test abs(AS.target_strength(sol) - ts_rigid) < 0.1
     end
 
-    @time @testset "fluid-filled: zero-interior-density limit recovers the vacuum-backed solver" begin
+    @time "fluid-filled: zero-interior-density limit recovers the vacuum-backed solver" @testset "fluid-filled: zero-interior-density limit recovers the vacuum-backed solver" begin
         n_eta = 9
         material = AS.Shelled(0.32, 2565.0, 70e9)
         sol_vac = AS.fem(shell_body, material, rho_ext, c_ext, 0.0, 1.0, k;
@@ -322,7 +322,7 @@ end
     end
 end
 
-@time @testset "General (Fourier-mode) solid shell FEM and oblique coupling" begin
+@time "General (Fourier-mode) solid shell FEM and oblique coupling" @testset "General (Fourier-mode) solid shell FEM and oblique coupling" begin
     reference_geometry = AS.ProlateShellGeometry(0.035, 0.007, 0.0005)
     geometry = AS.ProlateShellGeometry(0.02, 0.005, 0.0005)
     c_water = 1477.4
@@ -331,7 +331,7 @@ end
     n_eta = 13
     n_t = 3
 
-    @time @testset "outer dimensions and confocal cavity" begin
+    @time "outer dimensions and confocal cavity" @testset "outer dimensions and confocal cavity" begin
         mesh = AS.build_structured_shell_strip(reference_geometry, 9, 3; pole_offset = 0.001)
         @test AS.Ferrite.getnnodes(mesh.grid) == 27
         @test AS.Ferrite.getncells(mesh.grid) == 32
@@ -340,7 +340,7 @@ end
         @test mesh.inner_ρ[5] ≈ 0.0065 atol = 1e-12
     end
 
-    @time @testset "elastic reciprocity and unit-normal projections (m=0,1,2)" begin
+    @time "elastic reciprocity and unit-normal projections (m=0,1,2)" @testset "elastic reciprocity and unit-normal projections (m=0,1,2)" begin
         mesh = AS.build_structured_shell_strip(reference_geometry, 9, 3; pole_offset = 0.001)
         omega = 2pi * 12000.0
         for m in (0, 1, 2)
@@ -351,7 +351,7 @@ end
         end
     end
 
-    @time @testset "coupled oblique rigid limit (independent cross-check against solve_oblique)" begin
+    @time "coupled oblique rigid limit (independent cross-check against solve_oblique)" @testset "coupled oblique rigid limit (independent cross-check against solve_oblique)" begin
         beta = deg2rad(45.0)
         m_max = 3
         shell_mesh = AS.build_structured_shell_strip(geometry, n_eta, n_t; pole_offset = 0.001)
@@ -373,7 +373,7 @@ end
     end
 end
 
-@time @testset "Confocal elastic shell against independent outputs" begin
+@time "Confocal elastic shell against independent outputs" @testset "Confocal elastic shell against independent outputs" begin
     solution = fem(Shell(Spheroid(1.5, 1.0), 0.2), Shelled(0.33, 2700.0, 70e9),
         1000.0, 1500.0, 1000.0, 1500.0, 1.0;
         method = :general, incidence_angle = pi / 3, n_eta = 161, n_t = 17,
@@ -387,7 +387,7 @@ end
     end
 end
 
-@time @testset "Finite-stiffness shell scattering against spherical modal solutions" begin
+@time "Finite-stiffness shell scattering against spherical modal solutions" @testset "Finite-stiffness shell scattering against spherical modal solutions" begin
     rho, youngs_modulus, poisson = 2700.0, 70e9, 0.33
     c_longitudinal = sqrt(youngs_modulus * (1 - poisson) /
                           (rho * (1 + poisson) * (1 - 2poisson)))
@@ -410,7 +410,7 @@ end
         end
     end
 
-    @time @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92,)
+    @time "Water-filled spherical-shell resonance: kR=$ka" @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92,)
         beta = pi / 3
         reference_boundary = Shelled(wall, FluidInterior(1.0, 1.0), 0.8)
         solution = fem(Shell(Sphere(0.01), 0.002), Shelled(poisson, rho, youngs_modulus),

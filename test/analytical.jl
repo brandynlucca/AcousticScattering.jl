@@ -7,7 +7,7 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "special functions" begin
+@time "special functions" @testset "special functions" begin
     for x in (0.5, 1.3, 4.2)
         @test AS.js(0, x) ≈ sin(x) / x
         @test AS.ys(0, x) ≈ -cos(x) / x
@@ -32,7 +32,7 @@ BLAS.set_num_threads(1)
     @test AS.neumann_factor(1) == 2
 end
 
-@time @testset "sphere modal series (golden values)" begin
+@time "sphere modal series (golden values)" @testset "sphere modal series (golden values)" begin
     c_water = 1477.4
     a = 0.01
 
@@ -73,7 +73,7 @@ end
     @test AS.GasFilled === AS.FluidFilled
 end
 
-@time @testset "sphere modal series (limits and consistency)" begin
+@time "sphere modal series (limits and consistency)" @testset "sphere modal series (limits and consistency)" begin
     a = 0.01
     c = 1477.4
     sphere = AS.Sphere(a)
@@ -92,7 +92,7 @@ end
     @test f_back != f_forward
 end
 
-@time @testset "sphere modal series (shelled and solid elastic)" begin
+@time "sphere modal series (shelled and solid elastic)" @testset "sphere modal series (shelled and solid elastic)" begin
     freq = 38000.0
     c_ext = 1477.4
     rho_ext = 1026.8
@@ -172,12 +172,12 @@ end
 
 include("vesm_validation.jl")
 
-@time @testset "ViscoelasticShell (VESM, monopole)" begin
+@time "ViscoelasticShell (VESM, monopole)" @testset "ViscoelasticShell (VESM, monopole)" begin
     c1 = 1477.3
     k = 2pi * 2000.0 / c1
     rho_core, c_core = 1.24 / 1026.8, 345.0 / 1477.3
 
-    @time @testset "flesh matched to water: reduces exactly to Shelled{ElasticLayer,FluidInterior}" begin
+    @time "flesh matched to water: reduces exactly to Shelled{ElasticLayer,FluidInterior}" @testset "flesh matched to water: reduces exactly to Shelled{ElasticLayer,FluidInterior}" begin
         Re, R = 0.009, 0.005
         rho_wall, cL_wall, cT_wall = 1.05, 1.05, 0.30
         bc_ref = AS.Shelled(AS.ElasticLayer(rho_wall, cL_wall, cT_wall),
@@ -194,7 +194,7 @@ include("vesm_validation.jl")
         end
     end
 
-    @time @testset "wall matched to water (fluid limit): reduces exactly to FluidFilled" begin
+    @time "wall matched to water (fluid limit): reduces exactly to FluidFilled" @testset "wall matched to water (fluid limit): reduces exactly to FluidFilled" begin
         R = 0.005
         ts_ref = AS.target_strength(AS.modal(AS.Sphere(R), AS.FluidFilled(rho_core, c_core), k; m_max = 0))
 
@@ -209,7 +209,7 @@ include("vesm_validation.jl")
         end
     end
 
-    @time @testset "m >= 1 is explicitly rejected, not silently wrong" begin
+    @time "m >= 1 is explicitly rejected, not silently wrong" @testset "m >= 1 is explicitly rejected, not silently wrong" begin
         Re, R = 0.009, 0.005
         bc = AS.Shelled(
             AS.LayeredMaterial(AS.ViscousLayer(c1, 1.05, 1.0, 1e-6, 1e-6),
@@ -219,7 +219,7 @@ include("vesm_validation.jl")
     end
 end
 
-@time @testset "finite cylinder modal series" begin
+@time "finite cylinder modal series" @testset "finite cylinder modal series" begin
     freq = 38000.0
     c_sw = 1477.4
     rho_sw = 1026.8
@@ -254,7 +254,7 @@ end
     @test ts1 ≈ ts2 atol = 1e-8
 end
 
-@time @testset "Bent-cylinder modal series (BCMS)" begin
+@time "Bent-cylinder modal series (BCMS)" @testset "Bent-cylinder modal series (BCMS)" begin
     # radius_curvature is a ratio times length here, not meters
     c_sw, ρ_sw = 1477.3, 1026.8
     radius, length = 1e-3, 10.5e-3
@@ -277,7 +277,7 @@ end
     @test AS.equivalent_length_fresnel(2π * 38000 / 1477.3, 0.0105, Inf) ≈ 0.0105 + 0im
 end
 
-@time @testset "Bent-cylinder Kirchhoff (physical optics)" begin
+@time "Bent-cylinder Kirchhoff (physical optics)" @testset "Bent-cylinder Kirchhoff (physical optics)" begin
     radius, length = 0.01, 0.07
     c = 1477.3
     k = 2π * 38000.0 / c
@@ -306,7 +306,7 @@ end
     end
 end
 
-@time @testset "finite cylinder modal series (elastic shell and solid, ECMS)" begin
+@time "finite cylinder modal series (elastic shell and solid, ECMS)" @testset "finite cylinder modal series (elastic shell and solid, ECMS)" begin
     freq_ecms = 38000.0
     c_sw_ecms = 1477.3
     golden_solid_cases = [
@@ -362,7 +362,7 @@ end
     @test shell_solid_diffs[end] < 0.01
 end
 
-@time @testset "Kirchhoff high-frequency baseline" begin
+@time "Kirchhoff high-frequency baseline" @testset "Kirchhoff high-frequency baseline" begin
     a = 0.01
     c = 1477.4
     k_high = 2pi * 2.0e6 / c
@@ -389,7 +389,7 @@ end
     end
 end
 
-@time @testset "Finite-cylinder Kirchhoff high-frequency baseline" begin
+@time "Finite-cylinder Kirchhoff high-frequency baseline" @testset "Finite-cylinder Kirchhoff high-frequency baseline" begin
     radius, length = 0.01, 0.07
     reference_soundspeed = 1477.3
     k = 2pi * 38000.0 / reference_soundspeed
@@ -411,7 +411,7 @@ end
     @test abs(f_endon) ≈ k * radius^2 / 2 atol = 1e-9
 end
 
-@time @testset "Spheroid geometry" begin
+@time "Spheroid geometry" @testset "Spheroid geometry" begin
     body = AS.Spheroid(0.10, 0.03)
     @test body.kind == :prolate
     @test body.a == 0.10
@@ -442,7 +442,7 @@ end
     @test R2_eq ≈ b
 end
 
-@time @testset "Spheroid Kirchhoff high-frequency baseline" begin
+@time "Spheroid Kirchhoff high-frequency baseline" @testset "Spheroid Kirchhoff high-frequency baseline" begin
     body = AS.Spheroid(0.10, 0.03)
     k = 2pi * 200000.0 / 1477.4
 

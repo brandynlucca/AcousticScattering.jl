@@ -4,7 +4,7 @@ using Test
 
 BLAS.set_num_threads(2)
 
-@time @testset "Rigid and pressure-release incidence sweeps" begin
+@time "Rigid and pressure-release incidence sweeps" @testset "Rigid and pressure-release incidence sweeps" begin
     surface = mesh(
         Sphere(1.0); method = :full, resolution = 0.4, mesh_order = 3, qorder = 4)
     angles = [pi / 6, pi / 2, pi / 6]
@@ -41,7 +41,7 @@ BLAS.set_num_threads(2)
     end
 end
 
-@time @testset "Bent-surface incidence sweeps" begin
+@time "Bent-surface incidence sweeps" @testset "Bent-surface incidence sweeps" begin
     body = Cylinder(0.5, 2.0; radius_curvature = 2.0, endcap_depth = 0.5)
     surface = mesh(body; method = :full, resolution = 0.32, mesh_order = 3, qorder = 4)
     collocation = mesh(body; method = :full, resolution = 0.3, mesh_order = 3)

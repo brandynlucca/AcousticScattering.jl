@@ -1,4 +1,4 @@
-@time @testset "Lossy spherical-shell target-strength reference" begin
+@time "Lossy spherical-shell target-strength reference" @testset "Lossy spherical-shell target-strength reference" begin
     cases = (
         (1.1, (-40.689, -40.305, -40.460)),
         (1.2, (-41.011, -40.674, -40.834)),
@@ -23,7 +23,7 @@
     end
 end
 
-@time @testset "Lossy VESM reference outputs" begin
+@time "Lossy VESM reference outputs" @testset "Lossy VESM reference outputs" begin
     # q = k_water * gas_radius; amplitudes are in metres.
     cases = (
         (shear_modulus = 0.3e6,
@@ -85,13 +85,13 @@ end
     end
 end
 
-@time @testset "Shell complex phase and lossy VESM limits" begin
+@time "Shell complex phase and lossy VESM limits" @testset "Shell complex phase and lossy VESM limits" begin
     sound_speed = 1500.0
     core = FluidInterior(0.00126, 330 / sound_speed)
     gas = FluidFilled(core.density_contrast, core.soundspeed_contrast)
     radius = 0.01
 
-    @time @testset "Elastic and VESM transparent layers preserve phase" begin
+    @time "Elastic and VESM transparent layers preserve phase" @testset "Elastic and VESM transparent layers preserve phase" begin
         wall = ElasticLayer(1.0, 1.0, 1e-6)
         for k in (20.0, 100.0, 250.0)
             reference = scattering_amplitude(modal(Sphere(0.005), gas, k; m_max = 0))
@@ -106,7 +106,7 @@ end
         end
     end
 
-    @time @testset "Bulk-loss reference amplitudes" begin
+    @time "Bulk-loss reference amplitudes" @testset "Bulk-loss reference amplitudes" begin
         # Match wall and core fluids, so their interface disappears in the zero-shear limit.
         wall = ElasticLayer(core.density_contrast, core.soundspeed_contrast, 1e-6)
         inner_radius = 0.009
@@ -140,7 +140,7 @@ end
         end
     end
 
-    @time @testset "Nonzero shear loss has outgoing attenuation and passive partial waves" begin
+    @time "Nonzero shear loss has outgoing attenuation and passive partial waves" @testset "Nonzero shear loss has outgoing attenuation and passive partial waves" begin
         outer_radius, gas_radius = 0.12, 0.02
         wall = ElasticLayer(1.05, sqrt((1149.3e6 + 2 * 1.06e6) / 1050) / sound_speed,
             sqrt(1.06e6 / 1050) / sound_speed)

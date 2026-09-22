@@ -17,7 +17,7 @@ function near_reference_points(points, beta, alpha)
             for p in points]
 end
 
-@time @testset "Higher-frequency spherical pressure" begin
+@time "Higher-frequency spherical pressure" @testset "Higher-frequency spherical pressure" begin
     # NOTE: a full-mesh BEM comparison at this near-surface tolerance needs a fine enough
     # mesh that geometric approximation error stays under rtol=1e-3, which costs minutes
     # regardless of k/qorder/compression; that comparison is covered at full fidelity in
@@ -27,7 +27,7 @@ end
               for direction in ([1.0, 0, 0], [0.0, 0.6, 0.8], [-0.6, 0, 0.8])]
     for (boundary, n) in ((Rigid(), 96), (FluidFilled(1.2, 1.1), 64))
         reference = modal(body, boundary, k; m_max = 32)
-        @time @testset "$(typeof(boundary))" begin
+        @time "$(typeof(boundary))" @testset "$(typeof(boundary))" begin
             solution = mfs(body, boundary, k; n, oversampling = 2,
                 offset = 0.2, incidence_angle = beta, m_max = 18, condition_limit = 0)
             compare_near_pressure(pressure(solution, points; field = :scattered),
@@ -36,7 +36,7 @@ end
     end
 end
 
-@time @testset "Gas-sphere pressure across resonance" begin
+@time "Gas-sphere pressure across resonance" @testset "Gas-sphere pressure across resonance" begin
     # NOTE: sweeping across the resonance peak (k in 0.0137-0.0139) requires several minutes
     # per point due to poor GMRES conditioning near resonance; that peak-location sweep is
     # covered at full fidelity in perf/near_interface_pressure.jl. Here a single off-resonance

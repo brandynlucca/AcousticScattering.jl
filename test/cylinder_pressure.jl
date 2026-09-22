@@ -11,7 +11,7 @@ function compare_cylinder_pressure(actual, expected)
     end
 end
 
-@time @testset "Straight capped cylinder pressure" begin
+@time "Straight capped cylinder pressure" @testset "Straight capped cylinder pressure" begin
     # NOTE: for Rigid, the MFS/BEM cross-comparisons below are platform-dependent and
     # skipped, so the reference/coarse MFS solves and the extra mesh-based MFS solve
     # (only ever used to feed those skipped comparisons) aren't computed at all for Rigid.
@@ -25,7 +25,7 @@ end
         h = boundary isa FluidFilled ? 0.17 : 0.2
         solution = bem(body, boundary, 0.5; method = :full, meshsize = h, mesh_order = 3,
             qorder = 5, incidence_angle = pi/3, options...)
-        @time @testset "$(typeof(boundary))" begin
+        @time "$(typeof(boundary))" @testset "$(typeof(boundary))" begin
             if boundary isa Rigid
                 @test_skip "MFS/BEM cross-comparison skipped for Rigid (platform-dependent)."
             else
@@ -64,7 +64,7 @@ end
     end
 end
 
-@time @testset "Flat-cylinder domain and deferred shapes" begin
+@time "Flat-cylinder domain and deferred shapes" @testset "Flat-cylinder domain and deferred shapes" begin
     solution = bem(
         Cylinder(0.5, 1.0; endcap_depth = 0.5), Rigid(), 0.3; n = 16, incidence_angle = 0.0)
     @test isfinite(pressure(solution, (0.8, 0.0, 0.0)))

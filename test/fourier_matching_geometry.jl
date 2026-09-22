@@ -6,7 +6,7 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "Fourier matching: sphere limit" begin
+@time "Fourier matching: sphere limit" @testset "Fourier matching: sphere limit" begin
     a = 2.0
     profile = AS.Irregular(a, Float64[], Float64[])
     mapping = AS.solve_mapping(profile, 4; continuation_steps = 1)
@@ -25,7 +25,7 @@ BLAS.set_num_threads(1)
     end
 end
 
-@time @testset "Fourier matching: prolate spheroid, ellipse-equation check" begin
+@time "Fourier matching: prolate spheroid, ellipse-equation check" @testset "Fourier matching: prolate spheroid, ellipse-equation check" begin
     a, b = 3.0, 1.0
     order = 32
     Rtheta(theta) = 1 / sqrt((cos(theta) / a)^2 + (sin(theta) / b)^2)
@@ -40,7 +40,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: mapping order convergence" begin
+@time "Fourier matching: mapping order convergence" @testset "Fourier matching: mapping order convergence" begin
     a, b = 3.0, 1.0
     Rtheta(theta) = 1 / sqrt((cos(theta) / a)^2 + (sin(theta) / b)^2)
 
@@ -59,7 +59,7 @@ end
     @test residuals[end] < residuals[1] / 100
 end
 
-@time @testset "Fourier matching: noncanonical bumpy profile" begin
+@time "Fourier matching: noncanonical bumpy profile" @testset "Fourier matching: noncanonical bumpy profile" begin
     a = 1.0
     Rtheta(theta) = a * (1 + 0.12 * cos(3theta) - 0.05 * sin(2theta))
     order = 24
@@ -89,7 +89,7 @@ end
     @test fine < coarse / 20
 end
 
-@time @testset "Fourier matching: input validation and admissibility rejection" begin
+@time "Fourier matching: input validation and admissibility rejection" @testset "Fourier matching: input validation and admissibility rejection" begin
     @test_throws ArgumentError AS.Irregular(1.0, [1.0], Float64[])
     @test_throws ArgumentError AS.Irregular(-1.0, Float64[], Float64[])
     @test_throws ArgumentError AS.Irregular(theta -> 1.0, -1)

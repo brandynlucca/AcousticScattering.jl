@@ -9,7 +9,7 @@ BLAS.set_num_threads(1)
 
 include("spheroidal_coupling.jl")
 
-@time @testset "Spheroid modal series (rigid/pressure-release/fluid-filled)" begin
+@time "Spheroid modal series (rigid/pressure-release/fluid-filled)" @testset "Spheroid modal series (rigid/pressure-release/fluid-filled)" begin
     # k = 2pi * 38000.0 / 1477.4
 
     # @testset "converges to the sphere modal series as eccentricity -> 0" begin

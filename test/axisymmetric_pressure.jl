@@ -17,7 +17,7 @@ function compare_pressure_values(actual, expected)
     end
 end
 
-@time @testset "Axisymmetric spherical pressure" begin
+@time "Axisymmetric spherical pressure" @testset "Axisymmetric spherical pressure" begin
     for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1)), beta in (0.0, pi/3)
 
         n = iszero(beta) ? 256 : 128
@@ -28,7 +28,7 @@ end
         append!(points, [Tuple(r .* [0.6, 0.48, 0.64]) for r in (1.0, 1+1e-8, 1.01, 1.2)])
         actual = pressure(solution, points; field = :scattered)
         expected = pressure(reference, rotated_pressure_points(points, beta); field = :scattered)
-        @time @testset "$(typeof(boundary)) beta=$beta" begin
+        @time "$(typeof(boundary)) beta=$beta" @testset "$(typeof(boundary)) beta=$beta" begin
             compare_pressure_values(actual, expected)
             @test pressure(solution, points) ≈
                   actual + pressure(solution, points; field = :incident)

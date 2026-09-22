@@ -6,7 +6,7 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "Fourier matching: pressure-release, sphere diagonal exact match" begin
+@time "Fourier matching: pressure-release, sphere diagonal exact match" @testset "Fourier matching: pressure-release, sphere diagonal exact match" begin
     a = 2.0
     k = 1.3
     profile = AS.Irregular(a, Float64[], Float64[])
@@ -25,7 +25,7 @@ BLAS.set_num_threads(1)
     end
 end
 
-@time @testset "Fourier matching: pressure-release, sphere full pipeline (oblique, bistatic)" begin
+@time "Fourier matching: pressure-release, sphere full pipeline (oblique, bistatic)" @testset "Fourier matching: pressure-release, sphere full pipeline (oblique, bistatic)" begin
     a = 2.0
     k = 1.3
     theta0 = pi / 3
@@ -53,7 +53,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: pressure-release, spheroid vs. independent axisymmetric BEM" begin
+@time "Fourier matching: pressure-release, spheroid vs. independent axisymmetric BEM" @testset "Fourier matching: pressure-release, spheroid vs. independent axisymmetric BEM" begin
     a, b = 1.5, 1.0
     k = 1.0
     theta0 = pi / 3
@@ -83,7 +83,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: rigid, sphere diagonal exact match" begin
+@time "Fourier matching: rigid, sphere diagonal exact match" @testset "Fourier matching: rigid, sphere diagonal exact match" begin
     a = 2.0
     k = 1.3
     profile = AS.Irregular(a, Float64[], Float64[])
@@ -102,7 +102,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: rigid, sphere full pipeline (oblique, bistatic)" begin
+@time "Fourier matching: rigid, sphere full pipeline (oblique, bistatic)" @testset "Fourier matching: rigid, sphere full pipeline (oblique, bistatic)" begin
     a = 2.0
     k = 1.3
     theta0 = pi / 3
@@ -129,7 +129,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: rigid, spheroid vs. independent axisymmetric BEM" begin
+@time "Fourier matching: rigid, spheroid vs. independent axisymmetric BEM" @testset "Fourier matching: rigid, spheroid vs. independent axisymmetric BEM" begin
     a, b = 1.5, 1.0
     k = 1.0
     theta0 = pi / 3
@@ -159,7 +159,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: fluid, sphere diagonal exact match" begin
+@time "Fourier matching: fluid, sphere diagonal exact match" @testset "Fourier matching: fluid, sphere diagonal exact match" begin
     a = 2.0
     k = 1.3
     profile = AS.Irregular(a, Float64[], Float64[])
@@ -184,7 +184,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: fluid, sphere full pipeline (weak and gas contrast)" begin
+@time "Fourier matching: fluid, sphere full pipeline (weak and gas contrast)" @testset "Fourier matching: fluid, sphere full pipeline (weak and gas contrast)" begin
     a = 2.0
     k = 1.3
     theta0 = pi / 3
@@ -212,7 +212,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: fluid, spheroid vs. independent axisymmetric BEM" begin
+@time "Fourier matching: fluid, spheroid vs. independent axisymmetric BEM" @testset "Fourier matching: fluid, spheroid vs. independent axisymmetric BEM" begin
     a, b = 1.5, 1.0
     k = 1.0
     theta0 = pi / 3
@@ -243,7 +243,7 @@ end
     end
 end
 
-@time @testset "Fourier matching: public API, fourier(Irregular, ...) against modal(Sphere, ...)" begin
+@time "Fourier matching: public API, fourier(Irregular, ...) against modal(Sphere, ...)" @testset "Fourier matching: public API, fourier(Irregular, ...) against modal(Sphere, ...)" begin
     a = 2.0
     k = 1.3
     theta0 = pi / 3
@@ -261,7 +261,7 @@ end
     @test_throws ArgumentError fourier(body, Rigid(), -1.0)
 end
 
-@time @testset "Fourier matching: incidence_angle_sweep reuses the transition operator" begin
+@time "Fourier matching: incidence_angle_sweep reuses the transition operator" @testset "Fourier matching: incidence_angle_sweep reuses the transition operator" begin
     a = 2.0
     k = 1.3
     body = Irregular(a, Float64[], Float64[])

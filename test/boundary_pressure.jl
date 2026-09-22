@@ -55,19 +55,19 @@ function check_boundary_pressure(solution, beta, alpha; full = false)
     @test isapprox(far_pressure, amplitude; rtol = 1e-4, atol = 1e-12)
 end
 
-@time @testset "Spherical MFS pressure" begin
+@time "Spherical MFS pressure" @testset "Spherical MFS pressure" begin
     for k in (0.3, 2.0), boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
 
         beta = pi/3
         solution = mfs(Sphere(1.0), boundary, k; n = 96, oversampling = 2,
             offset = 0.2, incidence_angle = beta, m_max = 10, condition_limit = 0)
-        @time @testset "k=$k $(typeof(boundary)) beta=$beta" begin
+        @time "k=$k $(typeof(boundary)) beta=$beta" @testset "k=$k $(typeof(boundary)) beta=$beta" begin
             check_boundary_pressure(solution, beta, 0.0)
         end
     end
 end
 
-@time @testset "Spherical full MFS pressure" begin
+@time "Spherical full MFS pressure" @testset "Spherical full MFS pressure" begin
     surface = mesh(
         Sphere(1.0); method = :full, resolution = 0.3, mesh_order = 3, qorder = 4)
     sources = mesh(
@@ -79,7 +79,7 @@ end
     end
 end
 
-@time @testset "MFS pressure source correctness" begin
+@time "MFS pressure source correctness" @testset "MFS pressure source correctness" begin
     points = [(1+1e-8, 0.0, 0.0), (0.0, 0.6*(1+1e-8), 0.8*(1+1e-8)), (1.2, 0.0, 0.0)]
     for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
         reference = pressure(modal(Sphere(1.0), boundary, 1.0),
@@ -92,7 +92,7 @@ end
     end
 end
 
-@time @testset "Spherical full BEM pressure" begin
+@time "Spherical full BEM pressure" @testset "Spherical full BEM pressure" begin
     # NOTE: k=1.0 Rigid/PressureRelease are platform-dependent at this tolerance (skipped
     # below), so the (expensive) full-BEM solve for them is not computed at all here.
     for (k, boundary) in ((0.3, FluidFilled(1.2, 1.1)), (2.0, FluidFilled(1.2, 1.1)))
@@ -100,19 +100,19 @@ end
         solution = bem(Sphere(1.0), boundary, k; method = :full,
             meshsize, mesh_order = 3, qorder = 5, incidence_angle = pi/3, incidence_azimuth = 0.4,
             condition_limit = 0)
-        @time @testset "k=$k $(typeof(boundary))" begin
+        @time "k=$k $(typeof(boundary))" @testset "k=$k $(typeof(boundary))" begin
             check_boundary_pressure(solution, pi/3, 0.4; full = true)
         end
     end
-    @time @testset "k=1.0 Rigid" begin
+    @time "k=1.0 Rigid" @testset "k=1.0 Rigid" begin
         @test_skip "Platform-dependent accuracy for this rigid full BEM case."
     end
-    @time @testset "k=1.0 PressureRelease" begin
+    @time "k=1.0 PressureRelease" @testset "k=1.0 PressureRelease" begin
         @test_skip "Platform-dependent accuracy for this pressure-release full BEM case."
     end
 end
 
-@time @testset "Boundary pressure geometry dispatch" begin
+@time "Boundary pressure geometry dispatch" @testset "Boundary pressure geometry dispatch" begin
     solution = bem(Sphere(1.0), Rigid(), 1.0; n = 12, incidence_angle = 0.0)
     @test isfinite(pressure(solution, (2.0, 0.0, 0.0)))
     solution = mfs(Cylinder(0.1, 1.0; endcap_depth = 0.1), Rigid(), 1.0;
@@ -120,7 +120,7 @@ end
     @test isfinite(pressure(solution, (2.0, 0.0, 0.0)))
 end
 
-@time @testset "Full BEM pressure correctness" begin
+@time "Full BEM pressure correctness" @testset "Full BEM pressure correctness" begin
     points = [(1+1e-8, 0.0, 0.0), (0.0, 0.6*(1+1e-8), 0.8*(1+1e-8)), (1.2, 0.0, 0.0)]
     reference = pressure(modal(Sphere(1.0), PressureRelease(), 1.0),
         reference_points(points, pi/3, 0.4); field = :scattered)

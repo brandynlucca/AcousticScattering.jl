@@ -1,4 +1,4 @@
-@time @testset "Supplied closed surfaces" begin
+@time "Supplied closed surfaces" @testset "Supplied closed surfaces" begin
     nodes = [0.0 1 0 0; 0 0 1 0; 0 0 0 1]
     triangles = [1 1 1 2; 3 2 4 3; 2 4 3 4]
     surface = mesh(1000nodes, triangles; units = :mm, labels = [1, 1, 2, 2],
@@ -16,7 +16,7 @@
     @test AS.element_count(surface) == length(AS.coordinates(surface))
     @test all(n -> AS.norm(n) ≈ 1, AS.normals(surface))
 
-    @time @testset "Invalid surface input" begin
+    @time "Invalid surface input" @testset "Invalid surface input" begin
         @test_throws ArgumentError mesh(nodes[1:2, :], triangles)
         @test_throws ArgumentError mesh(nodes, triangles[1:2, :])
         @test_throws ArgumentError mesh(nodes, triangles .+ 1)
@@ -40,7 +40,7 @@
         @test AS.gmsh.isInitialized() == 0
     end
 
-    @time @testset "Gmsh surfaces against modal solutions" begin
+    @time "Gmsh surfaces against modal solutions" @testset "Gmsh surfaces against modal solutions" begin
         beta = pi / 3
         incident = [cos(beta), sin(beta), 0.0]
         for body in (Sphere(1.0),) # Spheroid(1.5, 1.0) requires SpheroidalWaves backend, not available locally
@@ -97,7 +97,7 @@
         end
     end
 
-    @time @testset "Nonconvex surface and translation" begin
+    @time "Nonconvex surface and translation" @testset "Nonconvex surface and translation" begin
         torus = mesh(; qorder = 4, provenance = "inline non-axisymmetric torus") do g
             g.model.add("torus")
             volume = g.model.occ.addTorus(0, 0, 0, 1.0, 0.35)
@@ -126,7 +126,7 @@
         @test abs(scattering_amplitude(matched)) < 1e-11
     end
 
-    @time @testset "Canonical mesh reuse" begin
+    @time "Canonical mesh reuse" @testset "Canonical mesh reuse" begin
         canonical = mesh(
             Sphere(1.0); resolution = 0.4, method = :full, mesh_order = 3, qorder = 4)
         solution = bem(canonical, Rigid(), 1.0; gmres_kwargs = (reltol = 1e-9,))

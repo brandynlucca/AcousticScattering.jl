@@ -7,7 +7,7 @@ const AS = AcousticScattering
 
 BLAS.set_num_threads(1)
 
-@time @testset "Bent-cylinder MFS (method of fundamental solutions)" begin
+@time "Bent-cylinder MFS (method of fundamental solutions)" @testset "Bent-cylinder MFS (method of fundamental solutions)" begin
     radius, length = 0.01, 0.07
     c = 1477.3
     k = 2π * 38000.0 / c
@@ -15,7 +15,7 @@ BLAS.set_num_threads(1)
     cyl_straight = AS.Cylinder(radius, length)
     cyl_bent = AS.Cylinder(radius, length; radius_curvature = ρc)
 
-    @time @testset "broadside, both boundaries: converges tightly" begin
+    @time "broadside, both boundaries: converges tightly" @testset "broadside, both boundaries: converges tightly" begin
         for boundary in (AS.Rigid(), AS.PressureRelease())
             ts_exact = AS.target_strength(AS.modal(cyl_straight, boundary, k; m_max = 30))
             ts_mfs = AS.target_strength(AS.mfs(
@@ -24,7 +24,7 @@ BLAS.set_num_threads(1)
         end
     end
 
-    @time @testset "oblique incidence: PressureRelease converges tightly, Rigid more slowly" begin
+    @time "oblique incidence: PressureRelease converges tightly, Rigid more slowly" @testset "oblique incidence: PressureRelease converges tightly, Rigid more slowly" begin
         angle = 1.2
         ts_pr = AS.target_strength(AS.modal(
             cyl_straight, AS.PressureRelease(), k; incidence_angle = angle, m_max = 30))
@@ -40,7 +40,7 @@ BLAS.set_num_threads(1)
     end
 end
 
-@time @testset "fluid shell sphere BEM (vs modal series)" begin
+@time "fluid shell sphere BEM (vs modal series)" @testset "fluid shell sphere BEM (vs modal series)" begin
     rho_ext, c_ext = 1026.8, 1477.4
     a = 0.05
     rr = 0.9
@@ -69,7 +69,7 @@ end
     @test diffs_pr[end] < 0.02
 end
 
-@time @testset "AxisymmetricBEM (sphere, axial incidence)" begin
+@time "AxisymmetricBEM (sphere, axial incidence)" @testset "AxisymmetricBEM (sphere, axial incidence)" begin
     a = 0.01
     c_water = 1477.4
 
@@ -83,7 +83,7 @@ end
 
     sphere = AS.Sphere(a)
     for boundary in (AS.Rigid(), AS.PressureRelease())
-        @time @testset "$(typeof(boundary))" begin
+        @time "$(typeof(boundary))" @testset "$(typeof(boundary))" begin
             ts_modal = AS.target_strength(AS.modal(sphere, boundary, k))
 
             sol16 = AS.bem(
@@ -105,7 +105,7 @@ end
     end
 end
 
-@time @testset "Axisymmetric MFS (sphere, axial incidence)" begin
+@time "Axisymmetric MFS (sphere, axial incidence)" @testset "Axisymmetric MFS (sphere, axial incidence)" begin
     a = 0.01
     c_water = 1477.4
     freq = 38000.0
@@ -122,11 +122,11 @@ end
     end
 end
 
-@time @testset "Axisymmetric MFS (spheroid, axial incidence)" begin
+@time "Axisymmetric MFS (spheroid, axial incidence)" @testset "Axisymmetric MFS (spheroid, axial incidence)" begin
     @test_skip "requires SpheroidalWaves backend, not available locally"
 end
 
-@time @testset "Axisymmetric MFS (cylinder with spheroidal endcaps, axial incidence)" begin
+@time "Axisymmetric MFS (cylinder with spheroidal endcaps, axial incidence)" @testset "Axisymmetric MFS (cylinder with spheroidal endcaps, axial incidence)" begin
     radius, cyl_length, endcap_depth = 0.01, 0.05, 0.01
     c_water = 1477.3
     freq = 38000.0
@@ -146,7 +146,7 @@ end
     end
 end
 
-@time @testset "Axisymmetric MFS (sphere, oblique incidence / rotational symmetry)" begin
+@time "Axisymmetric MFS (sphere, oblique incidence / rotational symmetry)" @testset "Axisymmetric MFS (sphere, oblique incidence / rotational symmetry)" begin
     a = 0.01
     c_water = 1477.4
     freq = 38000.0
@@ -165,14 +165,14 @@ end
     end
 end
 
-@time @testset "Axisymmetric MFS fluid-filled/transmission (sphere, axial incidence)" begin
+@time "Axisymmetric MFS fluid-filled/transmission (sphere, axial incidence)" @testset "Axisymmetric MFS fluid-filled/transmission (sphere, axial incidence)" begin
     a = 0.05
     c_water = 1477.4
     freq = 38000.0
     k = 2pi * freq / c_water
     sphere = AS.Sphere(a)
 
-    @time @testset "rigid limit (gh >> 1)" begin
+    @time "rigid limit (gh >> 1)" @testset "rigid limit (gh >> 1)" begin
         stiff = AS.FluidFilled(1e8, 1e8)
         ts_stiff = AS.target_strength(AS.mfs(
             sphere, stiff, k; incidence_angle = 0.0, offset = 0.3a, n = 24))
@@ -181,7 +181,7 @@ end
         @test ts_stiff ≈ ts_rigid atol = 1e-4
     end
 
-    @time @testset "pressure-release limit (g << 1)" begin
+    @time "pressure-release limit (g << 1)" @testset "pressure-release limit (g << 1)" begin
         soft = AS.FluidFilled(1e-8, 1.0)
         ts_soft = AS.target_strength(AS.mfs(
             sphere, soft, k; incidence_angle = 0.0, offset = 0.3a, n = 24))
@@ -190,7 +190,7 @@ end
         @test ts_soft ≈ ts_pr atol = 1e-4
     end
 
-    @time @testset "converges to the analytical FluidFilled sphere modal series" begin
+    @time "converges to the analytical FluidFilled sphere modal series" @testset "converges to the analytical FluidFilled sphere modal series" begin
         g, h = 1.05, 1.02
         bc = AS.FluidFilled(g, h)
         ts_modal = AS.target_strength(AS.modal(sphere, bc, k))
@@ -200,14 +200,14 @@ end
     end
 end
 
-@time @testset "Axisymmetric MFS fluid-filled/transmission (sphere, oblique incidence)" begin
+@time "Axisymmetric MFS fluid-filled/transmission (sphere, oblique incidence)" @testset "Axisymmetric MFS fluid-filled/transmission (sphere, oblique incidence)" begin
     a = 0.05
     c_water = 1477.4
     freq = 38000.0
     k = 2pi * freq / c_water
     sphere = AS.Sphere(a)
 
-    @time @testset "rigid limit (gh >> 1)" begin
+    @time "rigid limit (gh >> 1)" @testset "rigid limit (gh >> 1)" begin
         stiff = AS.FluidFilled(1e8, 1e8)
         for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
@@ -222,7 +222,7 @@ end
         end
     end
 
-    @time @testset "pressure-release limit (g << 1)" begin
+    @time "pressure-release limit (g << 1)" @testset "pressure-release limit (g << 1)" begin
         soft = AS.FluidFilled(1e-8, 1.0)
         for angle_deg in (0.0, 90.0)
             β = deg2rad(angle_deg)
@@ -237,7 +237,7 @@ end
         end
     end
 
-    @time @testset "sphere rotational symmetry against the analytical modal series" begin
+    @time "sphere rotational symmetry against the analytical modal series" @testset "sphere rotational symmetry against the analytical modal series" begin
         g, h = 1.05, 1.02
         bc = AS.FluidFilled(g, h)
         ts_modal = AS.target_strength(AS.modal(sphere, bc, k))
@@ -251,14 +251,14 @@ end
     end
 end
 
-@time @testset "AxisymmetricBEM fluid-filled/transmission (sphere, axial incidence)" begin
+@time "AxisymmetricBEM fluid-filled/transmission (sphere, axial incidence)" @testset "AxisymmetricBEM fluid-filled/transmission (sphere, axial incidence)" begin
     a = 0.05
     c_water = 1477.4
     freq = 38000.0
     k = 2pi * freq / c_water
     sphere = AS.Sphere(a)
 
-    @time @testset "rigid limit (gh >> 1)" begin
+    @time "rigid limit (gh >> 1)" @testset "rigid limit (gh >> 1)" begin
         stiff = AS.FluidFilled(1e8, 1e8)
         ts_stiff = AS.target_strength(AS.bem(
             sphere, stiff, k; incidence_angle = 0.0, n = 24))
@@ -267,7 +267,7 @@ end
         @test ts_stiff ≈ ts_rigid atol = 0.25
     end
 
-    @time @testset "pressure-release limit (g << 1)" begin
+    @time "pressure-release limit (g << 1)" @testset "pressure-release limit (g << 1)" begin
         soft = AS.FluidFilled(1e-8, 1.0)
         ts_soft = AS.target_strength(AS.bem(
             sphere, soft, k; incidence_angle = 0.0, n = 24))
@@ -276,7 +276,7 @@ end
         @test ts_soft ≈ ts_pr atol = 0.1
     end
 
-    @time @testset "converges to the analytical FluidFilled sphere modal series" begin
+    @time "converges to the analytical FluidFilled sphere modal series" @testset "converges to the analytical FluidFilled sphere modal series" begin
         g, h = 1.05, 1.02
         bc = AS.FluidFilled(g, h)
         ts_modal = AS.target_strength(AS.modal(sphere, bc, k))

@@ -1,4 +1,4 @@
-@time @testset "Axisymmetric BEM diagnostic contracts" begin
+@time "Axisymmetric BEM diagnostic contracts" @testset "Axisymmetric BEM diagnostic contracts" begin
     for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1)),
         beta in (0.0, pi / 3)
 
@@ -16,7 +16,7 @@
     end
 end
 
-@time @testset "MFS independent checks and oversampling" begin
+@time "MFS independent checks and oversampling" @testset "MFS independent checks and oversampling" begin
     square = mfs(Sphere(1.0), PressureRelease(), 1.0; n = 12, incidence_angle = 0.0)
     sampled = mfs(Sphere(1.0), PressureRelease(), 1.0;
         n = 12, incidence_angle = 0.0, oversampling = 2)
@@ -70,7 +70,7 @@ end
     @test deficient.condition_number == Inf
 end
 
-@time @testset "Bent MFS independent checks" begin
+@time "Bent MFS independent checks" @testset "Bent MFS independent checks" begin
     body = Cylinder(0.01, 0.07; radius_curvature = 0.2)
     for boundary in (Rigid(), PressureRelease())
         square = mfs(body, boundary, 100.0; n_s = 4, n_phi = 4, offset = 0.003)
@@ -92,7 +92,7 @@ end
     end
 end
 
-@time @testset "FEM reports across discretizations" begin
+@time "FEM reports across discretizations" @testset "FEM reports across discretizations" begin
     sphere, cylinder, spheroid = Sphere(1.0), Cylinder(1.0, 3.0), Spheroid(1.2, 1.0)
     solid = SolidElastic(2.7, 4.0, 2.0)
     elastic_shell = Shelled(ElasticLayer(2.7, 4.0, 2.0), FluidInterior(1.0, 1.0), 0.8)
@@ -138,7 +138,7 @@ end
     end
 end
 
-@time @testset "Adaptive FEM refinement status" begin
+@time "Adaptive FEM refinement status" @testset "Adaptive FEM refinement status" begin
     for boundary in (Rigid(), FluidFilled(1.2, 1.1))
         solution = fem(Sphere(1.0), boundary, 1.0; adaptive = true, m_max = 3,
             n_elements_start = 16, max_n_elements = 128, target_tol = 0.01)
@@ -156,7 +156,7 @@ end
     end
 end
 
-@time @testset "Complex sphere references near irregular frequencies and at strong contrast" begin
+@time "Complex sphere references near irregular frequencies and at strong contrast" @testset "Complex sphere references near irregular frequencies and at strong contrast" begin
     for (boundary, k) in ((PressureRelease(), pi - 0.02), (PressureRelease(), pi + 0.02),
         (FluidFilled(10.0, 0.5), 1.0))
         reference = modal(Sphere(1.0), boundary, k)
@@ -168,11 +168,11 @@ end
     end
 end
 
-@time @testset "Oblique spheroid complex references at strong contrast" begin
+@time "Oblique spheroid complex references at strong contrast" @testset "Oblique spheroid complex references at strong contrast" begin
     @test_skip "requires SpheroidalWaves backend, not available locally"
 end
 
-@time @testset "Oversampled MFS near gas-sphere resonance" begin
+@time "Oversampled MFS near gas-sphere resonance" @testset "Oversampled MFS near gas-sphere resonance" begin
     body, boundary, k = Sphere(1.0), FluidFilled(0.0012, 0.23), 0.014
     reference = modal(body, boundary, k)
     solution = mfs(body, boundary, k; incidence_angle = 0.0, n = 96, oversampling = 2)
@@ -180,7 +180,7 @@ end
     @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 0.01
 end
 
-@time @testset "BEM gas-sphere resonance and mesh refinement" begin
+@time "BEM gas-sphere resonance and mesh refinement" @testset "BEM gas-sphere resonance and mesh refinement" begin
     # NOTE: the fine (n=192) and resonance-peak (n=256) refinement checks are covered at
     # full fidelity in perf/diagnostics.jl; here a single coarse off-resonance k is cheap.
     body, boundary, k = Sphere(1.0), FluidFilled(0.0012, 0.23), 0.014

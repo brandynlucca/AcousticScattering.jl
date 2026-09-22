@@ -1,10 +1,10 @@
-@time @testset "Full BEM fluid transmission" begin
+@time "Full BEM fluid transmission" @testset "Full BEM fluid transmission" begin
     beta, alpha = pi / 3, 0.4
     incident = [cos(beta), sin(beta) * cos(alpha), sin(beta) * sin(alpha)]
     observations = ((pi, -incident), (0.0, incident),
         (pi / 2, [0.0, -sin(alpha), cos(alpha)]))
 
-    @time @testset "Material contrasts and irregular frequencies" begin
+    @time "Material contrasts and irregular frequencies" @testset "Material contrasts and irregular frequencies" begin
         # NOTE: the full material-contrast/frequency grid is covered in perf/full_bem.jl;
         # here a reduced set keeps both weak/strong-contrast and irregular-frequency coverage.
         for (g, h, k) in ((0.0012, 0.23, 1.0), (1000.0, 2.0, 1.0),
@@ -28,11 +28,11 @@
         end
     end
 
-    @time @testset "Spheroids and quadrature refinement" begin
+    @time "Spheroids and quadrature refinement" @testset "Spheroids and quadrature refinement" begin
         @test_skip "requires SpheroidalWaves backend, not available locally"
     end
 
-    @time @testset "Gas resonance and mesh refinement" begin
+    @time "Gas resonance and mesh refinement" @testset "Gas resonance and mesh refinement" begin
         boundary = FluidFilled(0.0012, 0.23)
         # NOTE: the full 4-point mesh-refinement sweep is covered in perf/full_bem.jl.
         for k in (0.0138, 0.016)
@@ -50,7 +50,7 @@
         end
     end
 
-    @time @testset "Equilibration, conventional system, and length scaling" begin
+    @time "Equilibration, conventional system, and length scaling" @testset "Equilibration, conventional system, and length scaling" begin
         boundary = FluidFilled(0.0012, 0.23)
         balanced = bem(Sphere(1.0), boundary, 1.0; method = :full,
             meshsize = 0.8, condition_limit = 700)
@@ -96,7 +96,7 @@
         end
     end
 
-    @time @testset "Independent transmission amplitudes" begin
+    @time "Independent transmission amplitudes" @testset "Independent transmission amplitudes" begin
         cases = (
             (0.0012, 0.23, 0.0138, 0.35, 5, 3,
                 (-0.2603525438230707 + 72.4628313282518im,

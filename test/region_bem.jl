@@ -17,7 +17,7 @@ function ellipsoid_surface(axes, center; resolution, qorder = 4)
     end
 end
 
-@time @testset "Coupled fluid regions" begin
+@time "Coupled fluid regions" @testset "Coupled fluid regions" begin
     beta, alpha = pi / 3, 0.4
     incident = [cos(beta), sin(beta) * cos(alpha), sin(beta) * sin(alpha)]
     observations = ((pi, -incident), (0.0, incident),
@@ -25,7 +25,7 @@ end
     outer = mesh(Sphere(1.0); method = :full, resolution = 0.5, mesh_order = 3, qorder = 5)
     inner = mesh(Sphere(0.5); method = :full, resolution = 0.25, mesh_order = 3, qorder = 5)
 
-    @time @testset "Single interface and material limits" begin
+    @time "Single interface and material limits" @testset "Single interface and material limits" begin
         material = FluidFilled(1.2, 1.1)
         single = bem(
             outer, material, 1.0; incidence_angle = beta, incidence_azimuth = alpha)
@@ -62,7 +62,7 @@ end
         end
     end
 
-    @time @testset "Spherical layers and strong contrasts" begin
+    @time "Spherical layers and strong contrasts" @testset "Spherical layers and strong contrasts" begin
         g, h, k = 0.0012, 0.23, 1.0
         solution = bem([outer, inner], [FluidFilled(1.2, 1.1), FluidFilled(g, h)], k;
             incidence_angle = beta, incidence_azimuth = alpha)
@@ -75,7 +75,7 @@ end
         end
     end
 
-    @time @testset "Three-interface reference amplitudes" begin
+    @time "Three-interface reference amplitudes" @testset "Three-interface reference amplitudes" begin
         reference_outer = mesh(
             Sphere(1.0); method = :full, resolution = 0.6, mesh_order = 3, qorder = 5)
         middle = mesh(
@@ -96,7 +96,7 @@ end
         end
     end
 
-    @time @testset "Displaced inner body and invisible interfaces" begin
+    @time "Displaced inner body and invisible interfaces" @testset "Displaced inner body and invisible interfaces" begin
         center = [0.25, -0.1, 0.2]
         shifted = ellipsoid_surface((0.3, 0.3, 0.3), center; resolution = 0.15, qorder = 5)
         material = FluidFilled(0.0012, 0.23)
@@ -113,7 +113,7 @@ end
         @test abs(scattering_amplitude(invisible)) < 1e-5
     end
 
-    @time @testset "Close interfaces" begin
+    @time "Close interfaces" @testset "Close interfaces" begin
         close = mesh(
             Sphere(0.9); method = :full, resolution = 0.45, mesh_order = 3, qorder = 5)
         material = FluidFilled(0.0012, 0.23)
@@ -128,7 +128,7 @@ end
         end
     end
 
-    @time @testset "Equilibration and conditioning" begin
+    @time "Equilibration and conditioning" @testset "Equilibration and conditioning" begin
         coarse = mesh(Sphere(1.0); method = :full, resolution = 1.0, qorder = 2)
         material = GasFilled(0.0012, 0.23)
         balanced = bem([coarse], [material], 1.0)
@@ -141,7 +141,7 @@ end
         @test scattering_amplitude(balanced) ≈ scattering_amplitude(unscaled) rtol = 1e-9
     end
 
-    @time @testset "Invalid region inputs" begin
+    @time "Invalid region inputs" @testset "Invalid region inputs" begin
         materials = [FluidFilled(1.2, 1.1), FluidFilled(0.7, 0.8)]
         @test_throws ArgumentError bem(Mesh[], FluidFilled[], 1.0)
         @test_throws ArgumentError bem([outer, inner], materials[1:1], 1.0)

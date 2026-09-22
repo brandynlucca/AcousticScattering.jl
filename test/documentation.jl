@@ -3,7 +3,7 @@ using Test: @test, @testset
 # Including the script defines its guard without performing a deployment.
 include(joinpath(@__DIR__, "..", "docs", "deploy.jl"))
 
-@time @testset "Documentation deployment guard" begin
+@time "Documentation deployment guard" @testset "Documentation deployment guard" begin
     trusted = Dict(
         "GITHUB_ACTIONS" => "true",
         "GITHUB_EVENT_NAME" => "push",
