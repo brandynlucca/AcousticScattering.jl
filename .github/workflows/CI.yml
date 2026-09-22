@@ -1,4 +1,4 @@
-name: CI
+name: Build status
 on:
   push:
     branches: [main]
@@ -46,8 +46,6 @@ jobs:
         flavor: [core, plots]
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-native
-        if: matrix.os == 'ubuntu-latest'
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
@@ -123,9 +121,6 @@ jobs:
         run: |
           using Pkg
           Pkg.instantiate()
-      # Coverage only needs to be collected once (line execution isn't OS-specific), and
-      # --code-coverage=user disables inlining/optimizations in numerical hot loops, costing
-      # 3-10x wall time — restricting it to one OS avoids paying that tax on all three.
       - name: Run test group
         if: matrix.version == '1.10' || matrix.os != 'ubuntu-latest'
         run: julia --startup-file=no --check-bounds=yes test/runtests.jl
@@ -241,8 +236,6 @@ jobs:
         mode: [standard, opt-out]
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-native
-        if: matrix.os == 'ubuntu-latest'
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
