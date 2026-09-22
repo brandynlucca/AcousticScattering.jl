@@ -10,7 +10,7 @@ BLAS.set_num_threads(1)
 @time "Oblique (multi-Fourier-mode) incidence" @testset "Oblique (multi-Fourier-mode) incidence" begin
     c_water = 1477.4
 
-    @time "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" @testset "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time @testset "$(typeof(boundary)): sphere rotational symmetry (independent of solve_axial)" for boundary in (AS.Rigid(), AS.PressureRelease())
         a = 0.01
         freq = 38000.0
         k = 2pi * freq / c_water
@@ -48,7 +48,7 @@ BLAS.set_num_threads(1)
               AS.target_strength(sol_mfs; angle = pi - β, azimuth = pi)
     end
 
-    @time "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" @testset "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time @testset "$(typeof(boundary)): prolate spheroid cross-check against the analytical modal series" for boundary in (AS.Rigid(), AS.PressureRelease())
         # a, b = 0.05, 0.02
         # spheroid = AS.Spheroid(a, b)
         # freq = 20000.0
@@ -65,7 +65,7 @@ BLAS.set_num_threads(1)
         @test_skip "requires SpheroidalWaves backend, not available locally"
     end
 
-    @time "$(typeof(boundary)): finite cylinder cross-check against FCMS" @testset "$(typeof(boundary)): finite cylinder cross-check against FCMS" for boundary in (AS.Rigid(), AS.PressureRelease())
+    @time @testset "$(typeof(boundary)): finite cylinder cross-check against FCMS" for boundary in (AS.Rigid(), AS.PressureRelease())
         radius, length = 0.01, 1.0
         freq = 20000.0
         k = 2pi * freq / c_water

@@ -183,7 +183,7 @@ end
 
     material = AS.Shelled(0.32, 2565.0, 70e9)
 
-    @time "assembled system, freq=$freq" @testset "assembled system, freq=$freq" for freq in (12000.0, 38000.0)
+    @time @testset "assembled system, freq=$freq" for freq in (12000.0, 38000.0)
         sys = AS.assemble_shell_system(geometry, material.material, freq; n_eta = 9)
 
         omega_hat_golden = freq == 12000.0 ? 0.4779315959914645 : 1.5134500539729712
@@ -410,7 +410,7 @@ end
         end
     end
 
-    @time "Water-filled spherical-shell resonance: kR=$ka" @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92,)
+    @time @testset "Water-filled spherical-shell resonance: kR=$ka" for ka in (1.92,)
         beta = pi / 3
         reference_boundary = Shelled(wall, FluidInterior(1.0, 1.0), 0.8)
         solution = fem(Shell(Sphere(0.01), 0.002), Shelled(poisson, rho, youngs_modulus),

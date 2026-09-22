@@ -14,8 +14,8 @@ jobs:
   format:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
         with:
           version: "1"
       - uses: julia-actions/cache@v3
@@ -45,10 +45,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         flavor: [core, plots]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-native
         if: matrix.os == 'ubuntu-latest'
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
@@ -72,7 +72,7 @@ jobs:
           using Pkg
           Pkg.precompile(; strict = true)
       - name: Save resolved test environment
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-environment-${{ matrix.os }}-${{ matrix.version }}-${{ matrix.flavor }}
           path: |
@@ -104,8 +104,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, NearPressure, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
@@ -134,7 +134,7 @@ jobs:
         run: julia --startup-file=no --check-bounds=yes --code-coverage=user test/runtests.jl
       - name: Save coverage files
         if: matrix.version == '1' && matrix.os == 'ubuntu-latest' && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.group }}
           path: |
@@ -205,8 +205,8 @@ jobs:
             flavor: plots
             groups: "Plots1D,Plots2D,Plots3DModels,Plots3DFull"
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
@@ -240,10 +240,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         mode: [standard, opt-out]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-native
         if: matrix.os == 'ubuntu-latest'
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
       # No cache: each matrix job uses a fresh Julia depot and the checked-out source.
