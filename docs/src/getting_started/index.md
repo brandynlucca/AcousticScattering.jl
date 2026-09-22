@@ -5,19 +5,6 @@ and calculate rigid-sphere target strength. The current package requires Julia 1
 
 ## Installation
 
-### Build prerequisites
-
-The registered `SpheroidalWaves` 0.4.1 dependency compiles its Fortran backends during installation. Install CMake 3.15 or later, a compatible Fortran compiler, and a build tool before running `Pkg.add`. Put them on `PATH` so Julia can find them.
-
-- On Ubuntu, install `cmake`, `gfortran`, and `make` with your system package manager.
-  The package CI installs these tools explicitly.
-- On Windows, use CMake and a matching MinGW-w64 toolchain providing `gfortran` and
-  `mingw32-make`. The dependency selects the `MinGW Makefiles` CMake generator.
-- Other platforms need a compatible native toolchain and supported dependency artifacts.
-  They are not covered by the current Linux CI matrix.
-
-Disabling the optional precompile workload does not skip this dependency build.
-
 ### Install the package
 
 For the current development version, install from the repository:
@@ -142,9 +129,6 @@ The full tutorial uses finer sampling and demonstrates saving the data and figur
   Compare first and second identical calls within one session to identify compilation cost.
 - **Artifact/Gmsh failure:** retain the error and Julia/platform versions, check network or proxy
   access, and run `Pkg.instantiate()` in the active environment.
-- **SpheroidalWaves build failure:** check the build prerequisites above and the build log named
-  in the error. After correcting the toolchain, run `Pkg.build("SpheroidalWaves")` and
-  `Pkg.precompile()` in the active environment.
 - **Headless cluster:** use CairoMakie and `save` for static figures, as in the tutorial.
 - **Unsupported combination:** consult [Choosing a solver](@ref solver-selection). A material
   constructor does not imply support in every geometry and solver.
