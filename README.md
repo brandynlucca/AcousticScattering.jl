@@ -1,35 +1,21 @@
-<p align="center">
-  <img src="docs/src/assets/logo.svg" alt="AcousticScattering.jl logo" width="240" height="240">
-</p>
-
-# AcousticScattering.jl
+<h1 align="center">
+  <img src="docs/src/assets/logo.svg" alt="AcousticScattering.jl" width="300">
+</h1>
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776331.svg)](https://doi.org/10.5281/zenodo.22776331)
 
-AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides
-modal-series and Kirchhoff models, boundary-element and finite-element methods, and the
-method of fundamental solutions for calculating scattering amplitude and target strength.
-
-Supported geometries include spheres, spheroids, straight and bent cylinders, and shells.
-Material options include rigid, pressure-release, fluid-filled, and elastic configurations.
-Support varies by solver. See the
-[model guide](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/selection/)
-for available combinations and limitations.
+AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides modal-series and Kirchhoff models, boundary-element and finite-element methods, the method of fundamental solutions, and Fourier matching for calculating scattering amplitude and target strength. Supported geometries include spheres, spheroids, straight and bent cylinders, shells, and general bodies of revolution. Material options include rigid, pressure-release, fluid-filled, and elastic configurations. Support varies by solver. See the [model guide](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/selection/) for available combinations and limitations.
 
 ## Installation
 
-Requires Julia 1.10 or later, CMake, and a Fortran toolchain. See the
-[build prerequisites](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/#build-prerequisites)
-for details. Install the development version from GitHub:
+Requires Julia 1.10 or later. Install the development version from GitHub:
 
 ```julia
 import Pkg
 Pkg.add(url = "https://github.com/brandynlucca/AcousticScattering.jl")
 ```
 
-Installation runs an optional precompile workload to reduce first-call latency.
-[Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/#opt-out-before-the-first-precompile)
-explains how to disable it before installation.
+Installation runs an optional precompile workload to reduce first-call latency. [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/#opt-out-before-the-first-precompile) explains how to disable it before installation.
 
 ## Example
 
@@ -48,26 +34,19 @@ target_strength(solution) # approximately -49.09 dB re 1 m²
 
 ## Documentation
 
-- [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/):
-  installation and your first calculation.
-- [First frequency sweep](https://brandynlucca.github.io/AcousticScattering.jl/stable/tutorials/):
-  plot target strength and save the data.
-- [Models and theory](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/):
-  conventions, assumptions, and solver selection.
-- [API reference](https://brandynlucca.github.io/AcousticScattering.jl/stable/api/):
-  geometry, materials, solvers, and result queries.
-- [Visualization gallery](https://brandynlucca.github.io/AcousticScattering.jl/stable/gallery/):
-  figures with links to their examples.
+- [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/):   installation and your first calculation.
+- [First frequency sweep](https://brandynlucca.github.io/AcousticScattering.jl/stable/tutorials/):   plot target strength and save the data.
+- [Models and theory](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/):   conventions, assumptions, and solver selection.
+- [API reference](https://brandynlucca.github.io/AcousticScattering.jl/stable/api/):   geometry, materials, solvers, and result queries.
+- [Visualization gallery](https://brandynlucca.github.io/AcousticScattering.jl/stable/gallery/):   figures with links to their examples.
 
 ## Citation
 
 If you use this package in research, cite the archived version you used:
 
-> Lucca, B., and contributors. (2026). *AcousticScattering.jl* (v0.1.0) [Computer software].
-> Zenodo. https://doi.org/10.5281/zenodo.22776331
+> Lucca, B., and contributors. (2026). *AcousticScattering.jl* (v0.1.0) [Computer software]. > Zenodo. https://doi.org/10.5281/zenodo.22776331
 
-Please also cite the relevant model papers listed in the
-[documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
+Please also cite the relevant model papers listed in the [documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
 
 ## License
 
