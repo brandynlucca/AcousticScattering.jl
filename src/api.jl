@@ -1037,6 +1037,7 @@ function fourier(body::Irregular, boundary::AbstractBoundaryCondition, k::Real;
         mapping_order::Integer = max(length(body.rc), 1),
         m_max::Integer = _default_mode_count(k * body.a), n_max::Integer = m_max,
         rtol::Real = 1e-6, maxevals::Integer = 1000)
+    isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive, got $k"))
     mapping = solve_mapping(body, mapping_order; continuation_steps)
     is_admissible(mapping) || throw(ArgumentError(
         "Irregular's conformal mapping is inadmissible (Jacobian vanishes somewhere). " *

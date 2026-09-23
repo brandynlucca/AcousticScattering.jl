@@ -104,7 +104,7 @@ Meshes may have independent shapes, origins and orientations, but must not inter
 Returns a [`BEMSolution`](@ref). Post-process with `scattering_amplitude(sol; direction)` or
 `target_strength(sol; direction)`.
 
-See [Coupled fluid regions](@ref coupled-fluid-regions) for the coupling equations,
+See [Coupled fluid regions](@ref boundary-theory) for the coupling equations,
 `formulation` and `correction` tradeoffs, and diagnostics fields.
 
 # Example

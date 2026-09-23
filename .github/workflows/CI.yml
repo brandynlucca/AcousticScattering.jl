@@ -104,7 +104,7 @@ jobs:
         # (observed up to ~50 min queue time for a single job) rather than running them.
         version: ["1.10", "1"]
         os: [ubuntu-latest, windows-latest]
-        group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, NearPressure, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
+        group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, NearPressure, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, FourierMatching, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -164,7 +164,7 @@ jobs:
           - version: "1.10"
             label: CoreBatch4
             flavor: core
-            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces"
+            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces,FourierMatching"
           - version: "1.10"
             label: PlotsAll
             flavor: plots
@@ -184,7 +184,7 @@ jobs:
           - version: "1"
             label: CoreBatch4
             flavor: core
-            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces"
+            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces,FourierMatching"
           - version: "1"
             label: PlotsAll
             flavor: plots
