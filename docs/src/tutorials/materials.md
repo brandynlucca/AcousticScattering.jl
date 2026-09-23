@@ -1,7 +1,6 @@
 # [Materials and shells](@id materials-tutorial)
 
-These examples demonstrate fluid, solid-elastic, and layered spheres. All contrasts are relative
-to the exterior fluid. The example values are illustrative, not calibration specifications.
+These examples demonstrate fluid, solid-elastic, and layered spheres. All contrasts are relative to the exterior fluid. The example values are illustrative, not calibration specifications.
 
 ## Fluid and gas interiors
 
@@ -19,8 +18,7 @@ gas_strength = target_strength(modal(body, gas_like, wavenumber))
 (water_like = water_strength, gas_like = gas_strength)
 ```
 
-`GasFilled` aliases `FluidFilled`: both impose pressure and normal-velocity continuity.
-Gas resonances may require fine frequency sampling. A coarse grid can miss their peaks.
+`GasFilled` aliases `FluidFilled`: both impose pressure and normal-velocity continuity. Gas resonances may require fine frequency sampling. A coarse grid can miss their peaks.
 
 ## Solid elastic sphere
 
@@ -31,8 +29,7 @@ solid_solution = modal(body, solid, wavenumber)
 target_strength(solid_solution)
 ```
 
-Inputs are density, longitudinal-speed, and shear-speed contrasts. See
-[Modal series](@ref modal-theory) for the elastic boundary conditions.
+Inputs are density, longitudinal-speed, and shear-speed contrasts. See [Modal series](@ref modal-theory) for the elastic boundary conditions.
 
 ## Fluid and elastic shells
 
@@ -46,9 +43,7 @@ shell_strengths = [target_strength(modal(body, configuration, wavenumber))
 shell_strengths
 ```
 
-`0.9` is inner radius divided by outer radius. The `Sphere` radius is the outer radius.
-`VacuumInterior()` imposes pressure release at the inner fluid-layer surface. It is not a
-zero-density `FluidInterior`.
+`0.9` is inner radius divided by outer radius. The `Sphere` radius is the outer radius. `VacuumInterior()` imposes pressure release at the inner fluid-layer surface. It is not a zero-density `FluidInterior`.
 
 ## Viscous flesh and an elastic wall
 
@@ -63,10 +58,6 @@ viscous_solution = modal(body, swimbladder, low_wavenumber; m_max = 0)
 target_strength(viscous_solution)
 ```
 
-Both ratios use the outer body radius. The gas core ends at `0.7 * radius`, and the elastic
-wall ends at `0.8 * radius`. Viscosity inputs are kinematic viscosities in m²/s. The implemented
-model is restricted to the monopole (`m_max = 0`). Higher orders are not supported.
+Both ratios use the outer body radius. The gas core ends at `0.7 * radius`, and the elastic wall ends at `0.8 * radius`. Viscosity inputs are kinematic viscosities in m²/s. The implemented model is restricted to the monopole (`m_max = 0`). Higher orders are not supported.
 
-Structural shell FEM instead uses `Shelled(poisson, density, youngs_modulus)` with
-`Shell(body, thickness)`. See [FEM and shell coupling](@ref fem-theory) for its absolute units
-and distinct interior-fluid arguments.
+Structural shell FEM instead uses `Shelled(poisson, density, youngs_modulus)` with `Shell(body, thickness)`. See [FEM and shell coupling](@ref fem-theory) for its absolute units and distinct interior-fluid arguments.

@@ -1,8 +1,6 @@
 # [Finding a gas-bubble resonance](@id bubble-resonance-tutorial)
 
-Locate the strongest echo from a spherical gas inclusion, then resolve its peak
-with a narrower frequency sweep. The model treats both fluids as lossless; the
-finite resonance width comes from acoustic radiation.
+Locate the strongest echo from a spherical gas inclusion, then resolve its peak with a narrower frequency sweep. The model treats both fluids as lossless and the finite resonance width comes from acoustic radiation.
 
 ## Search, then zoom in
 
@@ -29,10 +27,7 @@ nothing # hide
 
 ![Broad and refined gas-bubble spectra with their complex-amplitude phase.](bubble_resonance.png)
 
-The upper panels show target strength; the lower panels show wrapped amplitude
-phase in radians. Replot either saved sweep with `plot(zoom; quantity=:magnitude)`
-to see amplitude in meters without solving again.
-Phase follows the package's [time convention](@ref conventions).
+The upper panels show target strength; the lower panels show wrapped amplitude phase in radians. Replot either saved sweep with `plot(zoom; quantity=:magnitude)` to see amplitude in meters without solving again. Phase follows the package's [time convention](@ref conventions).
 
 ## Check the peak location
 
@@ -45,6 +40,4 @@ f_refined = refined.frequencies[argmax(refined.target_strength)]
 (peak_hz=f_refined, frequency_step_hz=step(band)/2)
 ```
 
-A sampled peak has finite frequency resolution. Repeat the search when changing
-radius or material, and widen the band if the maximum lies at an endpoint.
-For layered inclusions, continue with [Coated particles](@ref coated-particle-tutorial).
+A sampled peak has finite frequency resolution. Repeat the search when changing radius or material, and widen the band if the maximum lies at an endpoint. For layered inclusions, continue with [Coated particles](@ref coated-particle-tutorial).

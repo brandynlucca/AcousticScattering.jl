@@ -1,6 +1,6 @@
 # [Surface phase and directional scattering](@id gallery-bent)
 
-Solve a closed rigid body with curved sides and rounded ends. Its bend lies in the xy plane; its midpoint tangent is +x. These compact mesh settings are for visualization.
+Solve a closed rigid body with curved sides and rounded ends. Its bend lies in the xy plane. Its midpoint tangent is +x. These compact mesh settings are for visualization.
 
 ```@example gallery_bent
 using AcousticScattering
@@ -46,9 +46,7 @@ nothing # hide
 
 ## [3D scattering lobes](@id gallery-radiation)
 
-Radius is far-field amplitude magnitude divided by its maximum; color is directional target
-strength in dB re 1 m². This is a radiation pattern, not the body's physical surface.
-The direction opposite the incident wave gives the backscattering strength.
+Radius is far-field amplitude magnitude divided by its maximum. Color is directional target strength in dB re 1 m². This is a radiation pattern, not the body's physical surface. The direction opposite the incident wave gives the backscattering strength.
 
 ```@example gallery_bent
 pattern = bistatic_map(solution, range(0, pi; length=61), range(0, 2pi; length=121))

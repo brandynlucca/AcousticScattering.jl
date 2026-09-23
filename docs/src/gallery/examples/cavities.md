@@ -1,8 +1,6 @@
 # [Two gas cavities in one body](@id gallery-cavities)
 
-A branched region tree places both cavities inside the same outer body:
-`parents=[0, 1, 1]`. Their different sizes and positions produce different coupled
-internal pressures. The complete outer mesh has alpha 0.5.
+A branched region tree places both cavities inside the same outer body, `parents=[0, 1, 1]`. Their different sizes and positions produce different coupled internal pressures. The complete outer mesh has alpha 0.5.
 
 ```@example gallery_cavities
 using AcousticScattering
@@ -24,6 +22,5 @@ nothing # hide
 
 ![Internal pressure on two differently sized gas cavities within one fluid body.](cavity_pressure.png)
 
-Color shows total pressure magnitude divided by incident amplitude. This is one
-illustrative frequency; a resonance study needs frequency and mesh refinement.
+Color shows total pressure magnitude divided by incident amplitude. This is one illustrative frequency. A resonance study needs frequency and mesh refinement.
 

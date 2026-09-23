@@ -1,7 +1,6 @@
 # [An off-center fluid inclusion](@id gallery-eccentric)
 
-A displaced dense inclusion breaks spherical symmetry. Color shows total pressure on the
-inclusion; the complete outer interface remains visible as a translucent grid.
+A displaced dense inclusion breaks spherical symmetry. Color shows total pressure on the inclusion. The complete outer interface remains visible as a translucent grid.
 
 ```@example gallery_eccentric
 using AcousticScattering
@@ -22,6 +21,5 @@ nothing # hide
 
 ![Pressure on an eccentric fluid inclusion, enclosed by a complete outer mesh.](eccentric_pressure.png)
 
-Materials use density and sound-speed ratios relative to the exterior. These mesh settings
-are for visualization; see [numerical convergence](@ref convergence-tutorial) for refinement.
+Materials use density and sound-speed ratios relative to the exterior. These mesh settings are for visualization (see [numerical convergence](@ref convergence-tutorial) for refinement).
 

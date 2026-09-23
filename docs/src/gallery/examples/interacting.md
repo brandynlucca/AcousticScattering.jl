@@ -2,8 +2,7 @@
 
 ## [Pressure on two particles](@id gallery-pair)
 
-Two separated fluid particles scatter into each other. Both are exterior-facing regions
-(`parents=[0, 0]`); color shows total surface pressure divided by incident amplitude.
+Two separated fluid particles scatter into each other. Both are exterior-facing regions (`parents=[0, 0]`). Color shows total surface pressure divided by incident amplitude.
 
 ```@example gallery_pair
 using AcousticScattering
@@ -24,8 +23,7 @@ nothing # hide
 
 ## [Phase across a three-body cluster](@id gallery-cluster)
 
-Use three differently sized particles with oblique incidence. The returned solution
-includes multiple scattering among all three bodies.
+Use three differently sized particles with oblique incidence. The returned solution includes multiple scattering among all three bodies.
 
 ```@example gallery_cluster
 using AcousticScattering
@@ -48,9 +46,7 @@ nothing # hide
 
 ## [The cluster's 3D scattering pattern](@id gallery-cluster-radiation)
 
-Reuse that solution for every observation direction. Radius is amplitude magnitude
-normalized by its maximum; color is target strength. This is a directional pattern,
-not a physical surface. Backscatter is the direction opposite the incident wave.
+Reuse that solution for every observation direction. Radius is amplitude magnitude normalized by its maximum. Color is target strength. This is a directional pattern, not a physical surface. Backscatter is the direction opposite the incident wave.
 
 ```@example gallery_cluster
 pattern = bistatic_map(solution, range(0, pi; length=61), range(0, 2pi; length=121))
@@ -68,5 +64,4 @@ nothing # hide
 
 ![Three-dimensional directional scattering pattern of the coupled cluster.](cluster_radiation.png)
 
-Mesh settings are compact visualization choices. Refine meshes and quadrature before
-using these values quantitatively.
+Mesh settings are compact visualization choices. Refine meshes and quadrature before using these values quantitatively.

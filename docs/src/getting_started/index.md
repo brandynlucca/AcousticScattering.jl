@@ -1,7 +1,6 @@
 # [Getting Started](@id getting-started)
 
-Install into a project environment, choose whether to run the optional precompile workload,
-and calculate rigid-sphere target strength. The current package requires Julia 1.10 or later.
+Install into a project environment, choose whether to run the optional precompile workload, and calculate rigid-sphere target strength. The current package requires Julia 1.10 or later.
 
 ## Installation
 
@@ -28,8 +27,7 @@ For the plotting tutorials, install CairoMakie in the same environment:
 Pkg.add("CairoMakie")
 ```
 
-CairoMakie writes static figures without a display server. Plotting is optional for numerical
-calculations.
+CairoMakie writes static figures without a display server. Plotting is optional for numerical calculations.
 
 ## Precompilation: the default
 
@@ -37,8 +35,7 @@ Julia normally precompiles after installation. AcousticScattering additionally r
 
 ## Opt out before the first precompile
 
-Add this to `LocalPreferences.toml` beside the active environment's `Project.toml` **before
-installing**. Merge it into an existing file, preserving any other settings:
+Add this to `LocalPreferences.toml` beside the active environment's `Project.toml` **before installing**. Merge it into an existing file, preserving any other settings:
 
 ```toml
 [AcousticScattering]
@@ -63,21 +60,17 @@ Pkg.precompile()
 using AcousticScattering
 ```
 
-`withenv` restores the previous environment-variable setting. `JULIA_PKG_PRECOMPILE_AUTO=0`
-alone only postpones precompilation: importing the package can still trigger the workload
-unless the preference is set.
+`withenv` restores the previous environment-variable setting. `JULIA_PKG_PRECOMPILE_AUTO=0` alone only postpones precompilation: importing the package can still trigger the workload unless the preference is set.
 [Julia Pkg precompilation documentation](https://pkgdocs.julialang.org/v1/environments/).
 
-To re-enable the workload, set the preference to `true`, restart Julia, and run
-`Pkg.precompile()`:
+To re-enable the workload, set the preference to `true`, restart Julia, and run `Pkg.precompile()`:
 
 ```julia
 using Preferences: set_preferences!
 set_preferences!("AcousticScattering", "precompile_workload" => true; force = true)
 ```
 
-Changing a compile-time preference can rebuild package and dependent caches. Set the preference
-in the environment you actually use.
+Changing a compile-time preference can rebuild package and dependent caches. Set the preference in the environment you actually use.
 
 ## First calculation
 
@@ -95,9 +88,7 @@ strength = target_strength(solution) # dB re 1 m²
 (amplitude = amplitude, target_strength = strength)
 ```
 
-The solver returns a `ModalSolution`. Use `target_strength` to extract its scalar result. Sphere
-backscatter is orientation-independent, so no incidence keyword is needed. See
-[Conventions](@ref conventions) for normalization and
+The solver returns a `ModalSolution`. Use `target_strength` to extract its scalar result. Sphere backscatter is orientation-independent, so no incidence keyword is needed. See [Conventions](@ref conventions) for normalization and
 [Your first frequency sweep](@ref first-sweep) for a complete plotting workflow.
 
 ## First plot
@@ -125,12 +116,8 @@ The full tutorial uses finer sampling and demonstrates saving the data and figur
 
 ## Troubleshooting
 
-- **Slow first use:** distinguish downloads, dependency precompilation, and the optional workload.
-  Compare first and second identical calls within one session to identify compilation cost.
-- **Artifact/Gmsh failure:** retain the error and Julia/platform versions, check network or proxy
-  access, and run `Pkg.instantiate()` in the active environment.
+- **Slow first use:** distinguish downloads, dependency precompilation, and the optional workload. Compare first and second identical calls within one session to identify compilation cost.
+- **Artifact/Gmsh failure:** retain the error and Julia/platform versions, check network or proxy access, and run `Pkg.instantiate()` in the active environment.
 - **Headless cluster:** use CairoMakie and `save` for static figures, as in the tutorial.
-- **Unsupported combination:** consult [Choosing a solver](@ref solver-selection). A material
-  constructor does not imply support in every geometry and solver.
-- **Unexpected angle dependence:** incidence and observation angles are distinct inputs. Review
-  [Conventions](@ref conventions), especially for oblique axisymmetric BEM and MFS.
+- **Unsupported combination:** consult [Choosing a solver](@ref solver-selection). A material constructor does not imply support in every geometry and solver.
+- **Unexpected angle dependence:** incidence and observation angles are distinct inputs. Review [Conventions](@ref conventions), especially for oblique axisymmetric BEM and MFS.

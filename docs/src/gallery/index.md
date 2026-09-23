@@ -1,7 +1,6 @@
 # [Visualization Gallery](@id gallery)
 
-Explore geometry, materials, coupled bodies, pressure fields and scattering patterns.
-Click any figure to enlarge it, or open its short, runnable Julia example.
+Explore geometry, materials, coupled bodies, pressure fields and scattering patterns. Click any figure to enlarge it, or open its short, runnable Julia example.
 
 ```@raw html
 <div class="scattering-gallery">
@@ -177,11 +176,11 @@ Click any figure to enlarge it, or open its short, runnable Julia example.
 ```@raw html
   <figure>
     <a href="examples/radiation.png" aria-label="Enlarge 3d scattering lobes">
-      <img src="examples/radiation.png" alt="Radius shows relative amplitude; color shows directional target strength." loading="lazy">
+      <img src="examples/radiation.png" alt="Radius shows relative amplitude. Color shows directional target strength." loading="lazy">
     </a>
     <figcaption>
       <h2>3D scattering lobes</h2>
-      <p>Radius shows relative amplitude; color shows directional target strength.</p>
+      <p>Radius shows relative amplitude. Color shows directional target strength.</p>
 ```
 
 [Short example](@ref gallery-radiation)

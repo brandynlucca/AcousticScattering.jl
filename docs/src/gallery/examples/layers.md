@@ -1,8 +1,6 @@
 # [Three nested fluid regions](@id gallery-layers)
 
-Nested regions need not share a center or shape. Here a spherical exterior interface
-contains a flattened middle region and an offset core. Color shows pressure on the core;
-translucent grids retain both enclosing interfaces.
+Nested regions need not share a center or shape. Here a spherical exterior interface contains a flattened middle region and an offset core. Color shows pressure on the core. Translucent grids retain both enclosing interfaces.
 
 ```@example gallery_layers
 using AcousticScattering
@@ -24,6 +22,5 @@ nothing # hide
 
 ![Pressure on an offset core surrounded by two complete nested interfaces.](layered_pressure.png)
 
-Pressure is normalized by incident amplitude. Refine these visualization meshes before
-interpreting fine spatial features.
+Pressure is normalized by incident amplitude. Refine these visualization meshes before interpreting fine spatial features.
 

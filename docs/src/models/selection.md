@@ -1,9 +1,6 @@
 # [Choosing a solver](@id solver-selection)
 
-Start with the least costly method that supports both your physics and your desired output.
-The table lists supported combinations. All six solver families return solution objects. Hover
-a column header for what that solver is. Hover the ℹ️ icon next to a geometry for its caveats, or
-follow a linked geometry name to the page covering it.
+Start with the least costly method that supports both your physics and your desired output. The table lists supported combinations. All six solver families return solution objects. Hover a column header for what that solver is. Hover the ℹ️ icon next to a geometry for its caveats, or follow a linked geometry name to the page covering it.
 
 ```@raw html
 <table class="solver-table">
@@ -188,19 +185,11 @@ follow a linked geometry name to the page covering it.
 
 ## Choosing by question
 
-- Use sphere or spheroid modal methods as analytical references, while checking series
-  convergence and special-function conditioning.
-- Use Kirchhoff to explore physical-optics behavior. A numerically converged surface integral
-  does not establish validity of physical optics at low frequency.
-- Use FEM or BEM when checking analytical reductions, geometry discretization, or interface
-  coupling. Compare against a canonical case first.
+- Use sphere or spheroid modal methods as analytical references, while checking series convergence and special-function conditioning. 
+- Use Kirchhoff to explore physical-optics behavior. A numerically converged surface integral   does not establish validity of physical optics at low frequency. 
+- Use FEM or BEM when checking analytical reductions, geometry discretization, or interface   coupling. Compare against a canonical case first.
 - Use MFS when source placement is well controlled and its supported geometry suits the problem.
-- Use BEM surface results for repeated observation-angle queries. Supported radial FEM spheres
-  also provide complex backscatter. Cylinder radial and meridian FEM paths retain target strength
-  only.
-- Use Fourier matching for a smooth irregular body of revolution between the canonical (sphere/
-  spheroid) and general numerical (BEM/MFS/FEM) solvers. See [Fourier matching](@ref
-  fourier-matching-theory).
+- Use BEM surface results for repeated observation-angle queries. Supported radial FEM spheres also provide complex backscatter. Cylinder radial and meridian FEM paths retain target strength   only.
+- Use Fourier matching for a smooth irregular body of revolution between the canonical (sphere/spheroid) and general numerical (BEM/MFS/FEM) solvers. See [Fourier matching](@ref fourier-matching-theory).
 
-See [BEM and MFS](@ref boundary-theory) for the underlying boundary integral and source-fitting
-theory.
+See [BEM and MFS](@ref boundary-theory) for the underlying boundary integral and source-fitting theory.

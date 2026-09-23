@@ -8,8 +8,8 @@
 AcousticScattering.jl predicts how individual bodies scatter sound in a fluid. Construct a geometry and material configuration, solve with the following methods:
 - [Modal series solutions for canonical shapes](@ref modal-theory)
 - [Kirchoff physical optics and approximation](@ref kirchhoff-theory)
-- [Boundary element methods](@ref bem-theory)
-- [Method of fundamental solutions](@ref mfs-theory)
+- [Boundary element methods](@ref boundary-theory)
+- [Method of fundamental solutions](@ref boundary-theory)
 - [Finite element methods](@ref fem-theory)
 - [Fourier matching methods](@ref fourier-matching-theory)
 

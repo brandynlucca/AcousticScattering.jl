@@ -1,8 +1,6 @@
 # [API Reference](@id api-reference)
 
-The public workflow is geometry → boundary/material → solver → result query. Start with the
-[tutorial](@ref first-sweep) and check the [support table](@ref solver-selection) before choosing
-a model. Numerical inputs use meters, seconds, Hz, and exterior-fluid wavenumber in rad/m.
+Start with the [tutorial](@ref first-sweep) and check the [support table](@ref solver-selection) before choosing a model. Numerical inputs use meters, seconds, Hz, and exterior-fluid wavenumber in rad/m.
 
 ```@meta
 CurrentModule = AcousticScattering

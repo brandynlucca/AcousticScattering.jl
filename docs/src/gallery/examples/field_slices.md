@@ -1,8 +1,6 @@
 # [Pressure-field slices in 3D](@id gallery-field-slices)
 
-Two intersecting slices reveal the transmitted and scattered field of a fluid sphere.
-The wave travels along +x; color shows the real part of total pressure divided by
-incident amplitude. The downstream slice is at x = 25 mm.
+Two intersecting slices reveal the transmitted and scattered field of a fluid sphere. The wave travels along +x. Color shows the real part of total pressure divided by incident amplitude. The downstream slice is at x = 25 mm.
 
 ```@example gallery_field_slices
 using AcousticScattering

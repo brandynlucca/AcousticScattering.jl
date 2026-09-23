@@ -22,4 +22,4 @@ nothing # hide
 
 ![Rigid and elastic sphere spectra, including narrow elastic resonances.](elastic.png)
 
-Sharp features need local frequency refinement; see [reference-target models](@ref reference-target-tutorial).
+Sharp features need local frequency refinement (see [reference-target models](@ref reference-target-tutorial)).

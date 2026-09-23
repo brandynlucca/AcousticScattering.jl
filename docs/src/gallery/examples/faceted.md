@@ -1,7 +1,6 @@
 # [A supplied faceted body](@id gallery-faceted)
 
-Supply vertices and outward-oriented triangles directly. This rigid octahedron is
-elongated along x; color shows scattered-pressure magnitude divided by incident amplitude.
+Supply vertices and outward-oriented triangles directly. This rigid octahedron is elongated along x. Color shows scattered-pressure magnitude divided by incident amplitude.
 
 ```@example gallery_faceted
 using AcousticScattering
@@ -22,5 +21,4 @@ nothing # hide
 
 ![Scattered-pressure magnitude on a supplied rigid octahedral mesh.](faceted_pressure.png)
 
-This small mesh demonstrates the input and plotting workflow. Sharp-edge pressure
-requires local refinement for quantitative accuracy.
+This small mesh demonstrates the input and plotting workflow. Sharp-edge pressure requires local refinement for quantitative accuracy.

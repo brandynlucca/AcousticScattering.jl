@@ -1,7 +1,6 @@
 # [Pressure on a closed fluid cylinder](@id gallery-capped)
 
-A fluid-filled cylinder has hemispherical ends and oblique incidence. Full-surface BEM
-includes both ends. Color shows scattered-pressure magnitude, normalized by incident amplitude.
+A fluid-filled cylinder has hemispherical ends and oblique incidence. Full-surface BEM includes both ends. Color shows scattered-pressure magnitude, normalized by incident amplitude.
 
 ```@example gallery_capped
 using AcousticScattering
@@ -21,6 +20,5 @@ nothing # hide
 
 ![Scattered-pressure magnitude on a closed fluid cylinder under oblique incidence.](capped_pressure.png)
 
-The cylinder's long axis is x. Mesh size and quadrature order should be refined for
-quantitative comparisons.
+The cylinder's long axis is x. Mesh size and quadrature order should be refined for quantitative comparisons.
 

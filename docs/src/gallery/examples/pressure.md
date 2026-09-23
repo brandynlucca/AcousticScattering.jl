@@ -1,6 +1,6 @@
 # [Pressure inside and around a particle](@id gallery-pressure)
 
-A plane wave travels along +x through a fluid particle. Color shows the real part of total pressure, normalized by incident amplitude; the circle marks the interface.
+A plane wave travels along +x through a fluid particle. Color shows the real part of total pressure, normalized by incident amplitude. The circle marks the interface.
 
 ```@example gallery_pressure
 using AcousticScattering

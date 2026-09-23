@@ -1,9 +1,6 @@
 # [Closed bent-cylinder scattering](@id bent-cylinder-tutorial)
 
-Consider a rigid cylinder with 5 mm radius, 20 mm cylindrical arc length, 20 mm
-curvature radius and 5 mm hemispherical ends. Its bend lies in the `xy` plane, with
-midpoint tangent along `+x`. Incidence has polar angle 60° and azimuth 0.4 radians.
-The full surface includes both ends, so observations need not be near broadside.
+Consider a rigid cylinder with 5 mm radius, 20 mm cylindrical arc length, 20 mm curvature radius and 5 mm hemispherical ends. Its bend lies in the `xy` plane, with midpoint tangent along `+x`. Incidence has polar angle 60° and azimuth 0.4 radians. The full surface includes both ends, so observations need not be near broadside.
 
 ## Solve and inspect the actual surface
 
@@ -30,16 +27,13 @@ save("bent_surface.png", field_figure)
 nothing # hide
 ```
 
-![Scattered pressure phase on the closed bent cylinder; coordinates are metres.](bent_surface.png)
+![Scattered pressure phase on the closed bent cylinder where coordinates are meters.](bent_surface.png)
 
-Pressure is normalized to a unit incident plane wave. The mesh and field plot use the
-same curved triangles as the solve. For nonuniform bending, supply a closed triangular
-surface through `mesh(nodes, triangles)` or `mesh(path)`.
+Pressure is normalized to a unit incident plane wave. The mesh and field plot use the same curved triangles as the solve. For nonuniform bending, supply a closed triangular surface through `mesh(nodes, triangles)` or `mesh(path)`.
 
 ## Check convergence
 
-Refine triangle size and quadrature separately. Compare backscatter, forward scatter and
-a side observation in both target strength and complex amplitude:
+Refine triangle size and quadrature separately. Compare backscatter, forward scatter and a side observation in both target strength and complex amplitude:
 
 ```@example bent_surface
 d = [cos(beta), sin(beta) * cos(alpha), sin(beta) * sin(alpha)]
@@ -59,19 +53,12 @@ end
 changes
 ```
 
-These checks concern this frequency and these directions. Refine across the requested
-spectrum and angular range before drawing conclusions near resonances or scattering nulls.
-Rigid/soft closed-surface MFS provides a separate numerical method: pass the full mesh
-to `mfs`, choose a coarser `source_mesh`, and vary its source count and inward `offset`.
-BCMS's coherent-length correction and lateral-only bent MFS omit end scattering and are
-not exact closed-cylinder benchmarks away from broadside. See
-[Jech et al. (2015)](https://doi.org/10.1121/1.4937607) for finite-cylinder model limitations.
+These checks concern this frequency and these directions. Refine across the requested spectrum and angular range before drawing conclusions near resonances or scattering nulls. Rigid/soft closed-surface MFS provides a separate numerical method: pass the full mesh to `mfs`, choose a coarser `source_mesh`, and vary its source count and inward `offset`. BCMS's coherent-length correction and lateral-only bent MFS omit end scattering and are not exact closed-cylinder benchmarks away from broadside. See
+[Jech et al. (2015)](https://doi.org/10.1121/1.4937607) for finite-cylinder model limitations. 
 
 ## Frequency, incidence and bistatic patterns
 
-Frequency sweeps reuse the geometry. At fixed frequency, mesh-based incidence sweeps also
-reuse the assembled boundary operators and their compression. Each incidence gets a fresh
-GMRES solve. A bistatic map reuses an existing solution and changes only the observation direction.
+Frequency sweeps reuse the geometry. At fixed frequency, mesh-based incidence sweeps also reuse the assembled boundary operators and their compression. Each incidence gets a fresh GMRES solve. A bistatic map reuses an existing solution and changes only the observation direction.
 
 ```@example bent_surface
 sound_speed = 1500.0
@@ -97,8 +84,6 @@ nothing # hide
 
 ![Frequency and incidence-angle samples for the rigid bent cylinder.](bent_sweeps.png)
 
-![Bistatic target strength at exterior wavenumber 100 inverse metres.](bent_bistatic.png)
+![Bistatic target strength at exterior wavenumber 100 inverse meters.](bent_bistatic.png)
 
-Replace `Rigid()` with `PressureRelease()`, `FluidFilled(g, h)` or `GasFilled(g, h)`
-to solve those boundary conditions on the same surface. Density and sound-speed ratios
-are interior/exterior values. Gas resonances require their own frequency and mesh refinement.
+Replace `Rigid()` with `PressureRelease()`, `FluidFilled(g, h)` or `GasFilled(g, h)` to solve those boundary conditions on the same surface. Density and sound-speed ratios are interior/exterior values. Gas resonances require their own frequency and mesh refinement.

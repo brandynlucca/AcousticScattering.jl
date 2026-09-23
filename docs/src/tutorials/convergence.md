@@ -1,7 +1,6 @@
 # [Numerical convergence](@id convergence-tutorial)
 
-Use a modal sphere as a reference for FEM and BEM. These small axial examples run in the docs
-build and avoid ambiguity about the observation direction.
+Use a modal sphere as a reference for FEM and BEM. These small axial examples run in the docs build and avoid ambiguity about the observation direction.
 
 ## Radial FEM
 
@@ -21,8 +20,7 @@ fem_errors = abs.(fem_strengths .- reference)
 (elements = element_counts, error_db = fem_errors)
 ```
 
-Element count and modal truncation are separate controls. Fluid-filled radial FEM exposes
-`n_elements_int` and `n_elements_ext` instead of a single `n_elements`.
+Element count and modal truncation are separate controls. Fluid-filled radial FEM exposes `n_elements_int` and `n_elements_ext` instead of a single `n_elements`.
 
 ## Axisymmetric BEM
 
@@ -36,11 +34,6 @@ bem_errors = abs.(bem_strengths .- reference)
 (panels = panel_counts, error_db = bem_errors)
 ```
 
-The assertions are example smoke checks. Scientific error budgets need refinement over the
-frequency and parameter range of interest. Quadrature and panel resolution control different
-errors. Neither removes the formulation's irregular-frequency limitations.
+The assertions are example smoke checks. Scientific error budgets need refinement over the frequency and parameter range of interest. Quadrature and panel resolution control different errors. Neither removes the formulation's irregular-frequency limitations.
 
-For oblique axisymmetric incidence `beta` in the x–z plane, query backscatter with
-`target_strength(solution; angle = pi - beta, azimuth = pi)`, or simply
-`target_strength(solution)`: the defaults follow the antipodal incident direction.
-An explicitly supplied `angle = pi` points along negative x.
+For oblique axisymmetric incidence `beta` in the x–z plane, query backscatter with `target_strength(solution; angle = pi - beta, azimuth = pi)`, or simply `target_strength(solution)`. The defaults follow the antipodal incident direction. An explicitly supplied `angle = pi` points along negative x.

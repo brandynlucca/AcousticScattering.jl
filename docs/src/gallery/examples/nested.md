@@ -26,8 +26,7 @@ Use `target_strength(solution)` for the coupled response. The [fish tutorial](@r
 
 ## [Pressure on the outer body](@id gallery-surface-pressure)
 
-Color the complete outer surface by total pressure magnitude, normalized by incident amplitude.
-This includes the gas cavity's contribution to the coupled field.
+Color the complete outer surface by total pressure magnitude, normalized by incident amplitude. This includes the gas cavity's contribution to the coupled field.
 
 ```julia
 fig = plot(solution; kind=:surface_field, interfaces=[1], field=:pressure_magnitude,

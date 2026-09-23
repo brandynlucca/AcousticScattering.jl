@@ -1,7 +1,6 @@
 # [Short gallery examples](@id gallery-examples)
 
-Each example pairs a figure with the code that generates it. Lengths are in meters and
-wavenumbers in inverse meters. Start with any of these:
+Each example pairs a figure with the code that generates it. Lengths are in meters and wavenumbers in inverse meters. Start with any of these:
 
 - [Pressure inside and around a particle](@ref gallery-pressure)
 - [A millimeter bubble, a strong resonance](@ref gallery-bubble)

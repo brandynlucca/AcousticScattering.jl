@@ -1,9 +1,6 @@
 # [Comparing reference-target models](@id reference-target-tutorial)
 
-How much does treating a reference sphere as rigid change its predicted echo?
-Compare rigid and elastic models at the same radius before choosing a calibration
-model. These material contrasts are illustrative; use measured material properties
-and the exterior sound speed for a particular target.
+How much does treating a reference sphere as rigid change its predicted echo? Compare rigid and elastic models at the same radius before choosing a calibration model. These material contrasts are illustrative, so be sure to use measured material properties and the exterior sound speed for a particular target.
 
 ## Compare the spectra
 
@@ -31,9 +28,7 @@ nothing # hide
 
 ![Rigid and elastic reference spheres compared over frequency.](reference_targets.png)
 
-The elastic inputs are density, longitudinal-speed and shear-speed ratios relative
-to the exterior fluid. Peaks and dips reflect the model's frequency response;
-a rigid calculation alone cannot establish an elastic target's calibration value.
+The elastic inputs are density, longitudinal-speed and shear-speed ratios relative to the exterior fluid. Peaks and dips reflect the model's frequency response. A rigid calculation alone cannot establish an elastic target's calibration value.
 
 ## Check a working frequency
 
@@ -46,6 +41,4 @@ b = scattering_amplitude(modal(body, material, k; m_max=36))
 (target_strength_db=target_strength(b), modal_change=abs(a-b)/abs(b))
 ```
 
-Refine the frequency samples around any feature relevant to the instrument's band.
-This modal-order check measures numerical truncation, separately from material and
-radius uncertainty. See [Materials and shells](@ref materials-tutorial) for other interiors.
+Refine the frequency samples around any feature relevant to the instrument's band. This modal-order check measures numerical truncation, separately from material and radius uncertainty. See [Materials and shells](@ref materials-tutorial) for other interiors.

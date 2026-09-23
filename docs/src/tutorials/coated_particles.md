@@ -1,8 +1,6 @@
 # [Scattering and pressure in a coated particle](@id coated-particle-tutorial)
 
-Compare a fluid core with and without a fluid coating, then inspect the pressure
-through both layers. Keep the core radius and material fixed so the comparison
-isolates the addition of the coating. All material ratios below are illustrative.
+Compare a fluid core with and without a fluid coating, then inspect the pressure through both layers. Keep the core radius and material fixed so the comparison isolates the addition of the coating. All material ratios below are illustrative.
 
 ## Add a coating
 
@@ -30,8 +28,7 @@ nothing # hide
 
 ![Backscatter from a fixed fluid core before and after adding a fluid coating.](coated_spectrum.png)
 
-`ratio` is inner radius divided by outer radius. The layer and interior each take
-density and sound-speed ratios relative to the exterior fluid.
+`ratio` is inner radius divided by outer radius. The layer and interior each take density and sound-speed ratios relative to the exterior fluid.
 
 ## Look through the particle
 
@@ -52,9 +49,7 @@ nothing # hide
 
 ![Normalized total pressure through the core, coating and surrounding fluid.](coated_pressure.png)
 
-The incident wave travels along `+x`. Dashed lines mark the interfaces; `pressure`
-automatically selects the exterior, coating or core. This is total pressure, so
-the exterior includes interference between the incident and scattered waves.
+The incident wave travels along `+x`. Dashed lines mark the interfaces. `pressure` automatically selects the exterior, coating or core. This is total pressure, so the exterior includes interference between the incident and scattered waves.
 
 Check pressure continuity directly at the inner surface:
 
@@ -66,5 +61,4 @@ shell = pressure(solution, point; field=:shell)
 (core_trace=inside, coating_trace=shell)
 ```
 
-Increase `m_max` when resolving higher frequencies. See
-[Pressure at Cartesian points](@ref pressure-evaluation) for field selection and units.
+Increase `m_max` when resolving higher frequencies. See [Pressure at Cartesian points](@ref pressure-evaluation) for field selection and units.

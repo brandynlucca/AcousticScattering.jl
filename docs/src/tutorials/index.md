@@ -1,8 +1,6 @@
 # [Your first frequency sweep](@id first-sweep)
 
-Compute rigid-sphere backscatter, check modal truncation, and save a figure and data. Install
-AcousticScattering and CairoMakie following [Getting Started](@ref getting-started). The blocks
-on this page share a Julia session and execute during every documentation build.
+Compute rigid-sphere backscatter, check modal truncation, and save a figure and data. Install AcousticScattering and CairoMakie following [Getting Started](@ref getting-started). The blocks on this page share a Julia session and execute during every documentation build.
 
 ## Define and solve
 
@@ -21,9 +19,7 @@ strengths = target_strength.(solutions)
 nothing # hide
 ```
 
-`Rigid()` imposes zero total normal fluid velocity at the surface. The modal solver is a useful
-starting point because the sphere permits separation of variables. Each solution represents one
-frequency. See [Choosing a solver](@ref solver-selection) when changing shape or material.
+`Rigid()` imposes zero total normal fluid velocity at the surface. The modal solver is a useful starting point because the sphere permits separation of variables. Each solution represents one frequency. See [Choosing a solver](@ref solver-selection) when changing shape or material.
 
 ## Check accuracy
 
@@ -40,8 +36,7 @@ This checks modal truncation at one frequency, not the physical adequacy of a ri
 
 ![Incidence angle beta from the body axis and the opposite backscatter direction.](../assets/directions.svg)
 
-For a sphere the orientation does not change backscatter. For an axisymmetric nonspherical
-body, incidence and observation must be specified separately. See [Conventions](@ref conventions).
+For a sphere the orientation does not change backscatter. For an axisymmetric nonspherical body, incidence and observation must be specified separately. See [Conventions](@ref conventions).
 
 ## Plot and save
 
@@ -66,10 +61,7 @@ end
 nothing # hide
 ```
 
-Download the [figure](rigid_sphere_frequency.png) and [CSV](rigid_sphere_frequency.csv).
-In your own session, these files appear in the current working directory.
+Download the [figure](rigid_sphere_frequency.png) and [CSV](rigid_sphere_frequency.csv). In your own session, these files appear in the current working directory.
 
-Continue with [Materials and shells](@ref materials-tutorial),
-[Geometry and incidence](@ref geometry-tutorial), or
-[Numerical convergence](@ref convergence-tutorial). Compilation and threading advice lives in
-the separate [performance tutorial](@ref performance-tutorial).
+Continue with [Materials and shells](@ref materials-tutorial), [Geometry and incidence](@ref geometry-tutorial), or
+[Numerical convergence](@ref convergence-tutorial). Compilation and threading advice lives in the separate [performance tutorial](@ref performance-tutorial).
