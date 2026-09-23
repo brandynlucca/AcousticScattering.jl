@@ -553,7 +553,7 @@ _axisymmetric_mesh(body::Cylinder, n::Integer) = cylinder_mesh(body.radius, body
 A discretized surface mesh, returned by [`mesh`](@ref). The single public mesh type, whether the
 underlying representation is an axisymmetric meridian curve (`method=:axisymmetric`) or a full 3D
 triangulated surface (`method=:full`). `body`/`method`/`resolution` record what `mesh(...)` was
-called with. `resolution` is the maximum corner-edge length in metres. Inspect the surface with
+called with. `resolution` is the maximum corner-edge length in meters. Inspect the surface with
 `coordinates`, `normals`, `elements`, and `element_count`.
 """
 struct Mesh{D}

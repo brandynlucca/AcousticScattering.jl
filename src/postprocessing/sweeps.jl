@@ -62,8 +62,8 @@ end
 """
     FrequencySweep
 
-Frequency samples in Hz, exterior `k` in inverse metres, `target_strength` in dB re
-1 m², and complex `amplitudes` in metres. Arrays have samples along the first dimension;
+Frequency samples in Hz, exterior `k` in inverse meters, `target_strength` in dB re
+1 m², and complex `amplitudes` in meters. Arrays have samples along the first dimension;
 component comparisons have one column per entry in `labels`. `amplitudes` is `nothing`
 for scalar-only FEM results. Phase, when available, is `angle.(sweep.amplitudes)`.
 """
@@ -141,7 +141,7 @@ end
 """
     incidence_angle_sweep(surface::Mesh, boundary::Union{Rigid,PressureRelease}, k, angles; kwargs...)
 
-Sample full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse metres.
+Sample full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse meters.
 Polar `angles` are radians from +x, with fixed `incidence_azimuth=0` by default.
 Reuse layer operators, their compression and the system operator within this call.
 Each angle gets an independent GMRES solve with the supplied tolerances.
@@ -173,7 +173,7 @@ end
     incidence_angle_sweep(surfaces, materials, k, angles; components=false, labels=nothing, kwargs...)
 
 Sample fluid/gas full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse
-metres. Polar `angles` are radians from +x; `incidence_azimuth=0` sweeps the xy plane.
+meters. Polar `angles` are radians from +x; `incidence_azimuth=0` sweeps the xy plane.
 Geometry validation, operators and factorization are reused within this call. A new
 call assembles from its supplied meshes, materials, frequency and solver options.
 

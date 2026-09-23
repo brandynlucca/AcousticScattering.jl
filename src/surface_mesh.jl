@@ -35,7 +35,7 @@ end
         rotation=(axis=(0,0,1), angle=0), tip_ratio=1,
         mesh_order=3, qorder=5, validation=(;))
 
-Construct a closed ellipsoid with `semiaxes=(x,y,z)` and `center` in metres.
+Construct a closed ellipsoid with `semiaxes=(x,y,z)` and `center` in meters.
 `rotation` gives a nonzero axis and a right-handed angle in radians, applied before
 translation. Mesh a unit sphere, then stretch, rotate and translate its nodes.
 `resolution` is the dimensionless target edge length on that sphere; physical edge
@@ -102,7 +102,7 @@ linear, quadratic or cubic triangle ordering. `labels` optionally gives one posi
 physical-group tag per triangle. Gmsh input preserves all surface physical tags and names.
 
 Supply one connected, closed surface with outward-oriented triangles. Coordinates are
-converted from `units` (`:m`, `:cm`, `:mm`) to metres and retain their supplied Cartesian
+converted from `units` (`:m`, `:cm`, `:mm`) to meters and retain their supplied Cartesian
 frame. No remeshing, hole filling, node merging
 or orientation repair is performed. Unsupported elements, open/nonmanifold surfaces,
 inconsistent normals, inward orientation and detected intersections raise `ArgumentError`.
@@ -115,9 +115,9 @@ whose corner-plane projection folds are outside this acceptance criterion.
 case raises `ArgumentError`; neither exhausted limits nor small distances imply validity.
 Increasing the limits can resolve conservative bounds, but cannot repair invalid geometry.
 
-The returned `m.body` records `nodes` in metres, `connectivity` in Gmsh ordering, per-element
+The returned `m.body` records `nodes` in meters, `connectivity` in Gmsh ordering, per-element
 `labels` (tag/name pairs), `units`, `input_units`, `orientation`, `provenance` and `validation`.
-`m.resolution` is the maximum corner-edge length in metres. Pass `m` directly to [`bem`](@ref).
+`m.resolution` is the maximum corner-edge length in meters. Pass `m` directly to [`bem`](@ref).
 The Gmsh constructors require that no other Gmsh session is active.
 """
 function mesh(path::AbstractString; units::Symbol = :m, qorder::Integer = 4, validation::NamedTuple = (;))
@@ -291,7 +291,7 @@ end
 
 Solve scattering on a supplied full-3D `surface` with rigid, pressure-release or homogeneous
 fluid/gas material. The stored quadrature and outward normals are used directly. Wavenumber
-`k` is in inverse metres, including when the mesh input used centimetres or millimetres.
+`k` is in inverse meters, including when the mesh input used centimeters or millimeters.
 Solver options are the same as `bem(body, boundary, k; method=:full)`; mesh resolution and
 quadrature are selected when constructing `surface`. Returns a [`BEMSolution`](@ref).
 """

@@ -24,7 +24,7 @@
 end
 
 @time "Lossy VESM reference outputs" @testset "Lossy VESM reference outputs" begin
-    # q = k_water * gas_radius; amplitudes are in metres.
+    # q = k_water * gas_radius; amplitudes are in meters.
     cases = (
         (shear_modulus = 0.3e6,
             bulk = 50 / 3,
