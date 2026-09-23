@@ -20,6 +20,7 @@ makedocs(
         prettyurls = get(ENV, "CI", "false") == "true",
         assets = ["assets/gallery.css", "assets/branding.css", "assets/tooltip.css",
             "assets/page_toc.js", "assets/favicon.ico"],
+        collapselevel = 1,
         sidebar_sitename = false,
         footer = "Powered by [Documenter.jl](https://github.com/JuliaDocs/Documenter.jl). " *
                  "[Logo attribution and license](" *
