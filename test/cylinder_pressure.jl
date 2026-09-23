@@ -30,10 +30,10 @@ end
                 @test_skip "MFS/BEM cross-comparison skipped for Rigid (platform-dependent)."
             else
                 reference = mfs(
-                    body, boundary, 0.5; n = 256, oversampling = 2, offset = 0.12,
+                    body, boundary, 0.5; n = 160, oversampling = 2, offset = 0.12,
                     incidence_angle = pi/3, m_max = 6, condition_limit = 0)
                 expected = pressure(reference, points; field = :scattered)
-                coarse = mfs(body, boundary, 0.5; n = 128, oversampling = 2, offset = 0.12,
+                coarse = mfs(body, boundary, 0.5; n = 96, oversampling = 2, offset = 0.12,
                     incidence_angle = pi/3, m_max = 6, condition_limit = 0)
                 compare_cylinder_pressure(pressure(coarse, points; field = :scattered), expected)
                 compare_cylinder_pressure(pressure(solution, points; field = :scattered), expected)

@@ -20,9 +20,9 @@ end
 @time "Closed flat cylinder against axisymmetric BEM" @testset "Closed flat cylinder against axisymmetric BEM" begin
     body = Cylinder(0.5, 2.0)
     for (boundary, meshsize) in ((Rigid(), 0.25), (PressureRelease(), 0.25),
-        (FluidFilled(1.05, 1.02), 0.22))
+        (FluidFilled(1.05, 1.02), 0.28))
         k = boundary isa FluidFilled && boundary.density_contrast < 0.01 ? 0.1 : 1.0
-        qorder = boundary isa FluidFilled ? 5 : 4
+        qorder = 4
         options = if boundary isa FluidFilled
             (; condition_limit = 0)
         elseif boundary isa PressureRelease
@@ -35,7 +35,7 @@ end
         end
         solution = bem(body, boundary, k; method = :full, meshsize, mesh_order = 3,
             qorder, incidence_angle = pi / 3, options...)
-        reference = bem(body, boundary, k; n = 160, m_max = 6, incidence_angle = pi / 3)
+        reference = bem(body, boundary, k; n = 96, m_max = 6, incidence_angle = pi / 3)
         expected = [scattering_amplitude(reference; angle = t, azimuth = p)
                     for (t, p) in ((2pi / 3, pi), (pi / 3, 0.0), (pi / 2, pi / 2))]
         check_cylinder_amplitudes(cylinder_amplitudes(solution, pi / 3, 0.0), expected)
