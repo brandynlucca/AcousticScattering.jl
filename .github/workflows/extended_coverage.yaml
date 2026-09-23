@@ -1,0 +1,114 @@
+name: Extended coverage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JULIA_PKG_PRECOMPILE_AUTO: '0'
+  JULIA_CPU_TARGET: generic
+  JULIA_NUM_THREADS: '2'
+  OPENBLAS_NUM_THREADS: '1'
+
+jobs:
+  select:
+    name: Enumerate extended tests
+    runs-on: ubuntu-latest
+    outputs:
+      selections: ${{ steps.select.outputs.selections }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.10'
+      - name: Select all extended files
+        id: select
+        run: julia --startup-file=no .github/scripts/select_extended.jl All
+
+  coverage:
+    name: Extended coverage (${{ matrix.selection.task }})
+    needs: select
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        selection: ${{ fromJSON(needs.select.outputs.selections) }}
+    env:
+      JULIA_PROJECT: test
+      TEST_PROJECT: test
+      TEST_SUITE: Extended
+      TEST_EXTENDED_FILES: ${{ matrix.selection.file }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.10'
+      - uses: julia-actions/cache@v3
+        with:
+          cache-name: tests-ubuntu-latest-1.10-plots
+          include-matrix: false
+          delete-old-caches: false
+      - name: Install extended test dependencies
+        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.activate(ENV["TEST_PROJECT"])
+          Pkg.develop(PackageSpec(; path = pwd()))
+          Pkg.instantiate()
+          using Preferences: set_preferences!
+          set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
+              "precompile_workload" => false; force = true)
+      - name: Run extended test with source coverage
+        id: tests
+        run: julia --startup-file=no --check-bounds=yes --color=yes --code-coverage=@. test/runtests.jl
+      - name: Process coverage results
+        id: process
+        if: always() && steps.tests.outcome != 'skipped'
+        uses: julia-actions/julia-processcoverage@v1
+      - name: Upload shard coverage report
+        if: always() && steps.process.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: extended-coverage-${{ matrix.selection.task }}
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    name: Upload combined Extended coverage
+    needs: [select, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download shard coverage reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: extended-coverage-*
+          path: ${{ runner.temp }}/coverage-reports
+      - name: Verify shard reports
+        id: reports
+        shell: bash
+        env:
+          SELECTIONS: ${{ needs.select.outputs.selections }}
+        run: |
+          expected=$(python3 -c 'import json, os; print(len(json.loads(os.environ["SELECTIONS"])))')
+          mapfile -t reports < <(find "$RUNNER_TEMP/coverage-reports" -name lcov.info -type f | sort)
+          if [[ ${#reports[@]} -ne "$expected" ]]; then
+            echo "Expected $expected coverage reports, found ${#reports[@]}" >&2
+            exit 1
+          fi
+          printf 'files=%s\n' "$(IFS=,; echo "${reports[*]}")" >> "$GITHUB_OUTPUT"
+      - name: Upload Extended coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: ${{ steps.reports.outputs.files }}
+          flags: extended
+          token: ${{ secrets.CODECOV_TOKEN }}
+          disable_search: true
+          fail_ci_if_error: true

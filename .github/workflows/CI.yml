@@ -3,17 +3,22 @@ on:
   push:
     branches: [main]
     paths-ignore:
-        - 'README.md'
+      - 'README.md'
     tags: ["*"]
   pull_request:
     paths-ignore:
-        - 'README.md'
+      - 'README.md'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  JULIA_PKG_PRECOMPILE_AUTO: '0'
+  JULIA_CPU_TARGET: generic
+  JULIA_NUM_THREADS: '2'
+  OPENBLAS_NUM_THREADS: '1'
 jobs:
   format:
     runs-on: ubuntu-latest
@@ -32,22 +37,26 @@ jobs:
           using JuliaFormatter: format
           format(["src", "ext", "test", "docs"]; overwrite = false) ||
               error("Formatting required. See the developer guide for the formatting command.")
-  test-dependencies:
-    name: Test dependencies (Julia ${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.flavor }})
+  test-install-dependencies:
+    name: Test install & dependencies (Julia ${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.flavor }})
     runs-on: ${{ matrix.os }}
     env:
       TEST_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
       JULIA_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
-      JULIA_CPU_TARGET: generic
-      JULIA_NUM_THREADS: "2"
-      OPENBLAS_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
-        version: ["1.10", "1"]
-        os: [ubuntu-latest, macos-latest, windows-latest]
         flavor: [core, plots]
+        version:
+          - '1.10'
+          - '1'
+          - 'pre'
+          - 'nightly'
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-15-intel
+          - macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -56,6 +65,58 @@ jobs:
       - uses: julia-actions/cache@v3
         with:
           cache-name: tests-${{ matrix.os }}-${{ matrix.version }}-${{ matrix.flavor }}
+          include-matrix: false
+          delete-old-caches: false
+      - name: Install dependencies
+        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.activate(ENV["TEST_PROJECT"])
+          Pkg.develop(PackageSpec(; path = pwd()))
+          Pkg.instantiate()
+          using Preferences: set_preferences!
+          set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
+              "precompile_workload" => false; force = true)
+      - name: Test dependency precompilation
+        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.precompile(; strict = true)
+      - name: Store resolved test environment
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-environment-${{ matrix.os }}-${{ matrix.version }}-${{ matrix.flavor }}
+          path: |
+            ${{ env.TEST_PROJECT }}/Manifest.toml
+            ${{ env.TEST_PROJECT }}/LocalPreferences.toml
+          if-no-files-found: error
+          retention-days: 7
+      - name: Run basic tests
+        # basic_coverage owns this one Basic run on push/PR; dispatch keeps it here.
+        if: >-
+          matrix.flavor == 'plots' &&
+          (github.event_name == 'workflow_dispatch' ||
+           matrix.os != 'ubuntu-latest' ||
+           matrix.version != '1.10')
+        env:
+          TEST_SUITE: Basic
+        run: julia --startup-file=no --check-bounds=yes --color=yes test/runtests.jl
+  basic_coverage:
+    name: Basic coverage (Julia 1.10, ubuntu-latest)
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      JULIA_PROJECT: test
+      TEST_PROJECT: test
+      TEST_SUITE: Basic
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.10'
+      - uses: julia-actions/cache@v3
+        with:
+          cache-name: tests-ubuntu-latest-1.10-plots
           include-matrix: false
           delete-old-caches: false
       - name: Install test dependencies
@@ -68,172 +129,90 @@ jobs:
           using Preferences: set_preferences!
           set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
               "precompile_workload" => false; force = true)
-      - name: Precompile test dependencies
-        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
-        run: |
-          using Pkg
-          Pkg.precompile(; strict = true)
-      - name: Save resolved test environment
+      - name: Run basic tests with source coverage
+        id: tests
+        run: julia --startup-file=no --check-bounds=yes --color=yes --code-coverage=@src test/runtests.jl
+      - name: Process coverage results
+        id: process
+        if: always() && steps.tests.outcome != 'skipped'
+        uses: julia-actions/julia-processcoverage@v1
+      - name: Upload coverage report
+        if: always() && steps.process.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: test-environment-${{ matrix.os }}-${{ matrix.version }}-${{ matrix.flavor }}
-          path: |
-            ${{ env.TEST_PROJECT }}/Manifest.toml
-            ${{ env.TEST_PROJECT }}/LocalPreferences.toml
+          name: basic-coverage-ubuntu-1.10
+          path: lcov.info
           if-no-files-found: error
           retention-days: 7
-  test:
-    name: test (${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.group }})
-    runs-on: ${{ matrix.os }}
-    needs: [test-dependencies]
-    env:
-      GROUP: ${{ matrix.group }}
-      TEST_PROJECT: ${{ startsWith(matrix.group, 'Plots') && 'test' || 'test/core' }}
-      JULIA_PROJECT: ${{ startsWith(matrix.group, 'Plots') && 'test' || 'test/core' }}
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
-      JULIA_CPU_TARGET: generic
-      JULIA_NUM_THREADS: "2"
-      OPENBLAS_NUM_THREADS: "1"
-    strategy:
-      fail-fast: false
-      matrix:
-        # Julia 1.10 is both the minimum supported series and current LTS (2026-09-09).
-        # macOS is handled by the separate, batched test-macos job below: GitHub's hosted
-        # macOS runners have a much smaller concurrency limit than Linux/Windows, so the
-        # full per-group matrix here would queue most macOS jobs for tens of minutes each
-        # (observed up to ~50 min queue time for a single job) rather than running them.
-        version: ["1.10", "1"]
-        os: [ubuntu-latest, windows-latest]
-        group: [Analytical, RadialFEM, MeridianFEM, Boundary, FullBEM, CylinderBEM, RegionBEM, NearPressure, RegionShapes, FishBEM, LowFrequencyRegions, GasResonance, CoupledResonance, Spheroidal, Oblique, Interfaces, FourierMatching, Plots1D, Plots2D, Plots3DModels, Plots3DFull]
+      - name: Upload Basic coverage to Codecov
+        if: always() && steps.process.outcome == 'success'
+        continue-on-error: true
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          disable_search: true
+  select_extended:
+    name: Select extended tasks
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      selections: ${{ steps.select.outputs.selections }}
+      has_tests: ${{ steps.select.outputs.has_tests }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: julia-actions/setup-julia@v3
         with:
-          version: ${{ matrix.version }}
-      - uses: julia-actions/cache@v3
-        with:
-          cache-name: tests-${{ matrix.os }}-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
-          include-matrix: false
-          delete-old-caches: false
-      - name: Restore resolved test environment
-        uses: actions/download-artifact@v8
-        with:
-          name: test-environment-${{ matrix.os }}-${{ matrix.version }}-${{ startsWith(matrix.group, 'Plots') && 'plots' || 'core' }}
-          path: ${{ env.TEST_PROJECT }}
-      - name: Ensure cached dependencies are available
-        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
-        run: |
-          using Pkg
-          Pkg.instantiate()
-      - name: Run test group
-        run: julia --startup-file=no --check-bounds=yes test/runtests.jl
-  test-macos:
-    # GitHub's hosted macOS runners have a much smaller concurrency limit than
-    # Linux/Windows (Apple's licensing restricts macOS virtualization to Apple hardware),
-    # so requesting one job per group here (as the `test` job does for ubuntu/windows)
-    # queues most macOS jobs for tens of minutes waiting for a free runner. Batching
-    # several groups into each job (via runtests.jl's comma-separated GROUP support)
-    # keeps the same coverage with far fewer concurrent macOS job requests.
-    name: test (${{ matrix.version }}, macos-latest, ${{ matrix.label }})
-    runs-on: macos-latest
-    needs: [test-dependencies]
-    env:
-      GROUP: ${{ matrix.groups }}
-      TEST_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
-      JULIA_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
-      JULIA_CPU_TARGET: generic
-      JULIA_NUM_THREADS: "2"
-      OPENBLAS_NUM_THREADS: "1"
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - version: "1.10"
-            label: CoreBatch1
-            flavor: core
-            groups: "Analytical,RadialFEM,MeridianFEM,Boundary"
-          - version: "1.10"
-            label: CoreBatch2
-            flavor: core
-            groups: "FullBEM,CylinderBEM,RegionBEM,NearPressure"
-          - version: "1.10"
-            label: CoreBatch3
-            flavor: core
-            groups: "RegionShapes,FishBEM,LowFrequencyRegions,GasResonance"
-          - version: "1.10"
-            label: CoreBatch4
-            flavor: core
-            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces,FourierMatching"
-          - version: "1.10"
-            label: PlotsAll
-            flavor: plots
-            groups: "Plots1D,Plots2D,Plots3DModels,Plots3DFull"
-          - version: "1"
-            label: CoreBatch1
-            flavor: core
-            groups: "Analytical,RadialFEM,MeridianFEM,Boundary"
-          - version: "1"
-            label: CoreBatch2
-            flavor: core
-            groups: "FullBEM,CylinderBEM,RegionBEM,NearPressure"
-          - version: "1"
-            label: CoreBatch3
-            flavor: core
-            groups: "RegionShapes,FishBEM,LowFrequencyRegions,GasResonance"
-          - version: "1"
-            label: CoreBatch4
-            flavor: core
-            groups: "CoupledResonance,Spheroidal,Oblique,Interfaces,FourierMatching"
-          - version: "1"
-            label: PlotsAll
-            flavor: plots
-            groups: "Plots1D,Plots2D,Plots3DModels,Plots3DFull"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: ${{ matrix.version }}
-      - uses: julia-actions/cache@v3
-        with:
-          cache-name: tests-macos-latest-${{ matrix.version }}-${{ matrix.flavor }}
-          include-matrix: false
-          delete-old-caches: false
-      - name: Restore resolved test environment
-        uses: actions/download-artifact@v8
-        with:
-          name: test-environment-macos-latest-${{ matrix.version }}-${{ matrix.flavor }}
-          path: ${{ env.TEST_PROJECT }}
-      - name: Ensure cached dependencies are available
-        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
-        run: |
-          using Pkg
-          Pkg.instantiate()
-      - name: Run test group
-        run: julia --startup-file=no --check-bounds=yes test/runtests.jl
-  install:
-    name: Install (Julia ${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.mode }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    env:
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ["1.10", "1"]
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        mode: [standard, opt-out]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: ${{ matrix.version }}
-      # No cache: each matrix job uses a fresh Julia depot and the checked-out source.
-      - name: Verify isolated installation and precompile preferences
+          version: '1'
+      - name: Select extended tasks
+        id: select
         env:
-          JULIA_DEPOT_PATH: ${{ runner.temp }}/install-depot
-        shell: julia --startup-file=no --color=yes {0}
+          DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          empty!(ARGS)
-          push!(ARGS, "${{ matrix.mode }}")
-          include(joinpath(ENV["GITHUB_WORKSPACE"], "test", "precompile.jl"))
+          if [ "$DISPATCH" = "true" ]; then
+            julia --startup-file=no .github/scripts/select_extended.jl All
+          else
+            julia --startup-file=no .github/scripts/select_extended.jl "$BASE_SHA" "$HEAD_SHA"
+          fi
+
+  extended:
+    name: Extended (${{ matrix.selection.task }}, ${{ matrix.os }})
+    needs: select_extended
+    if: needs.select_extended.result == 'success' && needs.select_extended.outputs.has_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        selection: ${{ fromJSON(needs.select_extended.outputs.selections) }}
+    env:
+      JULIA_PROJECT: test
+      TEST_PROJECT: test
+      TEST_SUITE: Extended
+      TEST_EXTENDED_FILES: ${{ matrix.selection.file }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+        with:
+          cache-name: tests-${{ matrix.os }}-1-plots
+          include-matrix: false
+          delete-old-caches: false
+      - name: Install extended test dependencies
+        shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.activate(ENV["TEST_PROJECT"])
+          Pkg.develop(PackageSpec(; path = pwd()))
+          Pkg.instantiate()
+          using Preferences: set_preferences!
+          set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
+              "precompile_workload" => false; force = true)
+      - name: Run extended tests
+        run: julia --startup-file=no --check-bounds=yes --color=yes test/runtests.jl
