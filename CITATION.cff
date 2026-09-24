@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use AcousticScattering.jl in your work, please cite this software."
 type: software
 title: AcousticScattering.jl
-version: "0.1.0"
+version: "0.1.1"
 authors:
   - family-names: Lucca
     given-names: Brandyn
