@@ -62,3 +62,15 @@ let
         end
     end
 end
+
+let
+    @time "Flat-cylinder domain and deferred shapes" @testset "Flat-cylinder domain and deferred shapes" begin
+        solution = bem(
+            Cylinder(0.5, 1.0; endcap_depth = 0.5), Rigid(), 0.3; n = 16, incidence_angle = 0.0)
+        @test isfinite(pressure(solution, (0.8, 0.0, 0.0)))
+        @test_throws ArgumentError pressure(solution, (0.0, 0.4, 0.0))
+        bent = mfs(Cylinder(0.1, 1.0; radius_curvature = 2.0), Rigid(), 1.0;
+            offset = 0.03, n_s = 6, n_phi = 6, condition_limit = 0)
+        @test_throws ArgumentError pressure(bent, (2.0, 0.0, 0.0))
+    end
+end

@@ -92,3 +92,40 @@ let
         @test f_back != f_forward
     end
 end
+
+let
+    @time "Matched fluid and pressure-release surface" @testset "Matched fluid and pressure-release surface" begin
+        body, k = Sphere(1.0), 1.6
+        matched = modal(body, FluidFilled(1.0, 1.0), k)
+        points = [(0.0, 0.0, 0.0), (0.23, 0.34, 0.45), (1.0, 0.0, 0.0), (-2.0, 0.5, 0.0)]
+        @test pressure(matched, points) ≈ pressure(matched, points; field = :incident) rtol = 1e-12
+        @test iszero(scattering_amplitude(matched))
+        @test iszero(pressure(matched, last(points); field = :scattered))
+        @test pressure(matched, (0.0, 0.0, 0.0); field = :interior) ≈ 1.0
+        @test_throws ArgumentError pressure(matched, (1.1, 0.0, 0.0); field = :interior)
+        @test_throws ArgumentError pressure(matched, (0.1, 0.0, 0.0); field = :scattered)
+        soft = modal(body, PressureRelease(), k)
+        @test maximum(abs, pressure(soft, [
+            (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)])) < 1e-12
+    end
+
+    @time "Spherical pressure far-field limit and modal cutoff" @testset "Spherical pressure far-field limit and modal cutoff" begin
+        body, k = Sphere(1.0), 1.6
+        for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1)),
+            theta in (0.0, pi / 3, pi)
+
+            solution = modal(body, boundary, k; m_max = 12)
+            r = 1e6
+            point = (r * cos(theta), r * sin(theta), 0.0)
+            expected = scattering_amplitude(modal(
+                body, boundary, k; angle = theta, m_max = 12))
+            @test r * cis(-k * r) * pressure(solution, point; field = :scattered) ≈ expected rtol = 1e-5
+        end
+        point = (1.01, 0.0, 0.0)
+        coarse = pressure(modal(body, Rigid(), k; m_max = 0), point)
+        fine = pressure(modal(body, Rigid(), k; m_max = 12), point)
+        reference = pressure(modal(body, Rigid(), k; m_max = 18), point)
+        @test abs(fine - reference) < abs(coarse - reference) / 1000
+        @test_throws ArgumentError modal(body, Rigid(), k; m_max = -1)
+    end
+end

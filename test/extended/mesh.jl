@@ -375,3 +375,72 @@ let
             triangles[:, [4, 2, 3, 1]])
     end
 end
+
+let
+    @time "Body coordinates and directions" @testset "Body coordinates and directions" begin
+        @test AS._bem3d_incidence_direction(0.0, 0.0) ≈ [1, 0, 0]
+        @test AS._bem3d_incidence_direction(pi/2, 0.0) ≈ [0, 1, 0] atol=1e-15
+        @test AS._bem3d_incidence_direction(pi/2, pi/2) ≈ [0, 0, 1] atol=1e-15
+        for body in (Spheroid(0.06, 0.02), Cylinder(0.02, 0.12; endcap_depth = 0.02))
+            for method in (:axisymmetric, :full)
+                surface = mesh(body; method, resolution = method === :full ? 0.05 : 40)
+                points = if method === :full
+                    AS.coordinates(surface)
+                else
+                    panels = AS.panels(surface.data)
+                    revolved = AS.revolve_panels(panels, [zeros(length(panels))]; n_phi = 16)
+                    collect(zip(vec(revolved.x), vec(revolved.y), vec(revolved.z)))
+                end
+                extents = [maximum(p[j] for p in points)-minimum(p[j] for p in points)
+                           for j in 1:3]
+                @test extents[1] > 2extents[2]
+                @test extents[1] > 2extents[3]
+            end
+        end
+    end
+
+    @time "Curved surface point locations" @testset "Curved surface point locations" begin
+        for order in (1, 2, 3)
+            surface = mesh(; semiaxes = (1.0, 1.0, 1.0), center = (0.3, -0.2, 0.1),
+                resolution = 0.5, mesh_order = order, qorder = 4)
+            patches = AS._region_patches(surface.data, 0)
+            @test AS._surface_location(patches, (0.3, -0.2, 0.1)) === :inside
+            @test AS._surface_location(patches, (2.0, 0.0, 0.0)) === :outside
+            for i in (23, 71, 131)
+                q = surface.data[i]
+                @test AS._surface_location(patches, q.coords) === :on
+                @test AS._surface_location(patches, q.coords + 1e-8*q.normal) === :outside
+                @test AS._surface_location(patches, q.coords - 1e-8*q.normal) === :inside
+            end
+            for node in eachcol(surface.body.nodes[:, 1:3])
+                @test AS._surface_location(patches, node) === :on
+            end
+        end
+        nodes = [0.0 1 0 0; 0 0 1 0; 0 0 0 1]
+        faces = [1 1 1 2; 3 2 4 3; 2 4 3 4]
+        surface = mesh(nodes, faces)
+        patches = AS._region_patches(surface.data, 0)
+        @test AS._surface_location(patches, (0.1, 0.1, 0.1)) === :inside
+        @test AS._surface_location(patches, (0.5, 0.5, 0.5)) === :outside
+        for point in ((0.0, 0.0, 0.0), (0.5, 0.5, 0.0), (0.2, 0.2, 0.0))
+            @test AS._surface_location(patches, point) === :on
+        end
+        torus = mesh(; qorder = 4) do g
+            g.model.add("closed ring")
+            g.model.occ.addTorus(0, 0, 0, 1.0, 0.25)
+            g.model.occ.synchronize()
+            g.option.setNumber("Mesh.MeshSizeMin", 0.25)
+            g.option.setNumber("Mesh.MeshSizeMax", 0.25)
+            g.model.mesh.generate(2)
+            g.model.mesh.setOrder(3)
+        end
+        patches = AS._region_patches(torus.data, 0)
+        @test AS._surface_location(patches, (0.0, 0.0, 0.0)) === :outside
+        @test AS._surface_location(patches, (1.0, 0.0, 0.0)) === :inside
+        @test AS._surface_location(patches, (1.5, 0.0, 0.0)) === :outside
+        q = torus.data[23]
+        @test AS._surface_location(patches, q.coords) === :on
+        @test AS._surface_location(patches, q.coords + 1e-8*q.normal) === :outside
+        @test AS._surface_location(patches, q.coords - 1e-8*q.normal) === :inside
+    end
+end

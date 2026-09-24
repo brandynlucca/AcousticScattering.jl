@@ -301,3 +301,137 @@ let
         end
     end
 end
+
+let
+    @time "Rotated geometry preserves complex amplitudes" @testset "Rotated geometry preserves complex amplitudes" begin
+        original = mesh(; semiaxes = (0.06, 0.018, 0.025), resolution = 0.8, qorder = 5, tip_ratio = 0.4)
+        angle = 0.37
+        rotation = [cos(angle) -sin(angle) 0; sin(angle) cos(angle) 0; 0 0 1]
+        nodes = rotation*original.body.nodes
+        rotated = mesh(nodes, hcat(original.body.connectivity...); qorder = 5)
+        @test rotated.body.nodes ≈ nodes
+        @test maximum(norm.(AS.normals(rotated) .-
+                            [rotation*n for n in AS.normals(original)])) < 1e-10
+        beta, alpha = pi/3, 0.4
+        incident = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        rotated_incident = rotation*incident
+        for material in (FluidFilled(1.04, 1.04),)
+            a = bem(
+                original, material, 1.0; incidence_angle = beta, incidence_azimuth = alpha)
+            b = bem(rotated, material, 1.0; incidence_angle = acos(rotated_incident[1]),
+                incidence_azimuth = atan(rotated_incident[3], rotated_incident[2]))
+            for direction in (-incident, incident, [0.0, 0.0, 1.0])
+                reference = scattering_amplitude(a; direction)
+                actual = scattering_amplitude(b; direction = rotation*direction)
+                @test actual ≈ reference rtol=1e-5
+            end
+        end
+    end
+end
+
+let
+    function compare_region_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    function modal_region_points(points, direction)
+        [(dot(direction, p), sqrt(max(0, norm(p)^2-dot(direction, p)^2)), 0.0)
+         for p in points]
+    end
+
+    @time "Disconnected and branched fluid pressure" @testset "Disconnected and branched fluid pressure" begin
+        beta, alpha, k = pi/3, 0.4, 0.6
+        direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        center = [-0.35, 0.0, 0.0]
+        active = mesh(; semiaxes = (0.25, 0.25, 0.25), center = Tuple(center),
+            resolution = 0.36, mesh_order = 3, qorder = 5)
+        passive = mesh(; semiaxes = (0.2, 0.2, 0.2), center = (0.4, 0.1, 0.0),
+            resolution = 0.6, mesh_order = 3, qorder = 5)
+        outer = mesh(
+            Sphere(1.0); method = :full, resolution = 0.45, mesh_order = 3, qorder = 5)
+        material = FluidFilled(0.4, 0.7)
+        reference = modal(Sphere(0.25), material, k)
+        phase = cis(k*dot(direction, center))
+        points = [(1.1, 0.1, 0.0), (-0.35, 0.0, 0.0), (0.4, 0.1, 0.0),
+            (-0.35, 0.4, 0.0), (0.0, -0.4, 0.2)]
+        local_points = [Tuple(collect(p)-center) for p in points]
+        expected = phase .*
+                   pressure(reference, modal_region_points(local_points, direction))
+        for (surfaces, materials, parents, active_region, passive_region) in (
+            ([passive, active], [FluidFilled(1, 1), material], [0, 0], 2, 1),
+            ([outer, active, passive],
+            [FluidFilled(1, 1), material, FluidFilled(1, 1)], [0, 1, 1], 2, 3))
+            solution = bem(surfaces, materials, k; parents, incidence_angle = beta,
+                incidence_azimuth = alpha, condition_limit = 0)
+            @time "parents=$parents" @testset "parents=$parents" begin
+                compare_region_pressure(pressure(solution, points), expected)
+                @test pressure(solution, points[2]; region = active_region) ≈ expected[2] rtol = 1e-3
+                @test pressure(solution, points[3]; region = passive_region) ≈ expected[3] rtol = 1e-3
+                @test_throws ArgumentError pressure(solution, points[2]; region = passive_region)
+                exterior = [points[1], (0.0, 0.0, 1.3)]
+                local_exterior = [Tuple(collect(p)-center) for p in exterior]
+                compare_region_pressure(pressure(solution, exterior; field = :scattered),
+                    phase .*
+                    pressure(reference, modal_region_points(local_exterior, direction); field = :scattered))
+                if length(surfaces) == 3
+                    @test pressure(solution, points[4]; region = 1) ≈ expected[4] rtol = 1e-3
+                    @test_throws ArgumentError pressure(solution, points[4]; region = 0)
+                end
+                for (i, surface) in enumerate(surfaces)
+                    anchor = i == active_region ? AS.SVector(-0.35, 0.15, 0.2) :
+                             i == passive_region ? AS.SVector(0.4, 0.22, 0.16) :
+                             AS.SVector(0.6, 0.48, 0.64)
+                    q = surface.data[argmin(norm(node.coords-anchor)
+                    for node in surface.data)]
+                    compare_region_pressure([pressure(solution, q.coords; region = i)],
+                        [pressure(solution, q.coords; region = parents[i])])
+                end
+                @test diagnostics(solution).relative_residual < 1e-9
+            end
+        end
+    end
+
+    @time "Nested fluid pressure" @testset "Nested fluid pressure" begin
+        outer = mesh(
+            Sphere(1.0); method = :full, resolution = 0.6, mesh_order = 3, qorder = 4)
+        inner = mesh(
+            Sphere(0.5); method = :full, resolution = 0.3, mesh_order = 3, qorder = 4)
+        solution = bem([outer, inner],
+            [FluidFilled(1.2, 1.1), FluidFilled(0.7, 0.8)], 1.0; condition_limit = 0)
+        exterior = (1.2, 0.0, 0.0)
+        wall = (0.75, 0.0, 0.0)
+        cavity = (0.0, 0.0, 0.0)
+        @test all(isfinite, pressure(solution, [exterior, wall, cavity]))
+        @test pressure(solution, exterior; region = 0) ≈ pressure(solution, exterior)
+        @test pressure(solution, wall; region = 1) ≈ pressure(solution, wall)
+        @test pressure(solution, cavity; region = 2) ≈ pressure(solution, cavity)
+    end
+
+    @time "Interacting fluid pressure" @testset "Interacting fluid pressure" begin
+        surfaces = [mesh(; semiaxes = (0.2, 0.2, 0.2), center,
+                        resolution = 0.6, mesh_order = 3, qorder = 5)
+                    for center in ((-0.35, 0.0, 0.0), (0.35, 0.0, 0.0))]
+        k = 0.6
+        solution = bem(surfaces, [FluidFilled(0.7, 0.8), FluidFilled(1.4, 0.9)], k;
+            parents = [0, 0], incidence_angle = pi/3, incidence_azimuth = 0.4,
+            condition_limit = 0)
+        for (i, surface) in enumerate(surfaces)
+            anchor = AS.SVector(i == 1 ? -0.35 : 0.35, 0.12, 0.16)
+            index = argmin(norm(node.coords-anchor) for node in surface.data)
+            point = surface.data[index].coords
+            expected = [solution.data.interfaces[i].pressure[index]]
+            compare_region_pressure([pressure(solution, point; region = i)], expected)
+            compare_region_pressure([pressure(solution, point; region = 0)], expected)
+        end
+        for direction in ([0.36, 0.48, 0.8], [-0.8, 0.6, 0.0])
+            distance = 1e6
+            value = pressure(solution, Tuple(distance .* direction); field = :scattered)
+            amplitude = value * distance * cis(-k*distance)
+            @test isapprox(amplitude, scattering_amplitude(solution; direction); rtol = 1e-4, atol = 1e-12)
+        end
+        @test_throws ArgumentError pressure(modal(Sphere(1.0), Rigid(), k), (2.0, 0.0, 0.0); region = 0)
+    end
+end

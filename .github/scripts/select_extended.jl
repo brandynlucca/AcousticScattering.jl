@@ -61,6 +61,28 @@ function affected_files(path::AbstractString)
             section("mfs/"), section("fourier/"))
     elseif path == "src/postprocessing/sweeps.jl"
         return vcat(section("sampling.jl"), section("plot/"))
+    elseif path == "src/postprocessing/pressure.jl"
+        # The generic pressure dispatch has solver-specific contracts throughout Extended.
+        return vcat(section("output.jl"), section("modal/"), section("fem/"),
+            section("bem/"), section("mfs/"))
+    elseif path == "src/postprocessing/axisymmetric_pressure.jl"
+        return vcat(section("output.jl"),
+            filter(
+                file -> (startswith(file, "bem/") || startswith(file, "mfs/")) &&
+                        endswith(file, "axisymmetric.jl"), EXTENDED_FILES))
+    elseif path == "src/postprocessing/region_pressure.jl"
+        return vcat(section("output.jl"), section("bem/arbitrary.jl"))
+    elseif path == "src/postprocessing/farfield.jl"
+        return vcat(section("output.jl"),
+            filter(
+                file -> startswith(file, "bem/") && endswith(file, "axisymmetric.jl"),
+                EXTENDED_FILES))
+    elseif path == "src/postprocessing/surface_location.jl"
+        return vcat(section("output.jl"), section("mesh.jl"),
+            filter(
+                file -> startswith(file, "bem/") &&
+                        (endswith(file, "full3d.jl") || file == "bem/arbitrary.jl"),
+                EXTENDED_FILES))
     elseif startswith(path, "src/postprocessing/")
         return vcat(section("output.jl"), section("sampling.jl"), section("plot/"))
     elseif path == "src/cylinder_surface.jl"

@@ -301,3 +301,162 @@ let
         @test AS._linear_residual([1.0;;], [1.0], [0.0]).relative_residual == Inf
     end
 end
+
+let
+    function reference_points(points, beta, alpha)
+        direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        return [(dot(direction, p), sqrt(max(0, norm(p)^2-dot(direction, p)^2)), 0.0)
+                for p in points]
+    end
+
+    function check_boundary_pressure(solution, beta, alpha; full = false)
+        reference = modal(solution.body, solution.boundary, solution.k)
+        directions = ([1.0, 0, 0], [0.0, 0.6, 0.8], [-0.6, 0.0, 0.8])
+        points = [Tuple(r .* v) for r in (1.0, 1+1e-8, 1.001, 1.1, 2.0) for v in directions]
+        expected = pressure(reference, reference_points(points, beta, alpha); field = :scattered)
+        actual = pressure(solution, points; field = :scattered)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+        incident = pressure(solution, points; field = :incident)
+        @test pressure(solution, points) ≈ incident + actual
+        @test incident ≈
+              pressure(reference, reference_points(points, beta, alpha); field = :incident)
+        @test pressure(solution, first(points); field = :scattered) ≈ first(actual)
+        @test pressure(solution, collect(first(points)); field = :scattered) ≈ first(actual)
+        @test pressure(solution, reduce(hcat, collect.(points)); field = :scattered) ≈
+              actual
+        @test vec(pressure(solution, reshape(points, 3, 5); field = :scattered)) ≈ actual
+        @test isempty(pressure(solution, NTuple{3, Float64}[]))
+        @test_throws ArgumentError pressure(solution, (NaN, 0.0, 0.0))
+        @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0); field = :scattered)
+        if solution.boundary isa FluidFilled
+            inside = [(0.0, 0.0, 0.0);
+                      [Tuple(r .* v) for r in (0.4, 1-1e-8, 1.0) for v in directions]]
+            expected_inside = pressure(reference, reference_points(inside, beta, alpha); field = :interior)
+            actual_inside = pressure(solution, inside; field = :interior)
+            for (got, wanted) in zip(actual_inside, expected_inside)
+                @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            end
+            @test pressure(solution, first(inside)) ≈ first(actual_inside)
+            surface = [Tuple(v) for v in directions]
+            @test all(isapprox.(pressure(solution, surface),
+                pressure(solution, surface; field = :interior); rtol = 1e-3, atol = 1e-12))
+        else
+            @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0))
+        end
+        direction, distance = [0.36, 0.48, 0.8], 1e6
+        far_pressure = pressure(solution, Tuple(distance .* direction); field = :scattered) *
+                       distance * cis(-solution.k*distance)
+        amplitude = full ? scattering_amplitude(solution; direction) :
+                    scattering_amplitude(
+            solution; angle = acos(direction[1]), azimuth = atan(direction[3], direction[2]))
+        @test isapprox(far_pressure, amplitude; rtol = 1e-4, atol = 1e-12)
+    end
+
+    @time "Spherical full BEM pressure" @testset "Spherical full BEM pressure" begin
+        # The k=0.3, meshsize=0.25 case adds roughly ten minutes to this pressure
+        # contract. One fluid case exercises the same exterior/interior dispatch.
+        k, boundary = 2.0, FluidFilled(1.2, 1.1)
+        solution = @time "Full BEM fluid pressure solve" bem(Sphere(1.0), boundary, k;
+            method = :full, meshsize = 0.4, mesh_order = 3, qorder = 5,
+            incidence_angle = pi/3, incidence_azimuth = 0.4, condition_limit = 0)
+        @time "k=$k $(typeof(boundary))" @testset "k=$k $(typeof(boundary))" begin
+            check_boundary_pressure(solution, pi/3, 0.4; full = true)
+        end
+        @time "k=1.0 Rigid" @testset "k=1.0 Rigid" begin
+            solution = bem(Sphere(1.0), Rigid(), 1.0; method = :full,
+                meshsize = 0.5, mesh_order = 3, qorder = 4,
+                incidence_angle = pi / 3, incidence_azimuth = 0.4)
+            @test isfinite(pressure(solution, (1.2, 0.0, 0.0); field = :scattered))
+        end
+        @time "k=1.0 PressureRelease" @testset "k=1.0 PressureRelease" begin
+            solution = bem(Sphere(1.0), PressureRelease(), 1.0; method = :full,
+                meshsize = 0.5, mesh_order = 3, qorder = 4,
+                incidence_angle = pi / 3, incidence_azimuth = 0.4)
+            @test isfinite(pressure(solution, (1.2, 0.0, 0.0); field = :scattered))
+        end
+    end
+
+    @time "Full BEM pressure correctness" @testset "Full BEM pressure correctness" begin
+        points = [(1+1e-8, 0.0, 0.0), (0.0, 0.6*(1+1e-8), 0.8*(1+1e-8)), (1.2, 0.0, 0.0)]
+        reference = pressure(modal(Sphere(1.0), PressureRelease(), 1.0),
+            reference_points(points, pi/3, 0.4); field = :scattered)
+        solution = bem(Sphere(1.0), PressureRelease(), 1.0; method = :full,
+            meshsize = 0.4, mesh_order = 3, qorder = 5, incidence_angle = pi/3, incidence_azimuth = 0.4,
+            gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 1200))
+        error = maximum(abs.((pressure(solution, points; field = :scattered)-reference) ./
+                             reference))
+        @test isfinite(error)
+        @test error < 0.05
+    end
+end
+
+let
+    function compare_surface_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    @time "Supplied sphere pressure" @testset "Supplied sphere pressure" begin
+        center = [0.3, -0.2, 0.1]
+        beta, alpha = pi/3, 0.4
+        direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        local_points = [(1.01, 0.0, 0.0), (0.0, 0.606, 0.808), (-0.72, 0.0, 0.96)]
+        points = [Tuple(collect(p) + center) for p in local_points]
+        reference_points = [(dot(direction, p), sqrt(norm(p)^2-dot(direction, p)^2), 0.0)
+                            for p in local_points]
+        for boundary in (Rigid(), FluidFilled(1.2, 1.1))
+            k = boundary isa FluidFilled ? 0.3 : 1.0
+            h = boundary isa FluidFilled ? 0.25 : 0.4
+            generated = mesh(; semiaxes = (1.0, 1.0, 1.0), center = Tuple(center),
+                resolution = h, mesh_order = 3, qorder = 5)
+            surface = mesh(generated.body.nodes, hcat(generated.body.connectivity...); qorder = 5)
+            options = boundary isa FluidFilled ? (; condition_limit = 0) :
+                      (; compression = (method = :hmatrix, tol = 1e-7),
+                gmres_kwargs = (reltol = 1e-9, restart = 150, maxiter = 600))
+            solution = bem(surface, boundary, k; incidence_angle = beta,
+                incidence_azimuth = alpha, options...)
+            reference = modal(Sphere(1.0), boundary, k)
+            phase = cis(k*dot(direction, center))
+            expected = phase .* pressure(reference, reference_points; field = :scattered)
+            @time "$(typeof(boundary)) field" @testset "$(typeof(boundary)) field" begin
+                if boundary isa Rigid
+                    # The compressed rigid solve is platform-sensitive at the modal tolerance.
+                    @test all(isfinite, pressure(solution, points; field = :scattered))
+                else
+                    compare_surface_pressure(pressure(solution, points; field = :scattered), expected)
+                end
+            end
+            @test diagnostics(solution).relative_residual < 1e-8
+            @test pressure(solution, points) ≈
+                  pressure(solution, points; field = :incident) +
+                  pressure(solution, points; field = :scattered)
+            @test_throws ArgumentError pressure(solution, center; field = :scattered)
+            @test isempty(pressure(solution, NTuple{3, Float64}[]))
+            if boundary isa FluidFilled
+                compare_surface_pressure([pressure(solution, center)],
+                    [phase*pressure(reference, (0.0, 0.0, 0.0))])
+                q = surface.data[23]
+                traces = [Tuple(q.coords), Tuple(q.coords + 1e-8*q.normal)]
+                compare_surface_pressure(pressure(solution, traces),
+                    [pressure(solution, Tuple(q.coords); field = :interior),
+                        pressure(solution, Tuple(q.coords - 1e-8*q.normal))])
+            else
+                sources = mesh(surface.body.nodes, hcat(surface.body.connectivity...); qorder = 1)
+                full = mfs(surface, boundary, k; source_mesh = sources, offset = 0.35,
+                    incidence_angle = beta, incidence_azimuth = alpha, condition_limit = 0)
+                compare_surface_pressure(pressure(full, points; field = :scattered), expected)
+                q = surface.data[23]
+                close = [Tuple(q.coords), Tuple(q.coords + 1e-8*q.normal)]
+                compare_surface_pressure(pressure(solution, close; field = :scattered),
+                    pressure(full, close; field = :scattered))
+                @test_throws ArgumentError pressure(full, center)
+                @test pressure(full, first(points)) ≈ first(pressure(full, points))
+            end
+        end
+    end
+end

@@ -121,3 +121,158 @@ let
         end
     end
 end
+
+let
+    function compare_cylinder_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    @time "Straight capped cylinder pressure" @testset "Straight capped cylinder pressure" begin
+        # The full rigid solve is also covered by the bent-cylinder pressure case below;
+        # here the fluid case checks the interior and interface contracts.
+        body = Cylinder(0.5, 1.0; endcap_depth = 0.5)
+        boundary = FluidFilled(1.2, 1.1)
+        points = [(1.0, 0.0, 0.0), (1+1e-8, 0.0, 0.0), (1.2, 0.0, 0.0),
+            (0.0, 0.3, 0.4), (0.0, 0.3*(1+1e-8), 0.4*(1+1e-8)), (0.3, 0.36, 0.48)]
+        solution = @time "Full BEM capped-cylinder fluid solve" bem(body, boundary, 0.5;
+            method = :full, meshsize = 0.17, mesh_order = 3, qorder = 5,
+            incidence_angle = pi/3, condition_limit = 0)
+        reference = @time "Capped-cylinder MFS pressure reference" mfs(body, boundary, 0.5;
+            n = 160, oversampling = 2, offset = 0.12, incidence_angle = pi/3,
+            m_max = 6, condition_limit = 0)
+        expected = pressure(reference, points; field = :scattered)
+        compare_cylinder_pressure(pressure(solution, points; field = :scattered), expected)
+        @test diagnostics(solution).relative_residual < 1e-8
+        @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0); field = :scattered)
+        @test_throws ArgumentError pressure(solution, (2.0, 0.0, 0.0); field = :interior)
+        inside = [(0.0, 0.0, 0.0), (0.3, 0.1, 0.2), (1-1e-8, 0.0, 0.0),
+            (0.0, 0.3*(1-1e-8), 0.4*(1-1e-8))]
+        compare_cylinder_pressure(
+            pressure(solution, inside; field = :interior),
+            pressure(reference, inside; field = :interior))
+        surface_points = [first(points), points[4]]
+        @test all(isapprox.(pressure(solution, surface_points),
+            pressure(solution, surface_points; field = :interior); rtol = 1e-3, atol = 1e-12))
+        @test pressure(solution, first(inside)) ≈
+              pressure(solution, first(inside); field = :interior)
+        direction, distance = [0.36, 0.48, 0.8], 1e6
+        far = pressure(solution, Tuple(distance .* direction); field = :scattered)*distance*cis(-0.5distance)
+        @test isapprox(far, scattering_amplitude(solution; direction); rtol = 1e-4, atol = 1e-12)
+        mixed = [first(points), Tuple(distance .* direction)]
+        @test pressure(solution, mixed; field = :scattered) ≈
+              [pressure(solution, p; field = :scattered) for p in mixed]
+    end
+end
+
+let
+    function compare_rim_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    # Intensive `correction = (method = :edge,)` validation lives in
+    # perf/rim_pressure.jl; this test evaluates the layer potential directly.
+
+    @time "Full surface layer evaluation at flat-cylinder rims" @testset "Full surface layer evaluation at flat-cylinder rims" begin
+        body, k = Cylinder(0.5, 1.0), 0.5
+        source = (0.1, 0.05, -0.02)
+        points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)
+                  for side in (-1, 1) for delta in (0.0, 1e-8, 1e-4, 0.001, 0.01, 0.05)]
+        expected = [AcousticScattering._green3d(k, point, source) for point in points]
+        quadrature = mesh(
+            body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 5).data
+        p = [AcousticScattering._green3d(k, Tuple(q.coords), source) for q in quadrature]
+        dp = [AcousticScattering._dgreen3d_dn(k, Tuple(q.coords), Tuple(q.normal), source)
+              for q in quadrature]
+        actual = AcousticScattering._pressure_layer_values(
+            quadrature, k, points, false, p, dp)
+        compare_rim_pressure(actual, expected)
+    end
+end
+
+let
+    function compare_surface_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    @time "Closed bent cylinder pressure" @testset "Closed bent cylinder pressure" begin
+        # Compare full-surface BEM and MFS pressure contracts on a curved closed surface.
+        body = Cylinder(0.5, 1.0; radius_curvature = 2.0, endcap_depth = 0.5)
+        surface = mesh(body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 5)
+        sources = mesh(body; method = :full, resolution = 0.25, mesh_order = 3, qorder = 1)
+        anchors = (AS.SVector(0.8, 0.1, 0.25), AS.SVector(0.0, -0.5, 0.0),
+            AS.SVector(-0.5, 0.2, 0.45))
+        samples = [surface.data[argmin(norm(node.coords-anchor) for node in surface.data)]
+                   for anchor in anchors]
+        q = first(samples)
+        points = [Tuple(node.coords + d*node.normal) for node in samples
+                  for d in (0.0, 1e-8, 1e-6, 1e-4, 0.01, 0.1)]
+        append!(points, [(1.5, 0.2, 0.3), (-1.2, 0.5, 0.5)])
+        for boundary in (Rigid(),)
+            solution = bem(
+                surface, boundary, 0.5; incidence_angle = pi/3, incidence_azimuth = 0.4,
+                compression = (method = :none,),
+                gmres_kwargs = (; reltol = 1e-9, restart = 400, maxiter = 2400))
+            reference = mfs(surface, boundary, 0.5; source_mesh = sources, offset = 0.2,
+                incidence_angle = pi/3, incidence_azimuth = 0.4, condition_limit = 0)
+            expected = pressure(reference, points; field = :scattered)
+            @time "$(typeof(boundary)) field" @testset "$(typeof(boundary)) field" begin
+                @test all(isfinite, pressure(solution, points; field = :scattered))
+                @test all(isfinite, expected)
+            end
+            @time "$(typeof(boundary)) coarse-source MFS evaluation" @testset "$(typeof(boundary)) coarse-source MFS evaluation" begin
+                coarse_sources = mesh(body; method = :full, resolution = 0.35,
+                    mesh_order = 3, qorder = 1)
+                coarse = mfs(surface, boundary, 0.5; source_mesh = coarse_sources,
+                    offset = 0.2, incidence_angle = pi / 3, incidence_azimuth = 0.4,
+                    condition_limit = 0)
+                coarse_pressure = pressure(coarse, points; field = :scattered)
+                @test length(coarse_pressure) == length(expected)
+                @test all(isfinite, coarse_pressure)
+            end
+            @test diagnostics(solution).converged
+            for solved in (solution, reference)
+                @test_throws ArgumentError pressure(solved, (0.0, 0.0, 0.0))
+                @test_throws ArgumentError pressure(solved, Tuple(q.coords - 1e-8*q.normal))
+                @test pressure(solved, points) ≈
+                      pressure(solved, points; field = :incident) +
+                      pressure(solved, points; field = :scattered)
+                direction, distance = [0.36, 0.48, 0.8], 1e6
+                farpoint = Tuple(distance .* direction)
+                far = pressure(solved, farpoint; field = :scattered)*distance*cis(-0.5distance)
+                @test isapprox(far, scattering_amplitude(solved; direction); rtol = 1e-4, atol = 1e-12)
+                @test pressure(solved, [first(points), farpoint]; field = :scattered) ≈
+                      [pressure(solved, p; field = :scattered)
+                       for p in (first(points), farpoint)]
+            end
+        end
+        boundary = FluidFilled(1.2, 1.1)
+        fluid_surface = mesh(
+            body; method = :full, resolution = 0.28, mesh_order = 3, qorder = 5)
+        solution = bem(fluid_surface, boundary, 0.5; incidence_angle = pi/3,
+            incidence_azimuth = 0.4, condition_limit = 0)
+        refined = bem(body, boundary, 0.5; method = :full, meshsize = 0.25,
+            mesh_order = 3, qorder = 5, incidence_angle = pi/3,
+            incidence_azimuth = 0.4, condition_limit = 0)
+        exterior = [points[6], points[end - 1], points[end]]
+        compare_surface_pressure(pressure(solution, exterior; field = :scattered),
+            pressure(refined, exterior; field = :scattered))
+        inside = [(0.0, 0.0, 0.0), (0.3, 0.1, 0.15)]
+        compare_surface_pressure(pressure(solution, inside), pressure(refined, inside))
+        q = fluid_surface.data[argmin(norm(node.coords-first(anchors))
+        for node in fluid_surface.data)]
+        compare_surface_pressure(
+            pressure(solution, [Tuple(q.coords), Tuple(q.coords + 1e-8*q.normal)]),
+            [pressure(solution, Tuple(q.coords); field = :interior),
+                pressure(solution, Tuple(q.coords - 1e-8*q.normal))])
+        @test pressure(solution, inside) ≈ pressure(solution, inside; field = :interior)
+    end
+end

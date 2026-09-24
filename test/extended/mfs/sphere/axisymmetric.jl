@@ -194,3 +194,103 @@ let
         @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 0.01
     end
 end
+
+let
+    function reference_points(points, beta, alpha)
+        direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        return [(dot(direction, p), sqrt(max(0, norm(p)^2-dot(direction, p)^2)), 0.0)
+                for p in points]
+    end
+
+    function check_boundary_pressure(solution, beta, alpha; full = false)
+        reference = modal(solution.body, solution.boundary, solution.k)
+        directions = ([1.0, 0, 0], [0.0, 0.6, 0.8], [-0.6, 0.0, 0.8])
+        points = [Tuple(r .* v) for r in (1.0, 1+1e-8, 1.001, 1.1, 2.0) for v in directions]
+        expected = pressure(reference, reference_points(points, beta, alpha); field = :scattered)
+        actual = pressure(solution, points; field = :scattered)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+        incident = pressure(solution, points; field = :incident)
+        @test pressure(solution, points) ≈ incident + actual
+        @test incident ≈
+              pressure(reference, reference_points(points, beta, alpha); field = :incident)
+        @test pressure(solution, first(points); field = :scattered) ≈ first(actual)
+        @test pressure(solution, collect(first(points)); field = :scattered) ≈ first(actual)
+        @test pressure(solution, reduce(hcat, collect.(points)); field = :scattered) ≈
+              actual
+        @test vec(pressure(solution, reshape(points, 3, 5); field = :scattered)) ≈ actual
+        @test isempty(pressure(solution, NTuple{3, Float64}[]))
+        @test_throws ArgumentError pressure(solution, (NaN, 0.0, 0.0))
+        @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0); field = :scattered)
+        if solution.boundary isa FluidFilled
+            inside = [(0.0, 0.0, 0.0);
+                      [Tuple(r .* v) for r in (0.4, 1-1e-8, 1.0) for v in directions]]
+            expected_inside = pressure(reference, reference_points(inside, beta, alpha); field = :interior)
+            actual_inside = pressure(solution, inside; field = :interior)
+            for (got, wanted) in zip(actual_inside, expected_inside)
+                @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            end
+            @test pressure(solution, first(inside)) ≈ first(actual_inside)
+            surface = [Tuple(v) for v in directions]
+            @test all(isapprox.(pressure(solution, surface),
+                pressure(solution, surface; field = :interior); rtol = 1e-3, atol = 1e-12))
+        else
+            @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0))
+        end
+        direction, distance = [0.36, 0.48, 0.8], 1e6
+        far_pressure = pressure(solution, Tuple(distance .* direction); field = :scattered) *
+                       distance * cis(-solution.k*distance)
+        amplitude = full ? scattering_amplitude(solution; direction) :
+                    scattering_amplitude(
+            solution; angle = acos(direction[1]), azimuth = atan(direction[3], direction[2]))
+        @test isapprox(far_pressure, amplitude; rtol = 1e-4, atol = 1e-12)
+    end
+
+    @time "Spherical MFS pressure" @testset "Spherical MFS pressure" begin
+        for k in (0.3, 2.0), boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 1.1))
+
+            beta = pi/3
+            solution = mfs(Sphere(1.0), boundary, k; n = 96, oversampling = 2,
+                offset = 0.2, incidence_angle = beta, m_max = 10, condition_limit = 0)
+            @time "k=$k $(typeof(boundary)) beta=$beta" @testset "k=$k $(typeof(boundary)) beta=$beta" begin
+                check_boundary_pressure(solution, beta, 0.0)
+            end
+        end
+    end
+end
+
+let
+    function compare_near_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
+    function near_reference_points(points, beta, alpha)
+        direction = [cos(beta), sin(beta)*cos(alpha), sin(beta)*sin(alpha)]
+        return [(dot(direction, p), sqrt(max(0, norm(p)^2-dot(direction, p)^2)), 0.0)
+                for p in points]
+    end
+
+    @time "Higher-frequency spherical pressure" @testset "Higher-frequency spherical pressure" begin
+        # NOTE: a full-mesh BEM comparison at this near-surface tolerance needs a fine enough
+        # mesh that geometric approximation error stays under rtol=1e-3, which costs minutes
+        # regardless of k/qorder/compression; that comparison is covered at full fidelity in
+        # perf/near_interface_pressure.jl. Here only the (fast) MFS code path is checked.
+        body, k, beta = Sphere(1.0), 6.0, pi/3
+        points = [Tuple(r .* direction) for r in (1.0, 1+1e-8, 1.01, 1.2)
+                  for direction in ([1.0, 0, 0], [0.0, 0.6, 0.8], [-0.6, 0, 0.8])]
+        for (boundary, n) in ((Rigid(), 96), (FluidFilled(1.2, 1.1), 64))
+            reference = modal(body, boundary, k; m_max = 32)
+            @time "$(typeof(boundary))" @testset "$(typeof(boundary))" begin
+                solution = mfs(body, boundary, k; n, oversampling = 2,
+                    offset = 0.2, incidence_angle = beta, m_max = 18, condition_limit = 0)
+                compare_near_pressure(pressure(solution, points; field = :scattered),
+                    pressure(reference, near_reference_points(points, beta, 0.0); field = :scattered))
+            end
+        end
+    end
+end
