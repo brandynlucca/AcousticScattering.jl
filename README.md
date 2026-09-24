@@ -3,7 +3,7 @@
 </h1>
 
 [![AcousticScattering](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FAcousticScattering%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=AcousticScattering&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/AcousticScattering)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776331.svg)](https://doi.org/10.5281/zenodo.22776331)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776330.svg)](https://doi.org/10.5281/zenodo.22776330)
 
 [![Documentation](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation)](https://brandynlucca.github.io/AcousticScattering.jl)
 [![Build status (basic)](https://img.shields.io/github/actions/workflow/status/brandynlucca/AcousticScattering.jl/CI.yml?label=Build%20status%20(basic)&logo=github&labelColor=24292e)](https://github.com/brandynlucca/AcousticScattering.jl/actions/workflows/CI.yml)
@@ -74,7 +74,7 @@ target_strength(solution) # dB re 1 m²
 
 If you use this package in research, cite the archived version you used:
 
-> Lucca, B., and contributors. (2026). *AcousticScattering.jl* (v0.1.0) [Computer software]. > Zenodo. https://doi.org/10.5281/zenodo.22776331
+> Lucca, B., and contributors. (2026). *AcousticScattering.jl* (v0.1.1) [Computer software]. > Zenodo. https://doi.org/10.5281/zenodo.22776330
 
 Please also cite the relevant model papers listed in the [documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
 
