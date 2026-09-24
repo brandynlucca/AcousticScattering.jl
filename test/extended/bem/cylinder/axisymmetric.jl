@@ -7,6 +7,13 @@ const AS = AcousticScattering
 BLAS.set_num_threads(1)
 
 let
+    function compare_rim_pressure(actual, expected)
+        for (got, wanted) in zip(actual, expected)
+            @test isapprox(got, wanted; rtol = 1e-3, atol = 1e-12)
+            @test abs(20log10(abs(got/wanted))) < 0.01
+        end
+    end
+
     @time "Rigid flat-cylinder rim continuity" @testset "Rigid flat-cylinder rim continuity" begin
         body, boundary, k = Cylinder(0.5, 1.0), Rigid(), 0.5
         points = [(side*(0.5+delta), 0.3+0.6delta, 0.4+0.8delta)

@@ -17,7 +17,7 @@ using Test
             ("fluid shell, fluid interior",
                 Shelled(fluid_layer, FluidInterior(1.05, 1.02), 0.8)),
             ("fluid shell, vacuum interior",
-                Shelled(fluid_layer, VacuumInterior(), 0.8)),
+                Shelled(fluid_layer, VacuumInterior(), 0.8))
         )
         for (name, boundary) in cases
             @testset "$name" begin

@@ -6,7 +6,7 @@ using Test
         Sphere(1.0),
         Spheroid(1.0, 0.5),
         Spheroid(0.5, 1.0),
-        Cylinder(0.5, 1.0),
+        Cylinder(0.5, 1.0)
     )
     for body in bodies
         surface = mesh(body; method = :axisymmetric, resolution = 8)

@@ -10,7 +10,7 @@ using Test
         cases = (
             (Rigid(), -49.088291, 1e-4),
             (PressureRelease(), -44.997865, 1e-4),
-            (FluidFilled(1028.9 / 1026.8, 1480.3 / c_water), -94.278687, 1e-3),
+            (FluidFilled(1028.9 / 1026.8, 1480.3 / c_water), -94.278687, 1e-3)
         )
         for (boundary, expected_ts, tolerance) in cases
             solution = modal(sphere, boundary, k)
@@ -30,13 +30,16 @@ using Test
         wall = ElasticLayer(rho_shell / rho_ext, c_longitudinal / c_water,
             c_transverse / c_water)
         cases = (
-            (Sphere(0.019), SolidElastic(14900.0 / rho_ext,
-                6853.0 / c_water, 4171.0 / c_water), 13, -42.3768620168836),
+            (Sphere(0.019),
+                SolidElastic(14900.0 / rho_ext,
+                    6853.0 / c_water, 4171.0 / c_water),
+                13, -42.3768620168836),
             (Sphere(0.05), Shelled(wall, FluidInterior(1.0, 1.0), 0.048 / 0.05),
                 20, -28.236014616259297),
-            (Sphere(0.05), Shelled(wall,
-                FluidInterior(1.24 / rho_ext, 345.0 / c_water), 0.048 / 0.05),
-                20, -34.93644485774581),
+            (Sphere(0.05),
+                Shelled(wall,
+                    FluidInterior(1.24 / rho_ext, 345.0 / c_water), 0.048 / 0.05),
+                20, -34.93644485774581)
         )
         for (body, boundary, m_max, expected_ts) in cases
             solution = modal(body, boundary, k; m_max)

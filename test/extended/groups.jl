@@ -1,8 +1,11 @@
 # Shared group names for the extended runner and the CI change selector.
 const EXTENDED_ROOT = @__DIR__
-const EXTENDED_FILES = sort!([replace(relpath(joinpath(root, file), EXTENDED_ROOT), '\\' => '/')
-    for (root, _, files) in walkdir(EXTENDED_ROOT) for file in files
-    if endswith(file, ".jl") && file ∉ ("runtests.jl", "groups.jl")])
+const EXTENDED_FILES = sort!([replace(relpath(joinpath(root, file), EXTENDED_ROOT), '\\' =>
+                                  '/')
+                              for (root, _, files) in walkdir(EXTENDED_ROOT)
+                              for file in files
+                              if endswith(file, ".jl") &&
+    file ∉ ("runtests.jl", "groups.jl")])
 
 function extended_group(file::AbstractString)
     parts = split(replace(file, '\\' => '/'), '/')

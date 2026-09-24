@@ -7,13 +7,13 @@ using Test
     sphere = Sphere(radius)
     bodies = (
         (:prolate, Spheroid(radius + 0.0002, radius - 0.0002)),
-        (:oblate, Spheroid(radius - 0.0002, radius + 0.0002)),
+        (:oblate, Spheroid(radius - 0.0002, radius + 0.0002))
     )
     boundaries = (
         ("rigid", Rigid()),
         ("pressure-release", PressureRelease()),
         ("fluid-filled, full coupling", FluidFilled(1.05, 1.02; coupling = :full)),
-        ("fluid-filled, diagonal coupling", FluidFilled(1.05, 1.02; coupling = :diagonal)),
+        ("fluid-filled, diagonal coupling", FluidFilled(1.05, 1.02; coupling = :diagonal))
     )
 
     for (shape, body) in bodies

@@ -5,13 +5,13 @@ function affected_files(path::AbstractString)
     path = replace(path, '\\' => '/')
     section(prefix) = filter(file -> startswith(file, prefix), EXTENDED_FILES)
     if path in ("Project.toml", "test/Project.toml", "test/core/Project.toml",
-                "test/runtests.jl", "test/extended/runtests.jl",
-                "test/extended/groups.jl",
-                ".github/scripts/select_extended.jl", ".github/workflows/CI.yml") ||
+        "test/runtests.jl", "test/extended/runtests.jl",
+        "test/extended/groups.jl",
+        ".github/scripts/select_extended.jl", ".github/workflows/Extended.yml") ||
        path in ("src/AcousticScattering.jl", "src/api.jl", "src/special_functions.jl")
         return EXTENDED_FILES
     elseif startswith(path, "test/extended/")
-        file = path[length("test/extended/") + 1:end]
+        file = path[(length("test/extended/") + 1):end]
         return file in EXTENDED_FILES ? [file] : String[]
     elseif startswith(path, "ext/AcousticScatteringMakieExt/")
         return section("plot/")
@@ -37,13 +37,16 @@ function affected_files(path::AbstractString)
     elseif path in ("src/engine/mfs.jl", "src/surface_mfs.jl")
         return section("mfs/")
     elseif path == "src/engine/axisymmetric_bem.jl"
-        return filter(file -> startswith(file, "bem/") && endswith(file, "axisymmetric.jl"),
+        return filter(
+            file -> startswith(file, "bem/") && endswith(file, "axisymmetric.jl"),
             EXTENDED_FILES)
     elseif path in ("src/engine/full_bem.jl", "src/region_bem.jl")
-        return filter(file -> startswith(file, "bem/") &&
-            (endswith(file, "full3d.jl") || file == "bem/arbitrary.jl"), EXTENDED_FILES)
+        return filter(
+            file -> startswith(file, "bem/") &&
+                    (endswith(file, "full3d.jl") || file == "bem/arbitrary.jl"),
+            EXTENDED_FILES)
     elseif path in ("src/engine/shell_bem.jl", "src/engine/edge_quadrature.jl",
-                    "src/engine/fluid_quadrature.jl")
+        "src/engine/fluid_quadrature.jl")
         return section("bem/")
     elseif path == "src/engine/spheroid_meridian_fem.jl"
         return ["fem/spheroid/meridian.jl", "fem/spheroid/coupled.jl"]
@@ -92,9 +95,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
         select_files(paths)
     end
     entries = [string("{\"task\":\"",
-        replace(replace(replace(splitext(file)[1], '/' => '-'), '_' => '-'),
-            "plot-plot" => "plot-"),
-        "\",\"file\":\"", file, "\"}") for file in selected_files]
+                   replace(replace(replace(splitext(file)[1], '/' => '-'), '_' => '-'),
+                       "plot-plot" => "plot-"),
+                   "\",\"file\":\"", file, "\"}") for file in selected_files]
     # A nonempty sentinel keeps fromJSON(matrix) valid for docs-only PRs.
     value = isempty(entries) ? "[{\"task\":\"none\",\"file\":\"None\"}]" :
             "[" * join(entries, ",") * "]"

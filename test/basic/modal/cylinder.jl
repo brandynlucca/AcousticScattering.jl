@@ -12,7 +12,7 @@ using Test
             (PressureRelease(), pi / 2, -28.4384596592856),
             (FluidFilled(1028.9 / 1026.8, 1480.3 / c_water),
                 pi / 2, -81.847628998419),
-            (Rigid(), 1.2, -54.5632700811014),
+            (Rigid(), 1.2, -54.5632700811014)
         )
         for (boundary, incidence_angle, expected_ts) in cases
             solution = modal(body, boundary, k; incidence_angle, m_max = 20)
