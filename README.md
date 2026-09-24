@@ -64,17 +64,17 @@ target_strength(solution) # dB re 1 m²
 
 ## Documentation
 
-- [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/):   installation and your first calculation.
-- [First frequency sweep](https://brandynlucca.github.io/AcousticScattering.jl/stable/tutorials/):   plot target strength and save the data.
-- [Models and theory](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/):   conventions, assumptions, and solver selection.
-- [API reference](https://brandynlucca.github.io/AcousticScattering.jl/stable/api/):   geometry, materials, solvers, and result queries.
-- [Visualization gallery](https://brandynlucca.github.io/AcousticScattering.jl/stable/gallery/):   figures with links to their examples.
+- [Getting Started](https://brandynlucca.github.io/AcousticScattering.jl/stable/getting_started/): installation and your first calculation.
+- [First frequency sweep](https://brandynlucca.github.io/AcousticScattering.jl/stable/tutorials/): plot target strength and save the data.
+- [Models and theory](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/): conventions, assumptions, and solver selection.
+- [API reference](https://brandynlucca.github.io/AcousticScattering.jl/stable/api/): geometry, materials, solvers, and result queries.
+- [Visualization gallery](https://brandynlucca.github.io/AcousticScattering.jl/stable/gallery/): figures with links to their examples.
 
 ## Citation
 
 If you use this package in research, cite the archived version you used:
 
-> Lucca, B. (2026). *AcousticScattering.jl* (v0.1.1) [Computer software]. > Zenodo. https://doi.org/10.5281/zenodo.22776330
+> Lucca, B. (2026). *AcousticScattering.jl* (v0.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22776330
 
 Please also cite the relevant model papers listed in the [documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
 
