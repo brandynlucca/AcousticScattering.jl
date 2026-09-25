@@ -272,7 +272,8 @@ function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondit
         b_check = _check_coefficients(transition, k, incidence_angle, n_max, m_max)
         change = _fm_convergence(b, b_check, k)
         isnan(change) || (convergence[] = max(convergence[], change))
-        FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
+        FMSolution(
+            body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
     end
     _warn_fm_convergence(convergence[])
     return sweep

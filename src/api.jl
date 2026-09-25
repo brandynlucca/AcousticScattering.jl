@@ -1053,7 +1053,8 @@ function fourier(body::Irregular, boundary::AbstractBoundaryCondition, k::Real;
     b = _apply_transition(transition, a, n_max, m_max)
     b_check = _check_coefficients(transition, k, incidence_angle, n_max, m_max)
     _warn_fm_convergence(_fm_convergence(b, b_check, k))
-    return FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
+    return FMSolution(
+        body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
 end
 
 """

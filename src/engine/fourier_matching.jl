@@ -205,12 +205,14 @@ function solve_mapping(body::Irregular, order::Integer;
     nodes, weights = _full_period_quadrature(npoints)
     cosl = [cos(l * w) for l in 1:order, w in nodes]
     sinl = [sin(l * w) for l in 1:order, w in nodes]
-    kernel = [wt * cis(-j * w) / 2π for j in (-order):(order + 1), (w, wt) in zip(nodes, weights)]
+    kernel = [wt * cis(-j * w) / 2π
+              for j in (-order):(order + 1), (w, wt) in zip(nodes, weights)]
     x = zeros(Float64, 2order)
     for step in 1:continuation_steps
         scale = step / continuation_steps
         result = nlsolve(
-            (F, y) -> _mapping_residual!(F, y, body, order, scale, nodes, cosl, sinl, kernel),
+            (F, y) -> _mapping_residual!(
+                F, y, body, order, scale, nodes, cosl, sinl, kernel),
             x; nlsolve_kwargs...)
         result.f_converged || result.x_converged ||
             throw(ArgumentError(
@@ -320,7 +322,8 @@ function _radial_table(nodes::_FMNodes, k::Real, n_max::Integer)
     j = [js(n, xq) for n in 0:(n_max + 1), xq in x]
     h = j .+ im .* [ys(n, xq) for n in 0:(n_max + 1), xq in x]
     slope(f) = [(n / x[q]) * f[n + 1, q] - f[n + 2, q] for n in 0:n_max, q in eachindex(x)]
-    return (; j = j[1:(n_max + 1), :], h = h[1:(n_max + 1), :], jd = slope(j), hd = slope(h))
+    return (;
+        j = j[1:(n_max + 1), :], h = h[1:(n_max + 1), :], jd = slope(j), hd = slope(h))
 end
 
 # `Pₗᵐ(x)` for `l = m:n_max` by the same recurrence as `legendre_p(l, m, x)`.
@@ -338,7 +341,8 @@ function _legendre_column!(col, m::Integer, n_max::Integer, x::Real)
     n_max == m && return col
     col[2] = x * (2m + 1) * pmm
     for l in (m + 2):n_max
-        col[l - m + 1] = ((2l - 1) * x * col[l - m] - (l + m - 1) * col[l - m - 1]) / (l - m)
+        col[l - m + 1] = ((2l - 1) * x * col[l - m] - (l + m - 1) * col[l - m - 1]) /
+                         (l - m)
     end
     return col
 end
@@ -385,7 +389,8 @@ function _fm_blocks(kind::Symbol, nodes::_FMNodes, exterior, interior, k::Real, 
     if kind === :pressure_release
         return (; R = soft(exterior.j), Q = soft(exterior.h))
     elseif kind === :rigid
-        return (; R = hard(exterior.j, exterior.jd, k), Q = hard(exterior.h, exterior.hd, k))
+        return (;
+            R = hard(exterior.j, exterior.jd, k), Q = hard(exterior.h, exterior.hd, k))
     elseif kind === :interior
         return (; S = soft(exterior.j), Sp = hard(exterior.j, exterior.jd, k))
     else
@@ -581,7 +586,8 @@ function _fm_convergence(b::AbstractMatrix, b_check, k::Real)
     b_check === nothing && return NaN
     directions = [(angle, azimuth)
                   for angle in range(0, π; length = 13), azimuth in (0.0, π / 2, π)]
-    full = [fourier_matching_amplitude(b, k, angle, azimuth) for (angle, azimuth) in directions]
+    full = [fourier_matching_amplitude(b, k, angle, azimuth)
+            for (angle, azimuth) in directions]
     reduced = [fourier_matching_amplitude(b_check, k, angle, azimuth)
                for (angle, azimuth) in directions]
     peak = maximum(abs, full)
@@ -695,7 +701,8 @@ stay regular at the origin (Eq. (41)).
 """
 function _interior_boundary_matrices(mapping::ConformalMapping, k1::Real, m::Integer;
         n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    (; S, Sp) = only(_fm_blocks_converged(:interior, mapping, k1, k1, m:m, n_max, rtol, maxevals))
+    (; S, Sp) = only(_fm_blocks_converged(
+        :interior, mapping, k1, k1, m:m, n_max, rtol, maxevals))
     return S, Sp
 end
 

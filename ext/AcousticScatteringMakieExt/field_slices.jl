@@ -112,7 +112,8 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
         push!(values, _field_values(sampled, field))
     end
     limits = colorrange === nothing ? _slice_colorrange(values, field) : colorrange
-    bound = 1.08scale * max(Float64(extent), maximum(abs(spec.project_to) for spec in specs))
+    bound = 1.08scale *
+            max(Float64(extent), maximum(abs(spec.project_to) for spec in specs))
     axis_defaults = (aspect = :data,
         xlabel = "x ($unit_label)", ylabel = "y ($unit_label)", zlabel = "z ($unit_label)",
         limits = ((-bound, bound), (-bound, bound), (-bound, bound)),
@@ -120,7 +121,8 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
     fig = Figure(; figure...)
     ax = Axis3(fig[1, 1]; merge(axis_defaults, axis)...)
     plots = map(zip(coordinates, values)) do (coordinate, value)
-        surface!(ax, scale .* coordinate[1], scale .* coordinate[2], scale .* coordinate[3];
+        surface!(
+            ax, scale .* coordinate[1], scale .* coordinate[2], scale .* coordinate[3];
             color = value, colormap, colorrange = limits, shading, kwargs...)
     end
 

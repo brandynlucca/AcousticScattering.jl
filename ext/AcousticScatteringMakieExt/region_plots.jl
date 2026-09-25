@@ -100,7 +100,8 @@ function Makie.plot!(plot::RegionSurfacePlot)
     colored = first(pieces).values !== nothing
     solid = plot.solid_interfaces[]
     alphas = plot.interface_alpha[]
-    alpha_of(piece) = isempty(alphas) ? 1.0 : Float64(alphas[mod1(piece.index, length(alphas))])
+    alpha_of(piece) = isempty(alphas) ? 1.0 :
+                      Float64(alphas[mod1(piece.index, length(alphas))])
     values = colored ?
              reduce(vcat, [piece.values for piece in pieces if !(piece.index in solid)];
         init = Float64[]) : Float64[]
@@ -124,7 +125,8 @@ function Makie.plot!(plot::RegionSurfacePlot)
         if piece.index in wireframes
             wireframe!(plot, geometry; color)
         elseif flat
-            mesh!(plot, geometry; color = alpha < 1 && !(color isa Tuple) ? (color, alpha) : color)
+            mesh!(plot, geometry; color = alpha < 1 && !(color isa Tuple) ? (color, alpha) :
+                                          color)
         else
             mesh!(plot, geometry; color, colorrange = limits, transparency = alpha < 1,
                 colormap = alpha < 1 ? (plot.colormap[], alpha) : plot.colormap)
@@ -157,15 +159,17 @@ for (kind, default_field) in ((:mesh, nothing), (:surface_field, :pressure_magni
                         for p in pieces]
             Legend(result.figure[1, 2], elements, names)
         elseif field !== nothing && colorbar
-            field_mesh = first(filter(p -> p isa Makie.Mesh && p.color[] isa AbstractVector{<:Real},
+            field_mesh = first(filter(
+                p -> p isa Makie.Mesh && p.color[] isa AbstractVector{<:Real},
                 result.plot.plots))
             Colorbar(result.figure[1, 2]; colormap = result.plot.colormap[],
                 limits = field_mesh.colorrange[], label = _pressure_label(field))
             colgap!(result.figure.layout, 1, 70)
         end
         incident_arrow && _add_incident_arrow!(result.axis, sol,
-            reduce(vcat, [first(_inti_mesh_points_faces(interface.surface.data))
-                          for interface in sol.data.interfaces]))
+            reduce(vcat,
+                [first(_inti_mesh_points_faces(interface.surface.data))
+                 for interface in sol.data.interfaces]))
         return result
     end
     @eval function _plot_solution!(ax, sol::_RegionSolution, ::Val{$(QuoteNode(kind))};

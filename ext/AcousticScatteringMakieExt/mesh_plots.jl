@@ -34,8 +34,9 @@ function Makie.plot!(plot::RevolvedSurfacePlot)
 end
 
 Makie.preferred_axis_type(::RevolvedSurfacePlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::RevolvedSurfacePlot) =
+function Makie.preferred_axis_attributes(::Type{Axis3}, ::RevolvedSurfacePlot)
     (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
+end
 
 function _revolved_surface_plot_data(ps::Vector{AcousticScattering.Panel},
         modes::Union{Nothing, AbstractVector}, field::Union{Nothing, Symbol})
@@ -80,8 +81,9 @@ function Makie.plot!(plot::TriMeshPlot)
 end
 
 Makie.preferred_axis_type(::TriMeshPlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::TriMeshPlot) =
+function Makie.preferred_axis_attributes(::Type{Axis3}, ::TriMeshPlot)
     (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
+end
 
 function _inti_mesh_points_faces(quad)
     msh = quad.mesh
@@ -155,8 +157,9 @@ function Makie.plot!(plot::PointCloudPlot)
 end
 
 Makie.preferred_axis_type(::PointCloudPlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::PointCloudPlot) =
+function Makie.preferred_axis_attributes(::Type{Axis3}, ::PointCloudPlot)
     (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
+end
 
 # --- Solution/Mesh -> geometry tier dispatch (see the plan's 3D scope matrix) ---
 

@@ -37,6 +37,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("bem/cylinder.jl")
             include("bem/assembly.jl")
             include("bem/arbitrary.jl")
+            include("bem/edge.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "MFS")
