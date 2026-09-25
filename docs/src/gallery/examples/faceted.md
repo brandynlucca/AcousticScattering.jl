@@ -1,24 +1,28 @@
 # [A supplied faceted body](@id gallery-faceted)
 
-Supply vertices and outward-oriented triangles directly. This rigid octahedron is elongated along x. Color shows scattered-pressure magnitude divided by incident amplitude.
+Load a closed, outward-oriented Gmsh surface supplied by the user. This small asymmetric
+crystalline target keeps the example focused on the actual workflow: load, solve, and plot.
+The visible edges make it clear that the solver uses the supplied connectivity rather than a
+built-in body.
 
 ```@example gallery_faceted
 using AcousticScattering
-using CairoMakie: Colorbar, plot, save
+using CairoMakie: plot, save
 
-nodes = [0.025 -0.025 0 0 0 0; 0 0 0.016 -0.016 0 0; 0 0 0 0 0.012 -0.012]
-triangles = [1 3 2 4 3 2 4 1; 3 2 4 1 1 3 2 4; 5 5 5 5 6 6 6 6]
-surface_mesh = mesh(nodes, triangles; qorder=7)
-solution = bem(surface_mesh, Rigid(), 150.0; incidence_angle=pi / 3, incidence_azimuth=0.4)
+mesh_path = joinpath(pkgdir(AcousticScattering), "docs", "src", "gallery",
+    "examples", "irregular_target.msh")
+surface_mesh = mesh(mesh_path; qorder=4)
+solution = bem(surface_mesh, Rigid(), 220.0;
+    incidence_angle=pi / 3, incidence_azimuth=0.4)
 fig = plot(solution; kind=:surface_field, field=:pressure_magnitude, show_edges=true,
-    colormap=:viridis,
-    figure=(size=(800, 520), figure_padding=(70, 20, 20, 20)),
-    axis=(xlabel="x (m)", ylabel="y (m)", zlabel="z (m)", zlabeloffset=70))
-Colorbar(fig.figure[1, 2], first(fig.plot.plots); label="Scattered pressure / incident amplitude")
+    colormap=:viridis, colorbar=true, incident_arrow=true,
+    figure=(size=(900, 580), figure_padding=(70, 20, 20, 20)),
+    axis=(xlabel="x (m)", ylabel="y (m)", zlabel="z (m)",
+        azimuth=-0.38pi, elevation=0.24pi))
 save("faceted_pressure.png", fig)
 nothing # hide
 ```
 
-![Scattered-pressure magnitude on a supplied rigid octahedral mesh.](faceted_pressure.png)
+![Scattered-pressure magnitude on a supplied asymmetric crystalline mesh.](faceted_pressure.png)
 
 This small mesh demonstrates the input and plotting workflow. Sharp-edge pressure requires local refinement for quantitative accuracy.

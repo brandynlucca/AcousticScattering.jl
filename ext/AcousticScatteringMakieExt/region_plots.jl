@@ -84,19 +84,26 @@ end
 @recipe(RegionSurfacePlot, pieces) do scene
     Attributes(colormap = _MAGNITUDE_COLORMAP, colorrange = nothing,
         interface_colors = [:steelblue, :orange, :seagreen, :orchid],
+        interface_alpha = Float64[], solid_interfaces = Int[],
         wireframe_interfaces = Int[], show_edges = false)
 end
 
 Makie.preferred_axis_type(::RegionSurfacePlot) = Axis3
 function Makie.preferred_axis_attributes(::Type{Axis3}, ::RegionSurfacePlot)
     (aspect = :data, xticks = LinearTicks(2), yticks = LinearTicks(2),
-        xticklabelsize = 14, yticklabelsize = 14, xlabeloffset = 25, ylabeloffset = 40)
+        xticklabelsize = 14, yticklabelsize = 14, xlabeloffset = 35, ylabeloffset = 55,
+        zlabeloffset = 60)
 end
 
 function Makie.plot!(plot::RegionSurfacePlot)
     pieces = plot.pieces[]
     colored = first(pieces).values !== nothing
-    values = colored ? reduce(vcat, [piece.values for piece in pieces]) : Float64[]
+    solid = plot.solid_interfaces[]
+    alphas = plot.interface_alpha[]
+    alpha_of(piece) = isempty(alphas) ? 1.0 : Float64(alphas[mod1(piece.index, length(alphas))])
+    values = colored ?
+             reduce(vcat, [piece.values for piece in pieces if !(piece.index in solid)];
+        init = Float64[]) : Float64[]
     finite_values = filter(isfinite, values)
     lo, hi = isempty(finite_values) ? (-1.0, 1.0) : extrema(finite_values)
     limits = plot.colorrange[] === nothing ? (lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)) :
@@ -108,14 +115,19 @@ function Makie.plot!(plot::RegionSurfacePlot)
         throw(ArgumentError("wireframe_interfaces must select displayed interfaces"))
     colored && !isempty(wireframes) &&
         throw(ArgumentError("wireframe_interfaces requires kind=:mesh"))
-    for piece in pieces
+    for piece in sort(collect(pieces); by = p -> -alpha_of(p), alg = Base.Sort.MergeSort)
         isempty(piece.faces) && continue
         geometry = GBMesh(piece.points, piece.faces)
-        color = colored ? piece.values : colors[mod1(piece.index, length(colors))]
+        alpha = alpha_of(piece)
+        flat = !colored || piece.index in solid
+        color = flat ? colors[mod1(piece.index, length(colors))] : piece.values
         if piece.index in wireframes
             wireframe!(plot, geometry; color)
+        elseif flat
+            mesh!(plot, geometry; color = alpha < 1 && !(color isa Tuple) ? (color, alpha) : color)
         else
-            mesh!(plot, geometry; color, colormap = plot.colormap, colorrange = limits)
+            mesh!(plot, geometry; color, colorrange = limits, transparency = alpha < 1,
+                colormap = alpha < 1 ? (plot.colormap[], alpha) : plot.colormap)
             plot.show_edges[] && wireframe!(plot, geometry; color = (:black, 0.25))
         end
     end
@@ -126,7 +138,8 @@ for (kind, default_field) in ((:mesh, nothing), (:surface_field, :pressure_magni
     @eval function _plot_solution(sol::_RegionSolution, ::Val{$(QuoteNode(kind))};
             field = $(QuoteNode(default_field)), interfaces = eachindex(sol.data.interfaces),
             cutaway = nothing, interface_labels = nothing,
-            legend::Bool = true, colorbar::Bool = true, kwargs...)
+            legend::Bool = true, colorbar::Bool = true, incident_arrow::Bool = false,
+            kwargs...)
         pieces = _region_plot_data(sol, field; interfaces, cutaway)
         names = interface_labels === nothing ?
                 ["Region $(p.index) / region $(p.exterior)" for p in pieces] :
@@ -144,10 +157,15 @@ for (kind, default_field) in ((:mesh, nothing), (:surface_field, :pressure_magni
                         for p in pieces]
             Legend(result.figure[1, 2], elements, names)
         elseif field !== nothing && colorbar
-            label = field === :pressure_phase ? "Total pressure phase (rad)" :
-                    "Total pressure / incident amplitude"
-            Colorbar(result.figure[1, 2], first(result.plot.plots); label)
+            field_mesh = first(filter(p -> p isa Makie.Mesh && p.color[] isa AbstractVector{<:Real},
+                result.plot.plots))
+            Colorbar(result.figure[1, 2]; colormap = result.plot.colormap[],
+                limits = field_mesh.colorrange[], label = _pressure_label(field))
+            colgap!(result.figure.layout, 1, 70)
         end
+        incident_arrow && _add_incident_arrow!(result.axis, sol,
+            reduce(vcat, [first(_inti_mesh_points_faces(interface.surface.data))
+                          for interface in sol.data.interfaces]))
         return result
     end
     @eval function _plot_solution!(ax, sol::_RegionSolution, ::Val{$(QuoteNode(kind))};

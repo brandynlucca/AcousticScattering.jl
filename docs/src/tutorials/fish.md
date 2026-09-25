@@ -34,9 +34,9 @@ target_strength(solution)
 -37.88780582080883
 ```
 
-Region 0 is exterior water, region 1 flesh and region 2 gas. `parents=[0,1]` places flesh in water and gas in flesh. All material contrasts refer to exterior water. Incidence is along `+y`, broadside to the long `x` axis; `z` measures height/depth.
+Region 0 is exterior water, region 1 flesh and region 2 gas. `parents=[0,1]` places flesh in water and gas in flesh. All material contrasts refer to exterior water. Incidence is along `+y`, broadside to the long `x` axis. `z` measures height/depth.
 
-`mesh` generates cubic triangles by default. `resolution` is the dimensionless edge size on the unit sphere before stretching; `tip_ratio=0.4` refines its local x poles. Physical edge sizes depend on stretching. `qorder` controls quadrature independently.
+`mesh` generates cubic triangles by default. `resolution` is the dimensionless edge size on the unit sphere before stretching. `tip_ratio=0.4` refines its local x poles. Physical edge sizes depend on stretching. `qorder` controls quadrature independently.
 
 ## View geometry and pressure
 

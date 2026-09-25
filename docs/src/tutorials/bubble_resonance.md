@@ -27,7 +27,7 @@ nothing # hide
 
 ![Broad and refined gas-bubble spectra with their complex-amplitude phase.](bubble_resonance.png)
 
-The upper panels show target strength; the lower panels show wrapped amplitude phase in radians. Replot either saved sweep with `plot(zoom; quantity=:magnitude)` to see amplitude in meters without solving again. Phase follows the package's [time convention](@ref conventions).
+The upper panels show target strength. The lower panels show wrapped amplitude phase in radians. Replot either saved sweep with `plot(zoom; quantity=:magnitude)` to see amplitude in meters without solving again. Phase follows the package's [time convention](@ref conventions).
 
 ## Check the peak location
 

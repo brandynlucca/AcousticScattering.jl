@@ -13,7 +13,7 @@ surfaces = [
 materials = [FluidFilled(1.1, 0.95), FluidFilled(1.4, 1.15), FluidFilled(1.8, 0.75)]
 solution = bem(surfaces, materials, 180.0; parents=[0, 1, 2], incidence_angle=pi / 3)
 fig = plot(solution; kind=:surface_field, interfaces=[3], colormap=:viridis,
-    figure=(size=(800, 520),))
+    incident_arrow=true, figure=(size=(800, 520),))
 plot!(fig.axis, solution; kind=:mesh, interfaces=[1, 2], wireframe_interfaces=[1, 2],
     interface_colors=[(:steelblue, 0.5), (:darkorange, 0.5)])
 save("layered_pressure.png", fig)
@@ -22,5 +22,5 @@ nothing # hide
 
 ![Pressure on an offset core surrounded by two complete nested interfaces.](layered_pressure.png)
 
-Pressure is normalized by incident amplitude. Refine these visualization meshes before interpreting fine spatial features.
-
+The plotted ratio $|p|/|p_\mathrm{inc}|$ is dimensionless. Refine these visualization meshes
+before interpreting fine spatial features.

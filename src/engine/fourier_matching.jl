@@ -2,7 +2,7 @@
 
 using NLsolve: nlsolve
 using ADTypes: AutoForwardDiff
-using QuadGK: gauss, quadgk
+using QuadGK: gauss
 
 """
     Irregular(r, order; npoints=8*order+16)
@@ -140,32 +140,35 @@ function mapping_jacobian_squared(mapping::ConformalMapping, w::Real; u::Real = 
     return abs2(_mapping_derivative(mapping, w; u))
 end
 
-# Eq. (30)'s boundary-value function. `scale<1` is DiPerna Appendix A's continuation homotopy.
-function _boundary_value(body::Irregular, delta_c, delta_s, w::Real, scale::Real)
-    theta = w
-    for l in eachindex(delta_c)
-        theta += delta_c[l] * cos(l * w) + delta_s[l] * sin(l * w)
+# Eq. (30)'s boundary-value function at every node. `scale<1` is DiPerna Appendix A's continuation homotopy.
+function _boundary_values(body::Irregular, delta_c, delta_s, nodes, cosl, sinl, scale::Real)
+    harmonics = complex.(body.rc, body.rs) ./ 2
+    return map(eachindex(nodes)) do q
+        theta = nodes[q]
+        for l in eachindex(delta_c)
+            theta += delta_c[l] * cosl[l, q] + delta_s[l] * sinl[l, q]
+        end
+        eith = cis(theta)
+        eith_inv = conj(eith)
+        value = body.a * eith
+        up = eith
+        down = eith
+        for n in eachindex(harmonics)
+            up *= eith
+            down *= eith_inv
+            value += scale * (conj(harmonics[n]) * up + harmonics[n] * down)
+        end
+        value
     end
-    eith = cis(theta)
-    value = body.a * eith
-    for n in eachindex(body.rc)
-        Rn = complex(body.rc[n], body.rs[n]) / 2
-        value += scale * (conj(Rn) * eith^(1 + n) + Rn * eith^(1 - n))
-    end
-    return value
 end
 
-# Real-vector NLsolve residual packing Eq. (30)'s j>1 complex constraints I_j(delta)=0.
+# Real-vector NLsolve residual packing Eq. (30)'s j>1 complex constraints I_j(delta)=0. `kernel[j+order+1,:]` is `weights*cis(-j*nodes)/(2*pi)`.
 function _mapping_residual!(F, x, body::Irregular, order::Integer,
-        scale::Real, nodes, weights)
-    delta_c = @view x[1:order]
-    delta_s = @view x[(order + 1):(2order)]
+        scale::Real, nodes, cosl, sinl, kernel)
+    values = _boundary_values(body, @view(x[1:order]), @view(x[(order + 1):(2order)]),
+        nodes, cosl, sinl, scale)
     for j in 2:(order + 1)
-        total = zero(ComplexF64)
-        for (w, wt) in zip(nodes, weights)
-            total += wt * cis(-j * w) * _boundary_value(body, delta_c, delta_s, w, scale)
-        end
-        total /= 2π
+        total = sum(q -> kernel[j + order + 1, q] * values[q], eachindex(values))
         k = 2 * (j - 2)
         F[k + 1] = real(total)
         F[k + 2] = imag(total)
@@ -200,11 +203,14 @@ function solve_mapping(body::Irregular, order::Integer;
     continuation_steps >= 1 ||
         throw(ArgumentError("continuation_steps must be at least 1, got $continuation_steps"))
     nodes, weights = _full_period_quadrature(npoints)
+    cosl = [cos(l * w) for l in 1:order, w in nodes]
+    sinl = [sin(l * w) for l in 1:order, w in nodes]
+    kernel = [wt * cis(-j * w) / 2π for j in (-order):(order + 1), (w, wt) in zip(nodes, weights)]
     x = zeros(Float64, 2order)
     for step in 1:continuation_steps
         scale = step / continuation_steps
         result = nlsolve(
-            (F, y) -> _mapping_residual!(F, y, body, order, scale, nodes, weights),
+            (F, y) -> _mapping_residual!(F, y, body, order, scale, nodes, cosl, sinl, kernel),
             x; nlsolve_kwargs...)
         result.f_converged || result.x_converged ||
             throw(ArgumentError(
@@ -214,13 +220,10 @@ function solve_mapping(body::Irregular, order::Integer;
     end
     delta_c = x[1:order]
     delta_s = x[(order + 1):(2order)]
+    values = _boundary_values(body, delta_c, delta_s, nodes, cosl, sinl, 1.0)
     c = Vector{ComplexF64}(undef, order + 2)
     for (idx, j) in enumerate(1:-1:(-(order)))
-        total = zero(ComplexF64)
-        for (w, wt) in zip(nodes, weights)
-            total += wt * cis(-j * w) * _boundary_value(body, delta_c, delta_s, w, 1.0)
-        end
-        c[idx] = total / 2π
+        c[idx] = sum(q -> kernel[j + order + 1, q] * values[q], eachindex(values))
     end
     return ConformalMapping(body, delta_c, delta_s, c)
 end
@@ -261,34 +264,187 @@ function _incident_coefficients(n_max::Integer, m_max::Integer, k::Real, inciden
     return a
 end
 
+# --- Fixed-node boundary-matching quadrature (Eqs. 52-53, 69-70, 76-77) ---
+
 """
-    _boundary_matrices(mapping, k, m; n_max, rtol=1e-8)
+    _FMNodes
+
+The conformal mapping's geometry at fixed Gauss-Legendre nodes `w in (0,pi)` (`weight`, `cosw`,
+`sinw`), shared by every matrix entry, order `m` and boundary. `r` is the distance from the origin,
+`r_u` its `u`-derivative, `costheta` the Legendre argument `g/r`, `dcosdu` its `u`-derivative and
+`jacobian` the mapping's `|G'|` (Eq. (31)).
+"""
+struct _FMNodes
+    weight::Vector{Float64}
+    cosw::Vector{Float64}
+    sinw::Vector{Float64}
+    r::Vector{Float64}
+    r_u::Vector{Float64}
+    costheta::Vector{Float64}
+    dcosdu::Vector{Float64}
+    jacobian::Vector{Float64}
+end
+
+function _fm_nodes(mapping::ConformalMapping, npoints::Integer)
+    w, weight = gauss(npoints, 0.0, π)
+    g = similar(w)
+    f = similar(w)
+    g_u = similar(w)
+    f_u = similar(w)
+    for (q, wq) in enumerate(w)
+        g[q], f[q] = mapping_surface(mapping, wq)
+        dG = _mapping_derivative(mapping, wq)
+        g_u[q], f_u[q] = real(dG), imag(dG)
+    end
+    r = hypot.(f, g)
+    r_u = (f .* f_u .+ g .* g_u) ./ r
+    # Clamp roundoff at the poles (w=0,pi), where the Legendre argument needs |g/r|<=1 exactly.
+    costheta = clamp.(g ./ r, -1.0, 1.0)
+    dcosdu = (r .* g_u .- g .* r_u) ./ r .^ 2
+    return _FMNodes(weight, cos.(w), sin.(w), r, r_u, costheta, dcosdu, hypot.(g_u, f_u))
+end
+
+# Node count that resolves the highest test order through the mapping's angular stretch, and the radial oscillation.
+function _initial_node_count(mapping::ConformalMapping, k::Real, n_max::Integer)
+    w = range(0, π; length = 181)
+    surface = [mapping_surface(mapping, wi) for wi in w]
+    theta = [atan(abs(f), g) for (g, f) in surface]
+    stretch = maximum(abs, diff(theta)) / step(w)
+    kr = k * maximum(hypot(g, f) for (g, f) in surface)
+    return max(64, ceil(Int, 4 * (n_max + 1) * max(stretch, 1.0) + 2 * kr))
+end
+
+# Spherical Bessel and Hankel functions of orders `0:n_max` (and their argument derivatives) at `k*r` on the nodes, one row per order.
+function _radial_table(nodes::_FMNodes, k::Real, n_max::Integer)
+    x = k .* nodes.r
+    j = [js(n, xq) for n in 0:(n_max + 1), xq in x]
+    h = j .+ im .* [ys(n, xq) for n in 0:(n_max + 1), xq in x]
+    slope(f) = [(n / x[q]) * f[n + 1, q] - f[n + 2, q] for n in 0:n_max, q in eachindex(x)]
+    return (; j = j[1:(n_max + 1), :], h = h[1:(n_max + 1), :], jd = slope(j), hd = slope(h))
+end
+
+# `Pₗᵐ(x)` for `l = m:n_max` by the same recurrence as `legendre_p(l, m, x)`.
+function _legendre_column!(col, m::Integer, n_max::Integer, x::Real)
+    pmm = 1.0
+    if m > 0
+        somx2 = sqrt(1 - x^2)
+        fact = 1.0
+        for _ in 1:m
+            pmm *= -fact * somx2
+            fact += 2
+        end
+    end
+    col[1] = pmm
+    n_max == m && return col
+    col[2] = x * (2m + 1) * pmm
+    for l in (m + 2):n_max
+        col[l - m + 1] = ((2l - 1) * x * col[l - m] - (l + m - 1) * col[l - m - 1]) / (l - m)
+    end
+    return col
+end
+
+# Test functions `Pₙᵐ(cos w) sin w`, source functions `Pₙᵐ(g/r)` and their derivative in the argument, one row per order `n = m:n_max`.
+function _legendre_tables(nodes::_FMNodes, m::Integer, n_max::Integer)
+    npoints = length(nodes.weight)
+    nn = n_max - m + 1
+    test = Matrix{Float64}(undef, nn, npoints)
+    source = Matrix{Float64}(undef, nn, npoints)
+    dsource = Matrix{Float64}(undef, nn, npoints)
+    for q in 1:npoints
+        _legendre_column!(view(test, :, q), m, n_max, nodes.cosw[q])
+        test[:, q] .*= nodes.sinw[q]
+        x = nodes.costheta[q]
+        _legendre_column!(view(source, :, q), m, n_max, x)
+        for i in 1:nn
+            l = m + i - 1
+            previous = i > 1 ? source[i - 1, q] : 0.0
+            dsource[i, q] = ((l + m) * previous - l * x * source[i, q]) / (1 - x^2)
+        end
+    end
+    return (; test, source, dsource)
+end
+
+# Normal-derivative source terms of Eq. (66), the product rule through `r(u,w)` and the Legendre argument.
+function _normal_terms(radial_value, radial_slope, nodes::_FMNodes, tables, k::Real)
+    return radial_value .* tables.dsource .* nodes.dcosdu' .+
+           radial_slope .* tables.source .* (k .* nodes.r_u)'
+end
+
+# Matrices for one azimuthal order `m` (test rows, source columns) on the given nodes.
+function _fm_blocks(kind::Symbol, nodes::_FMNodes, exterior, interior, k::Real, k1::Real,
+        m::Integer, n_max::Integer)
+    tables = _legendre_tables(nodes, m, n_max)
+    order = (m + 1):(n_max + 1)
+    weighted = tables.test .* nodes.weight'
+    normal = weighted ./ nodes.jacobian'
+    soft(radial) = weighted * transpose(radial[order, :] .* tables.source)
+    function hard(value, slope, kk)
+        terms = _normal_terms(value[order, :], slope[order, :], nodes, tables, kk)
+        return normal * transpose(terms)
+    end
+    if kind === :pressure_release
+        return (; R = soft(exterior.j), Q = soft(exterior.h))
+    elseif kind === :rigid
+        return (; R = hard(exterior.j, exterior.jd, k), Q = hard(exterior.h, exterior.hd, k))
+    elseif kind === :interior
+        return (; S = soft(exterior.j), Sp = hard(exterior.j, exterior.jd, k))
+    else
+        return (; R = soft(exterior.j), Q = soft(exterior.h),
+            Rp = hard(exterior.j, exterior.jd, k), Qp = hard(exterior.h, exterior.hd, k),
+            S = soft(interior.j), Sp = hard(interior.j, interior.jd, k1))
+    end
+end
+
+function _fm_assemble(kind::Symbol, mapping::ConformalMapping, k::Real, k1::Real,
+        orders::AbstractRange, n_max::Integer, npoints::Integer)
+    nodes = _fm_nodes(mapping, npoints)
+    exterior = _radial_table(nodes, k, n_max)
+    interior = kind === :fluid ? _radial_table(nodes, k1, n_max) : nothing
+    return [_fm_blocks(kind, nodes, exterior, interior, k, k1, m, n_max) for m in orders]
+end
+
+# Largest entrywise change between two assemblies, on the row/column-equilibrated scale the solves use.
+function _blocks_change(new, old)
+    return maximum(zip(new, old)) do (block_new, block_old)
+        maximum(keys(block_new)) do name
+            A = block_new[name]
+            col_scale, row_scale = _equilibration(A)
+            maximum(abs.(A .- block_old[name]) ./ col_scale' ./ row_scale)
+        end
+    end
+end
+
+# Doubles the Gauss-Legendre node count until successive assemblies agree to `rtol` or `maxevals` nodes is reached.
+function _fm_blocks_converged(kind::Symbol, mapping::ConformalMapping, k::Real, k1::Real,
+        orders::AbstractRange, n_max::Integer, rtol::Real, maxevals::Integer)
+    npoints = min(_initial_node_count(mapping, max(k, k1), n_max), maxevals)
+    blocks = _fm_assemble(kind, mapping, k, k1, orders, n_max, npoints)
+    while npoints < maxevals
+        npoints = min(2npoints, maxevals)
+        refined = _fm_assemble(kind, mapping, k, k1, orders, n_max, npoints)
+        agreed = _blocks_change(refined, blocks) <= rtol
+        blocks = refined
+        agreed && break
+    end
+    return blocks
+end
+
+"""
+    _boundary_matrices(mapping, k, m; n_max, rtol=1e-6, maxevals=1000)
 
 Assemble the pressure-release boundary matrices `R`, `Q` (Eqs. (52)-(53)) for one azimuthal
 order `m`, truncated to test/source orders `n, n2 = m:n_max`. `R[i,j]`/`Q[i,j]` correspond to
 test order `n = m+i-1` and source order `n2 = m+j-1`. Eqs. (52)-(53) print both indices as "n",
 but Eq. (51)'s explicit sum over `n` and Eq. (54)'s explicit matrix inverse only make sense if
 these are two independent (test, source) indices, so that is how they are implemented here.
+
+The integrals over `w in (0,pi)` use fixed Gauss-Legendre nodes shared by every entry, and the node
+count doubles until the equilibrated matrices change by less than `rtol`, up to `maxevals` nodes.
 """
 function _boundary_matrices(mapping::ConformalMapping, k::Real, m::Integer;
         n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    ns = m:n_max
-    nn = length(ns)
-    R = zeros(ComplexF64, nn, nn)
-    Q = zeros(ComplexF64, nn, nn)
-    for (i, n) in enumerate(ns), (j, n2) in enumerate(ns)
-
-        (RQ, _) = quadgk(0.0, π; rtol, maxevals) do w
-            g, f = mapping_surface(mapping, w)
-            r = hypot(f, g)
-            # Clamp roundoff at the poles (w=0,pi), where legendre_p needs |g/r|<=1 exactly.
-            costheta = clamp(g / r, -1.0, 1.0)
-            weight = legendre_p(n, m, cos(w)) * sin(w) * legendre_p(n2, m, costheta)
-            kr = k * r
-            SVector(js(n2, kr) * weight, hs(n2, kr) * weight)
-        end
-        R[i, j], Q[i, j] = RQ
-    end
+    (; R, Q) = only(_fm_blocks_converged(
+        :pressure_release, mapping, k, k, m:m, n_max, rtol, maxevals))
     return R, Q
 end
 
@@ -303,11 +459,46 @@ unscaled `pinv` would wrongly truncate the small-but-dominant low-`n` terms as n
 only compares singular values against the matrix's own largest one.
 """
 function _equilibrated_solve(A::AbstractMatrix, rhs)
-    col_scale = vec(maximum(abs, A; dims = 1))
-    scaled = A ./ col_scale'
-    row_scale = vec(maximum(abs, scaled; dims = 2))
-    equilibrated = scaled ./ row_scale
+    col_scale, row_scale = _equilibration(A)
+    equilibrated = A ./ col_scale' ./ row_scale
     return (pinv(equilibrated) * (rhs ./ row_scale)) ./ col_scale
+end
+
+# Column then row maximum-magnitude scales that equilibrate `A`.
+function _equilibration(A::AbstractMatrix)
+    col_scale = vec(maximum(abs, A; dims = 1))
+    row_scale = vec(maximum(abs, A ./ col_scale'; dims = 2))
+    return col_scale, row_scale
+end
+
+# `n_max` and `m_max` are reduced by this step for the consistency solve behind `_fm_convergence`.
+const _FM_CHECK_STEP = 2
+const _FM_CONVERGENCE_TOLERANCE = 1e-2
+
+"""
+    _FMTransition
+
+Per-`m` transition matrices `full` at the requested `(n_max, m_max)`, and `check` at
+`(n_max - 2, min(m_max, n_max - 2))` (`nothing` when `n_max` is too small to reduce). Both come from
+leading blocks of the same assembled matrices, so `check` costs no extra quadrature.
+"""
+struct _FMTransition
+    full::Vector{Matrix{ComplexF64}}
+    check::Union{Nothing, Vector{Matrix{ComplexF64}}}
+end
+
+# `assemble(m)` returns `nn -> T`, the transition matrix from the leading `nn x nn` blocks of the quadrature matrices at order `m`.
+function _transition_operators(assemble, m_max::Integer, n_max::Integer)
+    n_check = n_max - _FM_CHECK_STEP
+    m_check = min(m_max, n_check)
+    full = Matrix{ComplexF64}[]
+    check = Matrix{ComplexF64}[]
+    for m in 0:m_max
+        solve = assemble(m)
+        push!(full, solve(n_max - m + 1))
+        n_check >= 1 && m <= m_check && push!(check, solve(n_check - m + 1))
+    end
+    return _FMTransition(full, n_check >= 1 ? check : nothing)
 end
 
 """
@@ -322,9 +513,11 @@ is cheap.
 """
 function _pressure_release_transition(mapping::ConformalMapping, k::Real;
         m_max::Integer, n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    return map(0:m_max) do m
-        R, Q = _boundary_matrices(mapping, k, m; n_max, rtol, maxevals)
-        -_equilibrated_solve(Q, R)
+    blocks = _fm_blocks_converged(
+        :pressure_release, mapping, k, k, 0:m_max, n_max, rtol, maxevals)
+    return _transition_operators(m_max, n_max) do m
+        (; R, Q) = blocks[m + 1]
+        nn -> -_equilibrated_solve(Q[1:nn, 1:nn], R[1:nn, 1:nn])
     end
 end
 
@@ -354,13 +547,51 @@ function solve_pressure_release(mapping::ConformalMapping, k::Real, incidence_an
 end
 
 # Apply a per-m transition operator (Vector{Matrix{ComplexF64}}) to incident coefficients a[n+1,m+1].
-function _apply_transition(transition, a, n_max::Integer, m_max::Integer)
+function _apply_transition(transition::_FMTransition, a, n_max::Integer, m_max::Integer)
+    return _apply_transition(transition.full, a, n_max, m_max)
+end
+
+function _apply_transition(transition::AbstractVector, a, n_max::Integer, m_max::Integer)
     b = zeros(ComplexF64, n_max + 1, m_max + 1)
     for m in 0:m_max
         av = @view a[(m + 1):(n_max + 1), m + 1]
         b[(m + 1):(n_max + 1), m + 1] = transition[m + 1] * av
     end
     return b
+end
+
+# Coefficients of the reduced-truncation solve, or `nothing` when `n_max` is too small to reduce.
+function _check_coefficients(transition::_FMTransition, k::Real, incidence_angle::Real,
+        n_max::Integer, m_max::Integer)
+    transition.check === nothing && return nothing
+    n_check = n_max - _FM_CHECK_STEP
+    m_check = min(m_max, n_check)
+    a = _incident_coefficients(n_check, m_check, k, incidence_angle)
+    return _apply_transition(transition.check, a, n_check, m_check)
+end
+
+"""
+    _fm_convergence(b, b_check, k)
+
+Largest change in the far-field amplitude between the solution `b` and the reduced-truncation
+solution `b_check`, over 13 polar angles at azimuths `0`, `pi/2` and `pi`, relative to the peak
+amplitude of `b` over those directions. `NaN` when there is no reduced solution.
+"""
+function _fm_convergence(b::AbstractMatrix, b_check, k::Real)
+    b_check === nothing && return NaN
+    directions = [(angle, azimuth)
+                  for angle in range(0, π; length = 13), azimuth in (0.0, π / 2, π)]
+    full = [fourier_matching_amplitude(b, k, angle, azimuth) for (angle, azimuth) in directions]
+    reduced = [fourier_matching_amplitude(b_check, k, angle, azimuth)
+               for (angle, azimuth) in directions]
+    peak = maximum(abs, full)
+    return iszero(peak) ? 0.0 : maximum(abs.(full .- reduced)) / peak
+end
+
+function _warn_fm_convergence(convergence::Real)
+    convergence > _FM_CONVERGENCE_TOLERANCE || return nothing
+    @warn "Fourier matching is not converged in its truncation orders. Reducing n_max and m_max by $_FM_CHECK_STEP changes the far-field amplitude by $(round(convergence; sigdigits = 2)) of its peak (tolerance $_FM_CONVERGENCE_TOLERANCE). Larger n_max does not always help for elongated bodies, so vary n_max and mapping_order and compare against bem before trusting the result."
+    return nothing
 end
 
 """
@@ -406,31 +637,7 @@ w.r.t. `u`, by the product rule through both `r(u,w)` and the Legendre argument 
 """
 function _rigid_boundary_matrices(mapping::ConformalMapping, k::Real, m::Integer;
         n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    ns = m:n_max
-    nn = length(ns)
-    R = zeros(ComplexF64, nn, nn)
-    Q = zeros(ComplexF64, nn, nn)
-    for (i, n) in enumerate(ns), (j, n2) in enumerate(ns)
-
-        (RQ, _) = quadgk(0.0, π; rtol, maxevals) do w
-            g, f = mapping_surface(mapping, w)
-            dG = _mapping_derivative(mapping, w)
-            g_u, f_u = real(dG), imag(dG)
-            r = hypot(f, g)
-            r_u = (f * f_u + g * g_u) / r
-            # Clamp roundoff at the poles (w=0,pi), where legendre_p needs |g/r|<=1 exactly.
-            costheta = clamp(g / r, -1.0, 1.0)
-            dcosdu = (r * g_u - g * r_u) / r^2
-            test = legendre_p(n, m, cos(w)) * sin(w) / abs(dG)
-            dPdx = ForwardDiff.derivative(x -> legendre_p(n2, m, x), costheta)
-            Pval = legendre_p(n2, m, costheta)
-            kr = k * r
-            js_term = (js(n2, kr) * dPdx * dcosdu + jsd(n2, kr) * k * r_u * Pval) * test
-            hs_term = (hs(n2, kr) * dPdx * dcosdu + hsd(n2, kr) * k * r_u * Pval) * test
-            SVector(js_term, hs_term)
-        end
-        R[i, j], Q[i, j] = RQ
-    end
+    (; R, Q) = only(_fm_blocks_converged(:rigid, mapping, k, k, m:m, n_max, rtol, maxevals))
     return R, Q
 end
 
@@ -443,9 +650,10 @@ The rigid transition operator (Eq. (71), one `T_m = -Q'^+ R'` matrix per azimuth
 """
 function _rigid_transition(mapping::ConformalMapping, k::Real;
         m_max::Integer, n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    return map(0:m_max) do m
-        R, Q = _rigid_boundary_matrices(mapping, k, m; n_max, rtol, maxevals)
-        -_equilibrated_solve(Q, R)
+    blocks = _fm_blocks_converged(:rigid, mapping, k, k, 0:m_max, n_max, rtol, maxevals)
+    return _transition_operators(m_max, n_max) do m
+        (; R, Q) = blocks[m + 1]
+        nn -> -_equilibrated_solve(Q[1:nn, 1:nn], R[1:nn, 1:nn])
     end
 end
 
@@ -487,34 +695,8 @@ stay regular at the origin (Eq. (41)).
 """
 function _interior_boundary_matrices(mapping::ConformalMapping, k1::Real, m::Integer;
         n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
-    ns = m:n_max
-    nn = length(ns)
-    S = zeros(ComplexF64, nn, nn)
-    Sprime = zeros(ComplexF64, nn, nn)
-    for (i, n) in enumerate(ns), (j, n2) in enumerate(ns)
-
-        (SS, _) = quadgk(0.0, π; rtol, maxevals) do w
-            g, f = mapping_surface(mapping, w)
-            dG = _mapping_derivative(mapping, w)
-            g_u, f_u = real(dG), imag(dG)
-            r = hypot(f, g)
-            r_u = (f * f_u + g * g_u) / r
-            costheta = clamp(g / r, -1.0, 1.0)
-            dcosdu = (r * g_u - g * r_u) / r^2
-            test_p = legendre_p(n, m, cos(w)) * sin(w)
-            Pval = legendre_p(n2, m, costheta)
-            k1r = k1 * r
-            j_val = js(n2, k1r)
-            dPdx = ForwardDiff.derivative(x -> legendre_p(n2, m, x), costheta)
-            S_term = j_val * Pval * test_p
-            Sprime_term = (j_val * dPdx * dcosdu + jsd(n2, k1r) * k1 * r_u * Pval) *
-                          test_p /
-                          abs(dG)
-            SVector(S_term, Sprime_term)
-        end
-        S[i, j], Sprime[i, j] = SS
-    end
-    return S, Sprime
+    (; S, Sp) = only(_fm_blocks_converged(:interior, mapping, k1, k1, m:m, n_max, rtol, maxevals))
+    return S, Sp
 end
 
 """
@@ -529,15 +711,17 @@ function _fluid_transition(mapping::ConformalMapping, k::Real,
         density_contrast::Real, soundspeed_contrast::Real;
         m_max::Integer, n_max::Integer, rtol::Real = 1e-6, maxevals::Integer = 1000)
     k1 = k / soundspeed_contrast
-    return map(0:m_max) do m
-        R, Q = _boundary_matrices(mapping, k, m; n_max, rtol, maxevals)
-        Rp, Qp = _rigid_boundary_matrices(mapping, k, m; n_max, rtol, maxevals)
-        S, Sp = _interior_boundary_matrices(mapping, k1, m; n_max, rtol, maxevals)
-        SinvQ = _equilibrated_solve(S, Q)
-        SinvR = _equilibrated_solve(S, R)
-        M1 = density_contrast .* Qp .- Sp * SinvQ
-        M2 = Sp * SinvR .- density_contrast .* Rp
-        _equilibrated_solve(M1, M2)
+    blocks = _fm_blocks_converged(:fluid, mapping, k, k1, 0:m_max, n_max, rtol, maxevals)
+    return _transition_operators(m_max, n_max) do m
+        (; R, Q, Rp, Qp, S, Sp) = blocks[m + 1]
+        function (nn)
+            ix = 1:nn
+            SinvQ = _equilibrated_solve(S[ix, ix], Q[ix, ix])
+            SinvR = _equilibrated_solve(S[ix, ix], R[ix, ix])
+            M1 = density_contrast .* Qp[ix, ix] .- Sp[ix, ix] * SinvQ
+            M2 = Sp[ix, ix] * SinvR .- density_contrast .* Rp[ix, ix]
+            _equilibrated_solve(M1, M2)
+        end
     end
 end
 

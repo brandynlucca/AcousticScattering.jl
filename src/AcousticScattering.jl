@@ -14,7 +14,7 @@ using LinearMaps: LinearMap
 using IterativeSolvers: IterativeSolvers
 using NLsolve: NLsolve
 using ForwardDiff: ForwardDiff
-using StaticArrays: SVector, SMatrix
+using StaticArrays: SVector, SMatrix, MVector
 using PrecompileTools: @compile_workload
 
 # Must precede every include below: Spheroid subtypes this directly.

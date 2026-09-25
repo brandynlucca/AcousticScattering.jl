@@ -18,4 +18,14 @@ using Test
     @test CairoMakie.plot(modal_solution; kind = :mesh) isa
           CairoMakie.Makie.FigureAxisPlot
     @test_throws ArgumentError CairoMakie.plot(modal_solution; kind = :surface_field)
+
+    fluid_solution = modal(body, FluidFilled(2.0, 0.65), k; m_max = 2)
+    slices = ((axis = :z, at = 0.0, project_to = -0.03),
+        (axis = :x, at = 0.003, project_to = 0.03))
+    field_slices = CairoMakie.plot(fluid_solution; kind = :field_slices,
+        slices, extent = 0.025, resolution = 7, colorbar = false)
+    @test field_slices isa CairoMakie.Makie.FigureAxisPlot
+    bad_slice = ((axis = :bad, at = 0.0, project_to = 0.03),)
+    @test_throws ArgumentError CairoMakie.plot(fluid_solution; kind = :field_slices,
+        slices = bad_slice, extent = 0.025, resolution = 7)
 end

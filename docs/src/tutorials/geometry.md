@@ -54,7 +54,7 @@ bent_kirchhoff = kirchhoff(bent, Rigid(), wavenumber; incidence_angle = pi / 2)
 
 Modal applies a near-broadside Fresnel correction. Kirchhoff integrates the curved illuminated surface. Their difference includes model error, especially at this modest frequency. `mfs(bent, ...)` uses a lateral-surface grid with `n_s` and `n_phi` controls that omits the ends. For a closed cylinder, use `mesh(bent; method=:full, ...)` and pass that mesh to `bem` or `mfs`. Full BEM includes rigid, pressure-release and fluid/gas interiors. Axisymmetric methods require a straight cylinder.
 
-Full meshes fix the bend in the `xy` plane. The midpoint is at the origin, its tangent is along `+x`, and the centerline bends toward `+y`. Incidence uses polar angle from `+x` and azimuth from `+y` toward `+z`; the geometry does not rotate when these angles change. `length` is the circular centerline's arc length. Positive `endcap_depth` adds a half-spheroid at each endpoint, oriented along its tangent; zero gives flat circular ends. See [Closed bent-cylinder scattering](@ref bent-cylinder-tutorial) for oblique and bistatic examples.
+Full meshes fix the bend in the `xy` plane. The midpoint is at the origin, its tangent is along `+x`, and the centerline bends toward `+y`. Incidence uses polar angle from `+x` and azimuth from `+y` toward `+z`. The geometry does not rotate when these angles change. `length` is the circular centerline's arc length. Positive `endcap_depth` adds a half-spheroid at each endpoint, oriented along its tangent. Zero gives flat circular ends. See [Closed bent-cylinder scattering](@ref bent-cylinder-tutorial) for oblique and bistatic examples.
 
 ## Mesh construction
 
@@ -76,7 +76,7 @@ solution = bem(surface_mesh, Rigid(), 100.0; incidence_angle = pi / 3)
 target_strength(solution; direction = [0.0, 1.0, 0.0])
 ```
 
-Use `FluidFilled(g, h)` or `GasFilled(g, h)` for a homogeneous interior, where `g` and `h` are the interior/exterior density and sound-speed ratios. Units are converted to m, where the exterior wavenumber is always in inverse meters. Surface physical tags and names remain available in `surface_mesh.body.labels`, one vector of tag/name pairs per element. Labels identify surface patches; they do not create additional materials or nested interfaces.
+Use `FluidFilled(g, h)` or `GasFilled(g, h)` for a homogeneous interior, where `g` and `h` are the interior/exterior density and sound-speed ratios. Units are converted to m, where the exterior wavenumber is always in inverse meters. Surface physical tags and names remain available in `surface_mesh.body.labels`, one vector of tag/name pairs per element. Labels identify surface patches. They do not create additional materials or nested interfaces.
 
 For in-memory geometry, pass a `3 × N` coordinate matrix and a connectivity matrix with one triangle per column. Triangle connectivity uses Gmsh ordering with 3, 6 or 10 nodes. For example, this outward-oriented tetrahedron has coordinates in millimeters:
 

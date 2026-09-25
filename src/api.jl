@@ -1006,7 +1006,8 @@ end
 Result of [`fourier`](@ref). Post-process with [`target_strength`](@ref)`(sol; angle,
 azimuth)` or [`scattering_amplitude`](@ref)`(sol; angle, azimuth)` (backscatter by default, same
 convention as axisymmetric [`bem`](@ref)/[`mfs`](@ref)). [`diagnostics`](@ref) reports the
-conformal mapping's admissibility and the truncation orders used.
+mapping's admissibility, the truncation orders and a truncation-consistency check. `b_check` holds
+the reduced-truncation coefficients.
 """
 struct FMSolution <: AbstractSolution
     body::AbstractBody
@@ -1015,6 +1016,7 @@ struct FMSolution <: AbstractSolution
     mapping::ConformalMapping
     b::Matrix{ComplexF64}
     incidence_angle::Float64
+    b_check::Union{Nothing, Matrix{ComplexF64}}
 end
 
 """
@@ -1027,10 +1029,14 @@ profile to a coordinate system where the mapped surface is exactly circular, the
 boundary condition using spherical wave functions. See [Fourier matching](@ref
 fourier-matching-theory). Supports [`Rigid`](@ref), [`PressureRelease`](@ref) and
 [`FluidFilled`](@ref) boundaries. `mapping_order` and `continuation_steps` control the conformal
-mapping (see `solve_mapping`). `m_max`/`n_max` truncate the modal series and `rtol`/
-`maxevals` control the boundary-matching quadrature. Post-process with
+mapping (see `solve_mapping`). `m_max`/`n_max` truncate the modal series. `rtol` and `maxevals` set the tolerance and maximum
+node count of the boundary-matching quadrature. Post-process with
 [`target_strength`](@ref)`(sol; angle, azimuth)` or [`scattering_amplitude`](@ref)`(sol; angle,
 azimuth)`, defaulting to backscatter.
+
+Each solve is repeated at `n_max` and `m_max` reduced by 2. A warning is emitted when the far-field
+amplitude changes by more than `1e-2` of its peak, and the change is reported by
+[`diagnostics`](@ref) as `convergence`. See [Fourier matching](@ref fourier-matching-theory).
 """
 function fourier(body::Irregular, boundary::AbstractBoundaryCondition, k::Real;
         incidence_angle::Real = π / 2, continuation_steps::Integer = 8,
@@ -1045,7 +1051,9 @@ function fourier(body::Irregular, boundary::AbstractBoundaryCondition, k::Real;
     transition = _boundary_transition(mapping, k, boundary; m_max, n_max, rtol, maxevals)
     a = _incident_coefficients(n_max, m_max, k, incidence_angle)
     b = _apply_transition(transition, a, n_max, m_max)
-    return FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle))
+    b_check = _check_coefficients(transition, k, incidence_angle, n_max, m_max)
+    _warn_fm_convergence(_fm_convergence(b, b_check, k))
+    return FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
 end
 
 """
@@ -1064,7 +1072,8 @@ defaults and their validated aspect-ratio range.
 function fourier(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
     irregular_body = Irregular(body.radius, Float64[], Float64[])
     sol = fourier(irregular_body, boundary, k; kwargs...)
-    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle)
+    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle,
+        sol.b_check)
 end
 
 function fourier(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
@@ -1075,7 +1084,8 @@ function fourier(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
         1 / sqrt((cos(theta) / body.a)^2 + (sin(theta) / body.b)^2)
     end
     sol = fourier(irregular_body, boundary, k; mapping_order, kwargs...)
-    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle)
+    return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle,
+        sol.b_check)
 end
 
 function target_strength(sol::FMSolution; angle::Real = π - sol.incidence_angle, azimuth::Real = π)
@@ -1088,8 +1098,11 @@ function scattering_amplitude(
 end
 
 function diagnostics(sol::FMSolution)
+    convergence = _fm_convergence(sol.b, sol.b_check, sol.k)
     (; admissible = is_admissible(sol.mapping),
-        m_max = size(sol.b, 2) - 1, n_max = size(sol.b, 1) - 1)
+        m_max = size(sol.b, 2) - 1, n_max = size(sol.b, 1) - 1, convergence,
+        convergence_tolerance = _FM_CONVERGENCE_TOLERANCE,
+        converged = isnan(convergence) ? nothing : convergence <= _FM_CONVERGENCE_TOLERANCE)
 end
 
 # --- `target_strength`/`scattering_amplitude` on `AbstractSolution`s -----------------------
@@ -1131,8 +1144,11 @@ target_strength
 """
     diagnostics(solution)
 
-Return a named tuple of solver diagnostics for BEM, MFS and FEM. Modal and Kirchhoff solutions
-return `nothing`.
+Return a named tuple of solver diagnostics for BEM, MFS, FEM and Fourier matching. Modal and
+Kirchhoff solutions return `nothing`.
+
+Fourier matching reports `admissible`, `m_max`, `n_max`, `convergence`, `convergence_tolerance` and
+`converged`, which is `nothing` when `n_max` is too small to reduce.
 
 Full-3D BEM reports `converged`, `iterations`, `relative_residual`, `residual_history`,
 `unknown_count`, `meshsize`, `quadrature_order`, and the solver settings used. Axisymmetric

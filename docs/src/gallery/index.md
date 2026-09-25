@@ -6,11 +6,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 <div class="scattering-gallery">
   <figure>
     <a href="examples/nested.png" aria-label="Enlarge see inside a coupled body">
-      <img src="examples/nested.png" alt="A complete translucent mesh reveals an offset gas cavity." loading="eager">
+      <img src="examples/nested.png" alt="A complete outer-body wireframe encloses an offset gas cavity." loading="eager">
     </a>
     <figcaption>
       <h2>See inside a coupled body</h2>
-      <p>A complete translucent mesh reveals an offset gas cavity.</p>
+      <p>The enclosing wireframe is drawn over, and visibly around, the internal cavity.</p>
 ```
 
 [Short example](@ref gallery-nested)
@@ -23,11 +23,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/nested_pressure.png" aria-label="Enlarge pressure on a coupled body">
-      <img src="examples/nested_pressure.png" alt="Total pressure on the outer surface includes the cavity's influence." loading="eager">
+      <img src="examples/nested_pressure.png" alt="Total pressure magnitude on the complete outer interface." loading="eager">
     </a>
     <figcaption>
-      <h2>Pressure on a coupled body</h2>
-      <p>Total pressure on the outer surface includes the cavity's influence.</p>
+      <h2>Pressure on the outer body</h2>
+      <p>The coupled total-pressure trace is shown on the complete outer interface.</p>
 ```
 
 [Short example](@ref gallery-surface-pressure)
@@ -57,11 +57,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/faceted_pressure.png" aria-label="Enlarge bring your own mesh">
-      <img src="examples/faceted_pressure.png" alt="Scattered-pressure magnitude on a supplied faceted body." loading="eager">
+      <img src="examples/faceted_pressure.png" alt="Scattered pressure on a supplied asymmetric crystalline body." loading="eager">
     </a>
     <figcaption>
       <h2>Bring your own mesh</h2>
-      <p>Scattered-pressure magnitude on a supplied faceted body.</p>
+      <p>Load a custom Gmsh surface, solve it, and inspect the supplied facets.</p>
 ```
 
 [Short example](@ref gallery-faceted)
@@ -74,11 +74,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/cavity_pressure.png" aria-label="Enlarge two internal gas cavities">
-      <img src="examples/cavity_pressure.png" alt="Different cavities share one enclosing body and one coupled solution." loading="lazy">
+      <img src="examples/cavity_pressure.png" alt="A cutaway exposes two cavities with distinct coupled pressure responses." loading="lazy">
     </a>
     <figcaption>
       <h2>Two internal gas cavities</h2>
-      <p>Different cavities share one enclosing body and one coupled solution.</p>
+      <p>A cutaway exposes two cavities with distinct coupled responses.</p>
 ```
 
 [Short example](@ref gallery-cavities)
@@ -108,11 +108,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/eccentric_pressure.png" aria-label="Enlarge an off-center inclusion">
-      <img src="examples/eccentric_pressure.png" alt="Pressure on a displaced inclusion inside a spherical body." loading="lazy">
+      <img src="examples/eccentric_pressure.png" alt="Pressure on a rotated inclusion inside a cutaway ellipsoidal host." loading="lazy">
     </a>
     <figcaption>
       <h2>An off-center inclusion</h2>
-      <p>Pressure on a displaced inclusion inside a spherical body.</p>
+      <p>A cutaway shows transmission through a displaced, rotated inclusion.</p>
 ```
 
 [Short example](@ref gallery-eccentric)
@@ -125,11 +125,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/field_slices.png" aria-label="Enlarge pressure fields in 3d">
-      <img src="examples/field_slices.png" alt="Intersecting slices reveal transmitted and scattered waves." loading="lazy">
+      <img src="examples/field_slices.png" alt="Projected pressure slices leave the sphere unobscured and mark their sampled planes." loading="lazy">
     </a>
     <figcaption>
       <h2>Pressure fields in 3D</h2>
-      <p>Intersecting slices reveal transmitted and scattered waves.</p>
+      <p>Projected slices leave the sphere clear and mark their sampled planes.</p>
 ```
 
 [Short example](@ref gallery-field-slices)
@@ -176,11 +176,11 @@ Explore geometry, materials, coupled bodies, pressure fields and scattering patt
 ```@raw html
   <figure>
     <a href="examples/radiation.png" aria-label="Enlarge 3d scattering lobes">
-      <img src="examples/radiation.png" alt="Radius shows relative amplitude. Color shows directional target strength." loading="lazy">
+      <img src="examples/radiation.png" alt="A translucent normalized scattering pattern surrounds the bent cylinder and marks incident and backscatter directions." loading="lazy">
     </a>
     <figcaption>
       <h2>3D scattering lobes</h2>
-      <p>Radius shows relative amplitude. Color shows directional target strength.</p>
+      <p>The target, incident direction and backscatter direction anchor the normalized 3D response.</p>
 ```
 
 [Short example](@ref gallery-radiation)

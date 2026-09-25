@@ -27,3 +27,21 @@ function _default_colorrange(ts::AbstractArray)
     lo = max(minimum(finite_ts), hi - _DEFAULT_DYNAMIC_RANGE_DB)
     return (lo, hi)
 end
+
+# Colorbar label for a plotted pressure `field`, of the scattered or the total pressure.
+function _pressure_label(field::Symbol; scattered::Bool = false)
+    if scattered
+        field === :pressure_phase && return L"\arg(p_\mathrm{scatter})~(\mathrm{rad})"
+        field === :pressure_real &&
+            return L"\mathrm{Re}(p_\mathrm{scatter} / p_\mathrm{incident})~(\mathrm{dimensionless})"
+        field === :pressure_imag &&
+            return L"\mathrm{Im}(p_\mathrm{scatter} / p_\mathrm{incident})~(\mathrm{dimensionless})"
+        return L"|p_\mathrm{scatter}| / |p_\mathrm{incident}|~(\mathrm{dimensionless})"
+    end
+    field === :pressure_phase && return L"\arg(p)~(\mathrm{rad})"
+    field === :pressure_real &&
+        return L"\mathrm{Re}(p / p_\mathrm{incident})~(\mathrm{dimensionless})"
+    field === :pressure_imag &&
+        return L"\mathrm{Im}(p / p_\mathrm{incident})~(\mathrm{dimensionless})"
+    return L"|p| / |p_\mathrm{incident}|~(\mathrm{dimensionless})"
+end

@@ -34,7 +34,8 @@ function Makie.plot!(plot::RevolvedSurfacePlot)
 end
 
 Makie.preferred_axis_type(::RevolvedSurfacePlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::RevolvedSurfacePlot) = (aspect = :data,)
+Makie.preferred_axis_attributes(::Type{Axis3}, ::RevolvedSurfacePlot) =
+    (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
 
 function _revolved_surface_plot_data(ps::Vector{AcousticScattering.Panel},
         modes::Union{Nothing, AbstractVector}, field::Union{Nothing, Symbol})
@@ -79,7 +80,8 @@ function Makie.plot!(plot::TriMeshPlot)
 end
 
 Makie.preferred_axis_type(::TriMeshPlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::TriMeshPlot) = (aspect = :data,)
+Makie.preferred_axis_attributes(::Type{Axis3}, ::TriMeshPlot) =
+    (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
 
 function _inti_mesh_points_faces(quad)
     msh = quad.mesh
@@ -153,7 +155,8 @@ function Makie.plot!(plot::PointCloudPlot)
 end
 
 Makie.preferred_axis_type(::PointCloudPlot) = Axis3
-Makie.preferred_axis_attributes(::Type{Axis3}, ::PointCloudPlot) = (aspect = :data,)
+Makie.preferred_axis_attributes(::Type{Axis3}, ::PointCloudPlot) =
+    (aspect = :data, xlabeloffset = 45, ylabeloffset = 60, zlabeloffset = 60)
 
 # --- Solution/Mesh -> geometry tier dispatch (see the plan's 3D scope matrix) ---
 
@@ -236,6 +239,37 @@ end
 function _mesh_render(m::AcousticScattering.Mesh{<:Inti.Quadrature})
     points, faces = _inti_mesh_points_faces(m.data)
     return (:trimesh, points, faces, nothing, _inti_mesh_qnormals(m.data))
+end
+
+# Unit propagation direction of the incident wave of a solution that stores an incidence angle.
+function _incident_direction(sol)
+    data = sol.data
+    hasproperty(data, :incidence_angle) || throw(ArgumentError(
+        "incident_arrow needs a solution that stores its incident direction"))
+    azimuth = hasproperty(data, :incidence_azimuth) ? data.incidence_azimuth : 0.0
+    return Vec3f(AcousticScattering._bem3d_incidence_direction(data.incidence_angle, azimuth)...)
+end
+
+function _render_points(render)
+    render[1] === :revolved &&
+        return [Point3f(x, y, z) for (x, y, z) in zip(render[2], render[3], render[4])]
+    return render[2]
+end
+
+# Gold arrow along the propagation direction, pointing at the bounding extent of `points`.
+function _add_incident_arrow!(ax, sol, points)
+    direction = _incident_direction(sol)
+    lo = [minimum(p[i] for p in points) for i in 1:3]
+    hi = [maximum(p[i] for p in points) for i in 1:3]
+    center = Point3f((lo .+ hi) ./ 2...)
+    reach = maximum(abs(sum((p - center) .* direction)) for p in points)
+    span = 0.4f0 * Float32(maximum(hi .- lo) / 2)
+    tip = center - 1.15f0 * Float32(reach) * direction
+    tail = tip - span * direction
+    arrows3d!(ax, [tail], [span * direction]; color = :goldenrod)
+    text!(ax, [tail]; text = ["incident wave"], color = :darkgoldenrod, fontsize = 14,
+        align = (:left, :top), offset = (6, -6))
+    return nothing
 end
 
 function _render_solution_plot(kind::Symbol, a, b, c, d; kwargs...)

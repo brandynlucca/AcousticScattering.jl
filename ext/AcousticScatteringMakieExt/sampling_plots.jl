@@ -130,7 +130,8 @@ end
     Attributes(
         colormap = _MAGNITUDE_COLORMAP,
         colorrange = nothing,
-        angle_units = :deg
+        angle_units = :deg,
+        interpolate = false
     )
 end
 function Makie.plot!(plot::BistaticMapPlot)
@@ -140,7 +141,8 @@ function Makie.plot!(plot::BistaticMapPlot)
     colorrange = plot.colorrange[] === nothing ? _default_colorrange(m.target_strength) :
                  plot.colorrange[]
     heatmap!(plot, thetas, phis, m.target_strength;
-        colormap = plot.colormap, colorrange = colorrange)
+        colormap = plot.colormap, colorrange = colorrange,
+        interpolate = plot.interpolate)
     return plot
 end
 
@@ -246,18 +248,29 @@ function _plot_solution(
     m = AcousticScattering.bistatic_map(sol, thetas, phis)
     return bistaticmapplot(m; kwargs...)
 end
-function _plot_solution(sol::AbstractSolution, ::Val{:mesh}; kwargs...)
+function _plot_solution(sol::AbstractSolution, ::Val{:mesh}; incident_arrow::Bool = false,
+        kwargs...)
     render = _solution_render(sol, nothing)
-    return _render_solution_plot(render[1], render[2:end]...; kwargs...)
+    result = _render_solution_plot(render[1], render[2:end]...; kwargs...)
+    incident_arrow && _add_incident_arrow!(result.axis, sol, _render_points(render))
+    return result
 end
-function _plot_solution(
-        sol::AbstractSolution, ::Val{:surface_field}; field::Symbol = :pressure_magnitude, kwargs...)
+function _plot_solution(sol::AbstractSolution, ::Val{:surface_field};
+        field::Symbol = :pressure_magnitude, incident_arrow::Bool = false,
+        colorbar::Bool = false, kwargs...)
     render = _solution_render(sol, field)
-    return _render_solution_plot(render[1], render[2:end]...; kwargs...)
+    result = _render_solution_plot(render[1], render[2:end]...; kwargs...)
+    incident_arrow && _add_incident_arrow!(result.axis, sol, _render_points(render))
+    if colorbar
+        Colorbar(result.figure[1, 2], first(result.plot.plots);
+            label = _pressure_label(field; scattered = true))
+        colgap!(result.figure.layout, 1, 70)
+    end
+    return result
 end
 function _plot_solution(::AbstractSolution, ::Val{K}; kwargs...) where {K}
     throw(ArgumentError(
-        "kind=$K not supported for a solution; use :bistatic_polar, :bistatic_cartesian, :bistatic_map, :mesh, or :surface_field"))
+        "kind=$K not supported for a solution; use :bistatic_polar, :bistatic_cartesian, :bistatic_map, :mesh, :surface_field, or :field_slices"))
 end
 
 function _plot_solution!(
@@ -305,7 +318,17 @@ that geometry by `field` (`:pressure_magnitude`, `:pressure_phase`, `:pressure_r
 `:pressure_imag`, default `:pressure_magnitude`) where the solution has real surface field data,
 and errors otherwise. Radial/meridian `fem(...)` results do not support surface-field plotting.
 
-For coupled fluid-region BEM, `interfaces` selects surface indices and
+`incident_arrow=true` adds a gold arrow along the incident propagation direction, and
+`colorbar=true` adds a labeled colorbar to `kind=:surface_field`.
+
+`kind=:field_slices` samples pressure on planes declared as
+`(axis=:x/:y/:z, at=value, project_to=value)`, projects the colored planes away from the body,
+and adds the body wireframe, slice markers, incident arrow, legend and colorbar. Supply the
+sampling half-width with `extent`; plane coordinates and `extent` are in meters, while
+`units=:mm` (default) controls display coordinates.
+
+For coupled fluid-region BEM, `interface_alpha` sets per-interface opacity and `solid_interfaces`
+colors the listed interfaces with `interface_colors` instead of the field. `interfaces` selects surface indices and
 `interface_colors` sets geometry colours. Surface fields are total interface pressure.
 `cutaway=(normal=(0, 1, 0), offset=0)` retains `normal ⋅ x ≤ offset` on exterior-adjacent
 surfaces, leaving internal interfaces whole. Field colours share `colorrange`/`colormap`.

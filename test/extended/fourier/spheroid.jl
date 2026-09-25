@@ -100,6 +100,38 @@ let
 end
 
 let
+    @time "Fourier matching: truncation guard against axisymmetric BEM across aspect ratio" @testset "Fourier matching: truncation guard against axisymmetric BEM across aspect ratio" begin
+        theta0 = pi / 3
+        directions = ((pi - theta0, pi), (theta0, 0.0), (pi / 2, pi / 2))
+        # (aspect ratio, ka, boundary, n_max) spanning converged, slowly converging and diverging truncations.
+        cases = ((2.0, 3.0, PressureRelease(), 12), (2.0, 3.0, Rigid(), 16),
+            (3.0, 3.0, PressureRelease(), 16), (3.0, 3.0, Rigid(), 10),
+            (2.0, 3.0, FluidFilled(1.05, 1.02), 10), (5.0, 3.0, PressureRelease(), 8))
+        for (aspect, ka, boundary, n_max) in cases
+            k = ka / aspect
+            body = Spheroid(aspect, 1.0)
+            bem_sol = AS.bem(body, boundary, k; method = :axisymmetric,
+                incidence_angle = theta0, n = 240, m_max = 12)
+            logs, solution = Test.collect_test_logs() do
+                fourier(body, boundary, k; incidence_angle = theta0, m_max = n_max, n_max)
+            end
+            report = diagnostics(solution)
+            rel, db = 0.0, 0.0
+            for (angle, azimuth) in directions
+                expected = AS.scattering_amplitude(bem_sol; angle, azimuth)
+                actual = AS.scattering_amplitude(solution; angle, azimuth)
+                rel = max(rel, abs(actual - expected) / abs(expected))
+                db = max(db, abs(AS.target_strength(actual) - AS.target_strength(expected)))
+            end
+            # The guard must never pass a solution outside the 1% amplitude and 0.1 dB gates.
+            report.converged && @test rel < 0.01 && db < 0.1
+            rel >= 0.01 && @test !report.converged
+            @test any(log -> log.level >= Base.CoreLogging.Warn, logs) == !report.converged
+        end
+    end
+end
+
+let
     @time "Fourier matching: prolate spheroid, ellipse-equation check" @testset "Fourier matching: prolate spheroid, ellipse-equation check" begin
         a, b = 3.0, 1.0
         order = 32

@@ -15,7 +15,7 @@ using Test
     @test cartesian.axis isa CairoMakie.Axis
 
     map_plot = CairoMakie.plot(solution; kind = :bistatic_map,
-        thetas = [0.0, pi / 2], phis = [0.0, pi])
+        thetas = [0.0, pi / 2], phis = [0.0, pi], interpolate = true)
     @test map_plot isa CairoMakie.Makie.FigureAxisPlot
     @test_throws ArgumentError CairoMakie.plot(solution; kind = :unknown, angles)
 end

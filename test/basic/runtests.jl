@@ -35,6 +35,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("bem/sphere.jl")
             include("bem/spheroid.jl")
             include("bem/cylinder.jl")
+            include("bem/assembly.jl")
             include("bem/arbitrary.jl")
         end
     end

@@ -50,7 +50,26 @@ For a penetrable interior with the given density and sound-speed contrast (`Flui
 
 `R_n^m`, `Q_n^m` and their primed and interior counterparts span many orders of magnitude across ``n`` from spherical Hankel-function growth alone, not from genuine ill-conditioning. Each per-``m`` linear solve uses a row/column-equilibrated truncated-SVD pseudoinverse (`pinv` on the equilibrated matrix) rather than a plain solve, so truncation compares singular values on a properly-scaled basis instead of against raw Hankel-function magnitude.
 
-This does not extend the method's own truncation-order envelope. Beyond roughly `2`:`1` aspect ratio, the default `mapping_order` and `n_max`/`m_max` (calibrated against the sphere) are not guaranteed accurate. The rigid boundary's extra normal-derivative terms make it consistently worse-conditioned than the pressure-release boundary at the same aspect ratio and mode count. Check convergence by increasing `n_max` and `mapping_order` independently and confirming the result stabilizes, rather than trusting a single truncation order.
+## Truncation guard
+
+Fourier matching does not converge monotonically in `n_max` for elongated bodies. Each solve is repeated with `n_max` and `m_max` reduced by 2, and `diagnostics(sol).convergence` reports the largest relative change in the far-field amplitude. A warning is emitted above `1e-2`.
+
+## Accuracy envelope
+
+Smallest error against axisymmetric BEM among the truncations that pass the guard, with its `n_max`. `none` means no truncation passes, with the best error in parentheses. Prolate spheroids at incidence ``\pi/3``, default `mapping_order`, fluid contrasts `1.05` and `1.02`.
+
+| aspect | ``ka`` | pressure-release | rigid | fluid |
+|:--|:--|:--|:--|:--|
+| 1.5 | 1 | `5e-5` (6) | `5e-5` (10) | `2e-4` (10) |
+| 2 | 1 | `4e-5` (6) | `6e-5` (20) | `2e-4` (10) |
+| 3 | 1 | `6e-5` (16) | none (`3e-2`) | `4e-3` (20) |
+| 5 | 1 | `3e-4` (4) | none (`7e-2`) | none (`5e-2`) |
+| 1.5 | 3 | `2e-4` (8) | `2e-4` (10) | `6e-3` (10) |
+| 2 | 3 | `2e-4` (8) | `4e-4` (24) | `2e-4` (10) |
+| 3 | 3 | `3e-4` (16) | none (`4e-3`) | `9e-4` (24) |
+| 5 | 3 | none (`7e-3`) | none (`9e-2`) | none (`5e-2`) |
+
+Up to 2:1 all boundaries meet the 0.1 dB and 1% gates. At 5:1 the default `n_max` is wrong for every boundary. The guard checks self-consistency, not error. Use `bem` for elongated bodies.
 
 ## Validation
 

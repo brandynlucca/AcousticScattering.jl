@@ -8,6 +8,8 @@ Start Julia with `julia --project=. -t auto` to make threads available. Actual p
 
 Compare `@time` on first and second identical calls in a session. For repeated source edits, consider the [precompile opt-out](@ref getting-started). It shifts compilation cost to first use.
 
+Axisymmetric BEM assembles its panel rows in parallel and hands them out one at a time, so uneven row costs stay balanced. It is the dominant cost of an oblique solve, and the dense solves are negligible next to it. Expect the gain to flatten near the physical core count.
+
 When BLAS and Julia threads compete, compare configurations explicitly. For example, `using LinearAlgebra: BLAS; BLAS.set_num_threads(1)` changes the entire process, so use it as a measured tuning choice. Do not assume more threads always improve performance.
 
 ## Accuracy and memory controls

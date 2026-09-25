@@ -306,6 +306,64 @@ function _quadgk_breakpoints(xρ::Real, xz::Real, p::Panel, self::Bool)
     return (0.0, s_clamped, 1.0)
 end
 
+# Bounds on the width of the ring kernel's near-singular peak at Δφ = 0, relative to the ring radius.
+const _RING_PEAK_FLOOR = 1e-12
+const _RING_PEAK_CEILING = 1e6
+
+# Half-cycle breakpoints of mode `m` over Δφ in [0,π], mapped to `τ` with `Δφ = scale * sinh(τ)`.
+function _azimuthal_sinh_breakpoints(m::Integer, scale::Real, upper::Real)
+    m <= 1 && return (0.0, upper)
+    points = [asinh(j * π / (m * scale)) for j in 0:m]
+    points[end] = upper
+    return points
+end
+
+# Integrates `integrand(Δφ)` over [0,π]. The substitution `Δφ = scale * sinh(τ)` makes the near-singular peak at Δφ = 0 smooth.
+function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ2::Real,
+        z2::Real, rtol::Real, atol::Real)
+    scale = clamp(hypot(ρ - ρ2, z - z2) / sqrt(ρ * ρ2), _RING_PEAK_FLOOR, _RING_PEAK_CEILING)
+    upper = asinh(π / scale)
+    val, _ = quadgk(τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ)),
+        _azimuthal_sinh_breakpoints(m, scale, upper)...; rtol = rtol, atol = atol,
+        maxevals = _AZIMUTHAL_MAXEVALS)
+    return val
+end
+
+# Calls `f(i)` for every row `i` in `1:n`. Threads take one row at a time so uneven row costs stay balanced.
+function _foreach_row(f, n::Integer)
+    if Threads.nthreads() == 1 || n < 2
+        for i in 1:n
+            f(i)
+        end
+        return nothing
+    end
+    next = Threads.Atomic{Int}(0)
+    Threads.@sync for _ in 1:min(Threads.nthreads(), n)
+        Threads.@spawn begin
+            while true
+                i = Threads.atomic_add!(next, 1) + 1
+                i > n && break
+                f(i)
+            end
+        end
+    end
+    return nothing
+end
+
+# Integrates `node(s)` over a panel. A self pair uses cubic maps of each half to remove the singularity at the collocation point.
+function _meridian_quadrature(node, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real)
+    if self
+        left = quadgk(t -> node(0.5 - 0.5 * t^3) * (1.5 * t^2), 0.0, 1.0;
+            rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+        right = quadgk(t -> node(0.5 + 0.5 * t^3) * (1.5 * t^2), 0.0, 1.0;
+            rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+        return left + right
+    end
+    bp = _quadgk_breakpoints(xρ, xz, pj, self)
+    return quadgk(
+        node, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+end
+
 function _ring_distance(ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
     hypot(ρ - ρ2, z - z2, 2sqrt(ρ * ρ2) * sin(Δφ / 2))
 end
@@ -343,12 +401,32 @@ end
 _azimuthal_breakpoints(m::Integer) = m == 0 ? (0.0, 2π) : range(0.0, 2π; length = 4m + 1)
 _azimuthal_half_breakpoints(m::Integer) = m == 0 ? (0.0, π) : range(0.0, π; length = 2m + 1)
 
-# Function-barrier helpers for outer (meridian) quadrature over a panel pair, avoids closure-capture
-# boxing in the i,j loops below. Fixed order-12 Gauss-Legendre on [0,1] for "far" pairs, cross-checked against the fully-adaptive path and the sphere modal series.
+# Largest Gauss-Legendre order for the panel integral of a far pair, used for the closest pairs.
 const _MERIDIAN_FIXED_ORDER = 12
-const _MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS = let
-    nodes, weights = gauss(_MERIDIAN_FIXED_ORDER)  # on [-1, 1]
-    (0.5 .* (nodes .+ 1), 0.5 .* weights)          # mapped to [0, 1]
+const _MERIDIAN_MIN_ORDER = 3
+
+# Gauss-Legendre rules on [0,1] for every panel node count up to the largest order.
+const _MERIDIAN_RULES = ntuple(Val(_MERIDIAN_FIXED_ORDER)) do order
+    nodes, weights = gauss(order)  # on [-1, 1]
+    (0.5 .* (nodes .+ 1), 0.5 .* weights)
+end
+
+# Quadrature error target of the panel rule, well below the solver tolerance.
+const _MERIDIAN_LOG_TOLERANCE = log(1e12)
+
+# Node count for a field point `separation` from the panel midpoint, from the Bernstein ellipse error bound plus the phase change across the panel.
+function _meridian_node_count(separation::Real, panel_length::Real, k::Real)
+    delta = 2separation / panel_length
+    bernstein = delta + sqrt(max(delta^2 - 1, 0))
+    decay = 2log(bernstein)
+    nodes = decay > 0 ? _MERIDIAN_LOG_TOLERANCE / decay : Inf
+    count = min(nodes + 1 + Float64(k) * panel_length, _MERIDIAN_FIXED_ORDER)
+    return max(ceil(Int, count), _MERIDIAN_MIN_ORDER)
+end
+
+function _meridian_rule(xρ::Real, xz::Real, pj::Panel, k::Real)
+    separation = hypot(xρ - pj.rhom, xz - pj.zm)
+    return _MERIDIAN_RULES[_meridian_node_count(separation, pj.L, k)]
 end
 
 function _pair_K(
@@ -358,7 +436,7 @@ function _pair_K(
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(complex(k))
-        for (s, w) in zip(_MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS)
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
             ρ2, z2 = _panel_point(pj, s)
             total += _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz;
                          m = m, rtol = rtol, far = true, meridian_projection = projection) *
@@ -366,15 +444,13 @@ function _pair_K(
         end
         return total
     end
-    bp = _quadgk_breakpoints(xρ, xz, pj, self)
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
         _azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; m = m, rtol = rtol, far = far,
             meridian_projection = projection) *
         ρ2 * pj.L
     end
-    return quadgk(
-        integrand, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+    return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
 end
 
 function _pair_V(
@@ -382,20 +458,18 @@ function _pair_V(
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(complex(k))
-        for (s, w) in zip(_MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS)
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
             ρ2, z2 = _panel_point(pj, s)
             total += _azimuthal_G(k, xρ, xz, ρ2, z2; m = m, rtol = rtol, far = true) * ρ2 *
                      pj.L * w
         end
         return total
     end
-    bp = _quadgk_breakpoints(xρ, xz, pj, self)
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
         _azimuthal_G(k, xρ, xz, ρ2, z2; m = m, rtol = rtol, far = far) * ρ2 * pj.L
     end
-    return quadgk(
-        integrand, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+    return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
 end
 
 # Rigid's RHS integrand: G(x,y)·∂p_inc/∂n_y(y), with ∂p_inc/∂n_y(y) = ik·nz(y)·e^{ikz(y)} folded in.
@@ -403,7 +477,7 @@ function _pair_G_rigid_rhs(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, 
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(ComplexF64)
-        for (s, w) in zip(_MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS)
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
             ρ2, z2 = _panel_point(pj, s)
             total += im * k * pj.nz * cis(k * z2) *
                      _azimuthal_G(k, xρ, xz, ρ2, z2; rtol = rtol, far = true) * ρ2 * pj.L *
@@ -411,14 +485,12 @@ function _pair_G_rigid_rhs(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, 
         end
         return total
     end
-    bp = _quadgk_breakpoints(xρ, xz, pj, self)
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
         im * k * pj.nz * cis(k * z2) *
         _azimuthal_G(k, xρ, xz, ρ2, z2; rtol = rtol, far = far) * ρ2 * pj.L
     end
-    return quadgk(
-        integrand, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+    return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
 end
 
 # PressureRelease's double-layer-applied-to-known-p_scat integrand: -p_scat(y)·∂G/∂n_y(x,y).
@@ -427,7 +499,7 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     if far
         total = zero(ComplexF64)
-        for (s, w) in zip(_MERIDIAN_FIXED_NODES, _MERIDIAN_FIXED_WEIGHTS)
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
             ρ2, z2 = _panel_point(pj, s)
             total += -cis(k * z2) *
                      _azimuthal_dGdn(
@@ -437,7 +509,6 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
         end
         return total
     end
-    bp = _quadgk_breakpoints(xρ, xz, pj, self)
     integrand = s -> begin
         ρ2, z2 = _panel_point(pj, s)
         -cis(k * z2) *
@@ -445,8 +516,7 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
             meridian_projection = projection) * ρ2 *
         pj.L
     end
-    return quadgk(
-        integrand, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+    return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
 end
 
 # Meridian separation selects panel quadrature; ring separation separately selects azimuthal quadrature.
@@ -464,16 +534,29 @@ function _azimuthal_fixed_order(m::Integer, k::Real, ρ::Real, ρ2::Real)
     max(4m + 32, ceil(Int, 8 * k * min(ρ, ρ2)) + 32)
 end
 
-# Fixed Gauss-Legendre rule cached by order, populated before assemble_cbie_operators's threaded region so only concurrent reads occur.
-const _AZIMUTHAL_FIXED_RULE_CACHE = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}()
+# Fixed Gauss-Legendre rules by order. A miss swaps in an updated copy under a lock, so concurrent readers never see a dictionary being modified.
+mutable struct _FixedRuleCache
+    @atomic rules::Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}
+end
+const _AZIMUTHAL_FIXED_RULES = _FixedRuleCache(Dict{
+    Int, Tuple{Vector{Float64}, Vector{Float64}}}())
+const _AZIMUTHAL_FIXED_RULES_LOCK = ReentrantLock()
+
 function _azimuthal_fixed_rule(order::Integer)
-    return get!(_AZIMUTHAL_FIXED_RULE_CACHE, order) do
+    rule = get(@atomic(_AZIMUTHAL_FIXED_RULES.rules), order, nothing)
+    rule === nothing || return rule
+    return lock(_AZIMUTHAL_FIXED_RULES_LOCK) do
+        cached = @atomic _AZIMUTHAL_FIXED_RULES.rules
+        haskey(cached, order) && return cached[order]
         nodes, weights = gauss(order)  # on [-1, 1]
         count = cld(order, 2)
         angles = π .* (nodes[1:count] .+ 1)
         folded_weights = 2π .* weights[1:count]
         isodd(order) && (folded_weights[end] /= 2)
-        return angles, folded_weights
+        updated = copy(cached)
+        updated[order] = (angles, folded_weights)
+        @atomic _AZIMUTHAL_FIXED_RULES.rules = updated
+        return updated[order]
     end
 end
 
@@ -497,9 +580,8 @@ function _azimuthal_G(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real; m::Intege
         end
         return total
     end
-    val, _ = quadgk(
-        Δφ -> _ring_G(k, ρ, z, ρ2, z2, Δφ) * cos(m * Δφ), _azimuthal_half_breakpoints(m)...;
-        rtol = rtol, atol = atol / 2, maxevals = _AZIMUTHAL_MAXEVALS)
+    val = _azimuthal_peak_quadrature(
+        Δφ -> _ring_G(k, ρ, z, ρ2, z2, Δφ) * cos(m * Δφ), m, ρ, z, ρ2, z2, rtol, atol / 2)
     return 2val
 end
 
@@ -517,10 +599,9 @@ function _azimuthal_dGdn(
         end
         return total
     end
-    val, _ = quadgk(
+    val = _azimuthal_peak_quadrature(
         Δφ -> _ring_dGdn(k, ρ, z, ρ2, z2, nρ2, nz2, Δφ; meridian_projection) * cos(m * Δφ),
-        _azimuthal_half_breakpoints(m)...; rtol = rtol,
-        atol = atol / 2, maxevals = _AZIMUTHAL_MAXEVALS)
+        m, ρ, z, ρ2, z2, rtol, atol / 2)
     return 2val
 end
 
@@ -548,36 +629,190 @@ function assemble_cbie_operators(mesh::MeridianMesh, k::Real; m::Integer = 0, rt
     n = length(ps)
     K = zeros(complex(typeof(k)), n, n)
     V = zeros(complex(typeof(k)), n, n)
-    # Populate every fixed-rule cache entry before the threaded region below to avoid a race.
-    for i in 1:n, j in 1:n
-
-        _azimuthal_fixed_rule(_azimuthal_fixed_order(m, k, ps[i].rhom, ps[j].rhom))
-    end
-
-    # Row i is written only by iteration i, safe to parallelize with no synchronization.
-    if Threads.nthreads() > 1
-        Threads.@threads for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol; m = m)
-                V[i, j] = _pair_V(k, xρ, xz, pj, self, rtol; m = m)
-            end
-        end
-    else
-        for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol; m = m)
-                V[i, j] = _pair_V(k, xρ, xz, pj, self, rtol; m = m)
-            end
+    _foreach_row(n) do i
+        xρ, xz = ps[i].rhom, ps[i].zm
+        for j in 1:n
+            pj = ps[j]
+            self = (i == j)
+            K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol; m = m)
+            V[i, j] = _pair_V(k, xρ, xz, pj, self, rtol; m = m)
         end
     end
 
     return K, V, ps
+end
+
+# Fused `(K, V)` ring-kernel integrands at azimuth difference `Δφ`, sharing the distance and phase evaluation.
+@inline function _ring_KV(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real,
+        projection::Real, Δφ::Real)
+    half_sin = sin(Δφ / 2)
+    r = hypot(ρ - ρ2, z - z2, 2sqrt(ρ * ρ2) * half_sin)
+    r < _RING_DISTANCE_FLOOR && return SVector(zero(ComplexF64), zero(ComplexF64))
+    G = cis(k * r) / (4π * r)
+    proj = projection - 2nρ2 * ρ * half_sin^2
+    return SVector(-(im * k - 1 / r) * G * proj / r, G)
+end
+
+# `cos(m x)` for `m = m0, m0 + 1, …` by the Chebyshev recurrence, with entries past `count` set to zero.
+@inline function _cos_multiples(x::Real, m0::Integer, count::Integer, ::Val{N}) where {N}
+    c = MVector{N, Float64}(undef)
+    c[1] = cos(m0 * x)
+    if N > 1
+        c[2] = cos((m0 + 1) * x)
+        twocos = 2cos(x)
+        for i in 3:N
+            c[i] = twocos * c[i - 1] - c[i - 2]
+        end
+    end
+    for i in (count + 1):N
+        c[i] = 0.0
+    end
+    return SVector(c)
+end
+
+# The `K` integrands of every mode followed by the `V` integrands of every mode.
+@inline function _ring_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real,
+        projection::Real, Δφ::Real, m0::Integer, count::Integer, width::Val)
+    kv = _ring_KV(k, ρ, z, ρ2, z2, nρ2, projection, Δφ)
+    c = _cos_multiples(Δφ, m0, count, width)
+    return vcat(kv[1] * c, kv[2] * c)
+end
+
+# Largest number of Fourier modes assembled per pass, bounds the retained K/V storage to one chunk.
+const _MODE_CHUNK = 8
+
+# Fixed azimuthal rules and `cos(mΔφ)` tables for every order the assembly requests, built serially.
+function _mode_rules(k::Real, ps::AbstractVector{Panel},
+        modes::AbstractUnitRange{<:Integer}, width::Val{N}) where {N}
+    rules = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}, Vector{SVector{N, Float64}}}}()
+    radii = Float64[]
+    for p in ps
+        push!(radii, p.rhom)
+        for (nodes, _) in _MERIDIAN_RULES, s in nodes
+
+            push!(radii, _panel_point(p, s)[1])
+        end
+    end
+    for ρ in radii
+        order = _azimuthal_fixed_order(last(modes), k, ρ, ρ)
+        haskey(rules, order) && continue
+        angles, weights = _azimuthal_fixed_rule(order)
+        table = [_cos_multiples(φ, first(modes), length(modes), width) for φ in angles]
+        rules[order] = (angles, weights, table)
+    end
+    return rules
+end
+
+# `∫(K, V)(Δφ)cos(mΔφ)dΔφ` over [0,2π) for every mode in `modes`, with one kernel evaluation per node.
+function _azimuthal_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real,
+        projection::Real, modes::AbstractUnitRange{<:Integer}, far::Bool, rules, rtol::Real,
+        width::Val{N}) where {N}
+    if far && hypot(ρ - ρ2, z - z2) >= 0.5sqrt(ρ * ρ2)
+        angles, weights, table = rules[_azimuthal_fixed_order(last(modes), k, ρ, ρ2)]
+        total = zero(SVector{2N, ComplexF64})
+        for j in eachindex(angles)
+            kv = _ring_KV(k, ρ, z, ρ2, z2, nρ2, projection, angles[j]) * weights[j]
+            total += vcat(kv[1] * table[j], kv[2] * table[j])
+        end
+        return total
+    end
+    m0, count = first(modes), length(modes)
+    val = _azimuthal_peak_quadrature(
+        Δφ -> _ring_KV_modes(k, ρ, z, ρ2, z2, nρ2, projection, Δφ, m0, count, width),
+        last(modes), ρ, z, ρ2, z2, rtol, _QUAD_ATOL / 2)
+    return 2val
+end
+
+# Panel-pair meridian integral of the fused `(K, V)` kernels for every mode in `modes`.
+function _pair_KV_modes(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real,
+        modes::AbstractUnitRange{<:Integer}, rules, width::Val{N}) where {N}
+    projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
+    far = !self && _azimuthal_is_far(xρ, xz, pj)
+    function node(s)
+        ρ2, z2 = _panel_point(pj, s)
+        return _azimuthal_KV_modes(
+            k, xρ, xz, ρ2, z2, pj.nrho, projection, modes, far, rules, rtol, width) *
+               (ρ2 * pj.L)
+    end
+    if far
+        total = zero(SVector{2N, ComplexF64})
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
+            total += node(s) * w
+        end
+        return total
+    end
+    return _meridian_quadrature(node, xρ, xz, pj, self, rtol)
+end
+
+function _assemble_modes(mesh::MeridianMesh, k::Real, modes::AbstractUnitRange{<:Integer},
+        rtol::Real, width::Val{N}) where {N}
+    ps = panels(mesh)
+    n = length(ps)
+    count = length(modes)
+    Ks = [zeros(ComplexF64, n, n) for _ in 1:count]
+    Vs = [zeros(ComplexF64, n, n) for _ in 1:count]
+    rules = _mode_rules(k, ps, modes, width)
+    _foreach_row(n) do i
+        xρ, xz = ps[i].rhom, ps[i].zm
+        for j in 1:n
+            kv = _pair_KV_modes(k, xρ, xz, ps[j], i == j, rtol, modes, rules, width)
+            for c in 1:count
+                Ks[c][i, j] = kv[c]
+                Vs[c][i, j] = kv[N + c]
+            end
+        end
+    end
+    return Ks, Vs, ps
+end
+
+"""
+    assemble_cbie_operators_modes(mesh, k, modes; rtol=1e-6)
+
+Assemble the raw exterior double-layer (`K`) and single-layer (`V`) operators of
+[`assemble_cbie_operators`](@ref) for every azimuthal Fourier mode in `modes` (at most
+$_MODE_CHUNK) in one pass. The ring kernel depends on the mode only through the weight
+`cos(mΔφ)`, so each kernel evaluation is shared across `modes` and between `K` and `V`.
+Returns `(Ks, Vs, ps)` where `Ks[i]` and `Vs[i]` belong to mode `modes[i]`.
+"""
+function assemble_cbie_operators_modes(mesh::MeridianMesh, k::Float64,
+        modes::AbstractUnitRange{<:Integer}; rtol::Real = 1e-6)
+    count = length(modes)
+    1 <= count <= _MODE_CHUNK ||
+        throw(ArgumentError("modes must hold between 1 and $_MODE_CHUNK modes, got $count"))
+    width = count == 1 ? Val(1) : (count <= 4 ? Val(4) : Val(_MODE_CHUNK))
+    return _assemble_modes(mesh, k, modes, rtol, width)
+end
+
+function assemble_cbie_operators(
+        mesh::MeridianMesh, k::Float64; m::Integer = 0, rtol::Real = 1e-6)
+    Ks, Vs, ps = assemble_cbie_operators_modes(mesh, k, m:m; rtol)
+    return Ks[1], Vs[1], ps
+end
+
+# Serves the `K`/`V` pair of successive modes from chunks assembled by `assemble_cbie_operators_modes`.
+mutable struct _ModeOperators
+    mesh::MeridianMesh
+    k::Float64
+    m_max::Int
+    rtol::Float64
+    first::Int
+    K::Vector{Matrix{ComplexF64}}
+    V::Vector{Matrix{ComplexF64}}
+end
+
+function _ModeOperators(mesh::MeridianMesh, k::Real, m_max::Integer, rtol::Real)
+    return _ModeOperators(mesh, Float64(k), Int(m_max), Float64(rtol), 0,
+        Matrix{ComplexF64}[], Matrix{ComplexF64}[])
+end
+
+function _mode_operators!(cache::_ModeOperators, m::Integer)
+    if !(cache.first <= m < cache.first + length(cache.K))
+        chunk = m:min(m + _MODE_CHUNK - 1, cache.m_max)
+        cache.K, cache.V, _ = assemble_cbie_operators_modes(
+            cache.mesh, cache.k, chunk; rtol = cache.rtol)
+        cache.first = m
+    end
+    return cache.K[m - cache.first + 1], cache.V[m - cache.first + 1]
 end
 
 """
@@ -644,34 +879,13 @@ function solve_axial(
     n = length(ps)
     K = zeros(ComplexF64, n, n)
     b = zeros(ComplexF64, n)
-    # See `assemble_cbie_operators`'s identical pre-population pass for why
-    # this needs every pair's own order, not a single up-front call.
-    for i in 1:n, j in 1:n
-
-        _azimuthal_fixed_rule(_azimuthal_fixed_order(0, k, ps[i].rhom, ps[j].rhom))
-    end
-
-    # Row i written only by iteration i, safe to thread; single-threaded Threads.@threads is
-    # catastrophically slow (~1150x on a 218-panel case), so only thread when nthreads() > 1.
-    if Threads.nthreads() > 1
-        Threads.@threads for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol)
-                b[i] += _pair_G_rigid_rhs(k, xρ, xz, pj, self, rtol)
-            end
-        end
-    else
-        for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol)
-                b[i] += _pair_G_rigid_rhs(k, xρ, xz, pj, self, rtol)
-            end
+    _foreach_row(n) do i
+        xρ, xz = ps[i].rhom, ps[i].zm
+        for j in 1:n
+            pj = ps[j]
+            self = (i == j)
+            K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol)
+            b[i] += _pair_G_rigid_rhs(k, xρ, xz, pj, self, rtol)
         end
     end
 
@@ -687,35 +901,13 @@ function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh;
     n = length(ps)
     G = zeros(ComplexF64, n, n)
     Kp_known = zeros(ComplexF64, n) # double-layer applied to the known p_scat = -e^{ikz}
-    # See `assemble_cbie_operators`'s identical pre-population pass for why
-    # this needs every pair's own order, not a single up-front call.
-    for i in 1:n, j in 1:n
-
-        _azimuthal_fixed_rule(_azimuthal_fixed_order(0, k, ps[i].rhom, ps[j].rhom))
-    end
-
-    # See `solve_axial(::Rigid, ...)` above for why threading is
-    # conditional on `Threads.nthreads() > 1`.
-    if Threads.nthreads() > 1
-        Threads.@threads for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                G[i, j] = _pair_V(k, xρ, xz, pj, self, rtol)
-                Kp_known[i] += _pair_K_pressrel(k, xρ, xz, pj, self, rtol)
-            end
-        end
-    else
-        for i in 1:n
-            xρ, xz = ps[i].rhom, ps[i].zm
-            for j in 1:n
-                pj = ps[j]
-                self = (i == j)
-                # -p_scat(y) = e^{ikz(y)} baked into the double-layer integrand.
-                G[i, j] = _pair_V(k, xρ, xz, pj, self, rtol)
-                Kp_known[i] += _pair_K_pressrel(k, xρ, xz, pj, self, rtol)
-            end
+    _foreach_row(n) do i
+        xρ, xz = ps[i].rhom, ps[i].zm
+        for j in 1:n
+            pj = ps[j]
+            self = (i == j)
+            G[i, j] = _pair_V(k, xρ, xz, pj, self, rtol)
+            Kp_known[i] += _pair_K_pressrel(k, xρ, xz, pj, self, rtol)
         end
     end
 
@@ -969,8 +1161,9 @@ function solve_oblique(::Rigid, k::Real, mesh::MeridianMesh, incidence_angle::Re
     p_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
     dpdn_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
 
+    operators = _ModeOperators(mesh, k, m_max, rtol)
     for m in 0:m_max
-        K, V, _ = assemble_cbie_operators(mesh, k; m = m, rtol = rtol)
+        K, V = _mode_operators!(operators, m)
         dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, β, p.rhom, p.zm, p.nrho, p.nz)
                               for p in ps]
         dpdn_scat = -dpdn_inc
@@ -1008,8 +1201,9 @@ function solve_oblique(
     p_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
     dpdn_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
 
+    operators = _ModeOperators(mesh, k, m_max, rtol)
     for m in 0:m_max
-        K, V, _ = assemble_cbie_operators(mesh, k; m = m, rtol = rtol)
+        K, V = _mode_operators!(operators, m)
         p_inc = ComplexF64[_p_inc_mode(m, k, β, p.rhom, p.zm) for p in ps]
         p_scat = -p_inc
         dpdn_scat = _solve_reported(
@@ -1128,9 +1322,11 @@ function solve_oblique(
     chief_pts_int = chief_points_int > 0 ? _chief_points(mesh, chief_points_int) :
                     Tuple{Float64, Float64}[]
 
+    operators_ext = _ModeOperators(mesh, k, m_max, rtol)
+    operators_int = _ModeOperators(mesh, k_int, m_max, rtol)
     for m in 0:m_max
-        K_ext, V_ext, _ = assemble_cbie_operators(mesh, k; m = m, rtol = rtol)
-        K_int, V_int, _ = assemble_cbie_operators(mesh, k_int; m = m, rtol = rtol)
+        K_ext, V_ext = _mode_operators!(operators_ext, m)
+        K_int, V_int = _mode_operators!(operators_int, m)
 
         p_inc = ComplexF64[_p_inc_mode(m, k, β, p.rhom, p.zm) for p in ps]
         dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, β, p.rhom, p.zm, p.nrho, p.nz)

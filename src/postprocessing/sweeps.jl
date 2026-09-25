@@ -265,11 +265,17 @@ function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondit
         "Irregular's conformal mapping is inadmissible (Jacobian vanishes somewhere). " *
         "Try a higher mapping_order or more continuation_steps"))
     transition = _boundary_transition(mapping, k, boundary; m_max, n_max, rtol, maxevals)
-    return incidence_angle_sweep(angles) do incidence_angle
+    convergence = Ref(0.0)
+    sweep = incidence_angle_sweep(angles) do incidence_angle
         a = _incident_coefficients(n_max, m_max, k, incidence_angle)
         b = _apply_transition(transition, a, n_max, m_max)
-        FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle))
+        b_check = _check_coefficients(transition, k, incidence_angle, n_max, m_max)
+        change = _fm_convergence(b, b_check, k)
+        isnan(change) || (convergence[] = max(convergence[], change))
+        FMSolution(body, boundary, Float64(k), mapping, b, Float64(incidence_angle), b_check)
     end
+    _warn_fm_convergence(convergence[])
+    return sweep
 end
 
 const _BistaticAngleAzimuthSolution = Union{
