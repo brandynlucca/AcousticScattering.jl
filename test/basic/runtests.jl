@@ -21,6 +21,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("kirchhoff/sphere.jl")
             include("kirchhoff/spheroid.jl")
             include("kirchhoff/cylinder.jl")
+            include("kirchhoff/high_frequency.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "FEM")
@@ -38,6 +39,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("bem/assembly.jl")
             include("bem/arbitrary.jl")
             include("bem/edge.jl")
+            include("bem/formulations.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "MFS")
@@ -66,6 +68,8 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("mesh.jl")
             include("sampling.jl")
             include("output.jl")
+            include("internals.jl")
+            include("pressure.jl")
         end
     end
 end

@@ -77,3 +77,34 @@ using Test
     @test_throws ArgumentError incidence_angle_sweep([surface], [FluidFilled(1.2, 1.1)],
         0.3, [0.0]; labels = ["inclusion"])
 end
+
+@testset "Sweep constructors and mesh sweeps" begin
+    @test AcousticScattering.FrequencySweep([1.0, 2.0], [1.0, 2.0], [-10.0, -11.0]).labels ==
+          ["Scattered field"]
+    @test AcousticScattering.IncidenceAngleSweep([0.0, 1.0], [-10.0, -11.0]).amplitudes ===
+          nothing
+    @test AcousticScattering.BistaticSweep([0.0, 1.0], 0.0, [-10.0, -11.0], 0.3).incidence_azimuth ==
+          0.0
+
+    nodes = [0.0 1 0 0; 0 0 1 0; 0 0 0 1]
+    triangles = [1 1 1 2; 3 2 4 3; 2 4 3 4]
+    tetra = mesh(nodes, triangles; qorder = 2)
+    angles = [0.0, 0.5]
+    rigid = incidence_angle_sweep(tetra, Rigid(), 0.3, angles;
+        compression = (method = :none,))
+    @test length(rigid.target_strength) == 2 && all(isfinite, rigid.target_strength)
+    fluid = incidence_angle_sweep(tetra, FluidFilled(1.2, 1.1), 0.3, angles)
+    @test length(fluid.amplitudes) == 2 && all(isfinite, fluid.target_strength)
+    coupled = incidence_angle_sweep([tetra], [FluidFilled(1.2, 1.1)], 0.3, angles;
+        components = true, labels = ["body"])
+    @test size(coupled.amplitudes) == (2, 3)
+    @test coupled.labels == ["Coupled", "Isolated body", "Coherent sum"]
+    @test_throws ArgumentError incidence_angle_sweep(
+        [tetra], [FluidFilled(1.2, 1.1)], 0.3, angles; labels = ["body"])
+
+    scalar = frequency_sweep(
+        k -> fem(Cylinder(0.05, 0.1), Rigid(), k; incidence_angle = 0.0,
+            n_r = 6, n_theta = 12, m_max = 0),
+        [1000.0, 2000.0], 1477.4)
+    @test scalar.amplitudes === nothing && all(isfinite, scalar.target_strength)
+end

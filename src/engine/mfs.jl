@@ -72,12 +72,12 @@ folded into the boundary-condition right-hand side instead, see
 """
 function assemble_mfs_operators(mesh::MeridianMesh, k::Real, ρ_s::AbstractVector{<:Real},
         z_s::AbstractVector{<:Real};
-        m::Integer = 0, rtol::Real = 1e-6)
+        m::Integer = 0, rtol::Real = 1e-6, threaded::Bool = Threads.nthreads() > 1)
     ps = panels(mesh)
     n, ns = length(ps), length(ρ_s)
     P = zeros(ComplexF64, n, ns)
     V = zeros(ComplexF64, n, ns)
-    if Threads.nthreads() > 1
+    if threaded
         Threads.@threads for i in 1:n
             pi = ps[i]
             for j in 1:ns

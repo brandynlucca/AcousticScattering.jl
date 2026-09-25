@@ -198,7 +198,7 @@ function cylinder_meridian_fem_target_strength(
         boundary::Union{Rigid, PressureRelease}, k::Real,
         radius::Real, length::Real, R::Real;
         n_r::Integer = 30, n_theta::Integer = 60,
-        l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
+        l_max::Integer = _default_mode_count(k * R), solve_reports = nothing)
     nr1 = n_r + 1
 
     halfL = length / 2

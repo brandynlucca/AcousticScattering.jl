@@ -1,25 +1,27 @@
 using AcousticScattering
 using Test
 
+include(joinpath(@__DIR__, "..", "..", "helpers", "structured_cylinder.jl"))
+
 @testset "Edge quadrature on a flat-ended cylinder" begin
-    surface = mesh(Cylinder(0.5, 1.0); method = :full, resolution = 0.9, mesh_order = 1,
-        qorder = 2)
+    nodes, triangles = structured_cylinder(16, 3, 3)
+    surface = mesh(nodes, triangles; qorder = 2)
     edge = (formulation = :cbie, compression = (method = :none,),
         correction = (method = :edge,))
-    points = [(1.0, 0.2, 0.1), (0.0, 0.0, 1.2)]
-    for (boundary, rtol) in ((PressureRelease(), 0.08), (Rigid(), 0.03))
-        solution = bem(surface, boundary, 0.5; incidence_angle = 0.4, edge...)
-        reference = bem(surface, boundary, 0.5; incidence_angle = 0.4,
+    far = (1.0, 0.2, 0.5)
+    near = [(0.51, 0.1, 0.5), (0.0, 0.51, 0.5), (0.2, 0.0, 1.02)]
+    for (boundary, rtol) in ((PressureRelease(), 0.1), (Rigid(), 0.05))
+        solution = bem(surface, boundary, 4.0; incidence_angle = 0.4, edge...)
+        reference = bem(surface, boundary, 4.0; incidence_angle = 0.4,
             compression = (method = :none,))
         @test scattering_amplitude(solution)≈scattering_amplitude(reference) rtol=rtol
-        @test pressure(solution, points)≈pressure(reference, points) rtol=0.05
-        @test pressure(solution, points; field = :scattered) ≈
-              pressure(solution, points) - pressure(solution, points; field = :incident)
+        @test pressure(solution, far)≈pressure(reference, far) rtol=0.1
+        @test all(isfinite, pressure(solution, near))
+        @test pressure(solution, near; field = :scattered) ≈
+              pressure(solution, near) - pressure(solution, near; field = :incident)
     end
-    @test_throws ArgumentError bem(surface, Rigid(), 0.5;
+    @test_throws ArgumentError bem(surface, Rigid(), 4.0;
         correction = (method = :edge,), compression = (method = :none,))
-    @test_throws ArgumentError bem(surface, FluidFilled(1.2, 1.1), 0.5;
+    @test_throws ArgumentError bem(surface, FluidFilled(1.2, 1.1), 4.0;
         correction = (method = :edge,))
-    @test_throws ArgumentError mesh(Cylinder(0.5, 1.0); method = :full,
-        resolution = 0.9, mesh_order = 4, qorder = 2)
 end

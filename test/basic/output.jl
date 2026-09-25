@@ -77,3 +77,14 @@ let
         @test_throws ArgumentError mesh(body; resolution = 12, k = 100.0)
     end
 end
+
+@testset "Pressure input and region validation" begin
+    solution = modal(Sphere(0.01), Rigid(), 100.0)
+    @test_throws ArgumentError pressure(solution, "point")
+    cylinder = bem(Cylinder(0.01, 0.03), PressureRelease(), 100.0; n = 16)
+    @test_throws ArgumentError pressure(cylinder, (0.001, 0.0, 0.0))
+
+    rigid_fem = fem(Sphere(0.01), Rigid(), 50.0; n_elements = 12, order = 2, m_max = 3)
+    @test isfinite(pressure(rigid_fem, (0.012, 0.0, 0.0)))
+    @test isfinite(pressure(rigid_fem, (0.05, 0.0, 0.0)))
+end

@@ -69,6 +69,8 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "bem-")
         @time @safetestset "BEM cylinder axisymmetric" include("bem/cylinder/axisymmetric.jl")
     selected_file("bem/cylinder/full3d.jl") &&
         @time @safetestset "BEM cylinder full 3D" include("bem/cylinder/full3d.jl")
+    selected_file("bem/cylinder/edge.jl") &&
+        @time @safetestset "BEM cylinder edge quadrature" include("bem/cylinder/edge.jl")
     selected_file("bem/arbitrary.jl") &&
         @time @safetestset "BEM arbitrary" include("bem/arbitrary.jl")
 end

@@ -125,7 +125,7 @@ function _edge_self_single_layer(k, patch, anchor, options, normal = nothing)
             edge_distance = (1-v)^power*_edge_coordinate(anchor, opposite) +
                             s*((1-t)*_edge_coordinate(_EDGE_VERTICES[side], opposite) +
                                t*_edge_coordinate(_EDGE_VERTICES[mod1(side+1, 3)], opposite))
-            weight = area*measure*Inti._integration_measure(jac)*edge_distance^exponent
+            weight = area*measure*Inti._integration_measure(jac)*max(edge_distance, 0.0)^exponent
             kernel = normal === nothing ? cis(k*s*distance)/(4pi*distance) :
                      normal === :source ?
                      cis(k*s*distance) * (1-im*k*s*distance) *
@@ -227,7 +227,8 @@ function _edge_near_single_layer(k, patch, x, options; double_layer = false)
             r = norm(separation)
             lambda = complement*_edge_coordinate(anchor, patch.opposite) +
                      s*(tb*_edge_coordinate(va, patch.opposite)+t*_edge_coordinate(vb, patch.opposite))
-            weight = area*measure*s*Inti._integration_measure(jac)*lambda^patch.exponent
+            weight = area * measure * s * Inti._integration_measure(jac) *
+                     max(lambda, 0.0)^patch.exponent
             kernel = double_layer ?
                      (1-im*k*r)*cis(k*r)*dot(Inti._normal(jac, patch.orientation), separation)/(4pi*r^3) :
                      cis(k*r)/(4pi*r)
@@ -416,11 +417,11 @@ function _edge_fluid_basis(patch, roots)
     coordinates = _edge_fluid_coordinates(patch)
     powers = u -> begin
         lambda, factor, y = coordinates(u)
-        x = lambda*factor
+        x = max(lambda*factor, 0.0)
         radial = map(intervals) do (lo, hi)
             hi-lo < 0.1 ? _edge_power_difference(x, lo, hi) : x^hi
         end
-        factor^patch.exponent*SVector(map(term -> radial[first(term)]*y^last(term), terms))
+        max(factor, 0.0)^patch.exponent*SVector(map(term -> radial[first(term)]*y^last(term), terms))
     end
     matrix = reduce(vcat, transpose.(powers.(patch.refs)))
     cond(matrix) < 1e12 ||

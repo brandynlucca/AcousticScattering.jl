@@ -51,3 +51,34 @@ end
     @test isnan(diagnostics(tiny).convergence)
     @test diagnostics(tiny).converged === nothing
 end
+
+@testset "Boundary-matching building blocks on a sphere" begin
+    AS = AcousticScattering
+    body = Irregular(1.0, Float64[], Float64[])
+    mapping = AS.solve_mapping(body, 2; continuation_steps = 1)
+    k, theta0 = 0.5, pi / 3
+    @test AS.profile_radius(body, 0.7) ≈ 1.0
+    @test AS.mapping_theta(mapping, 0.7)≈0.7 atol=1e-8
+
+    for matrices in (AS._boundary_matrices, AS._rigid_boundary_matrices)
+        R, Q = matrices(mapping, k, 1; n_max = 3)
+        @test size(R) == size(Q) == (3, 3)
+        @test maximum(abs, R - AS.Diagonal(AS.diag(R))) < 1e-8
+    end
+    S, Sp = AS._interior_boundary_matrices(mapping, k / 1.02, 1; n_max = 3)
+    @test size(S) == size(Sp) == (3, 3)
+
+    soft = AS.solve_pressure_release(mapping, k, theta0; m_max = 2, n_max = 3)
+    hard = AS.solve_rigid(mapping, k, theta0; m_max = 2, n_max = 3)
+    fluid = AS.solve_fluid(mapping, k, theta0, 1.05, 1.02; m_max = 2, n_max = 3)
+    for b in (soft, hard, fluid)
+        @test size(b) == (4, 3) && all(isfinite, b)
+    end
+    @test_throws ArgumentError AS.solve_pressure_release(mapping, -1.0, theta0)
+    @test_throws ArgumentError AS.solve_rigid(mapping, -1.0, theta0)
+    @test_throws ArgumentError AS.solve_fluid(mapping, -1.0, theta0, 1.05, 1.02)
+    @test_throws ArgumentError fourier(
+        Sphere(1.0), Shelled(FluidLayer(1.1, 1.02),
+            VacuumInterior(), 0.9),
+        k; mapping_order = 2, continuation_steps = 1)
+end

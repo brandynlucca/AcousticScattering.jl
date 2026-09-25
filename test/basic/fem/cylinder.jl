@@ -46,3 +46,13 @@ using Test
     @test_throws ArgumentError fem(bent, Rigid(), k)
     @test_throws ArgumentError fem(bent, SolidElastic(2.0, 2.0, 1.0), k)
 end
+
+@testset "Axial meridian cylinder FEM" begin
+    ts = AcousticScattering.cylinder_meridian_fem_target_strength(
+        Rigid(), 0.5, 0.05, 0.1, 0.12; n_r = 6, n_theta = 12)
+    @test isfinite(ts)
+    ts_soft = AcousticScattering.cylinder_meridian_fem_target_strength(
+        PressureRelease(), 0.5, 0.05, 0.1, 0.12; n_r = 6, n_theta = 12, l_max = 5)
+    @test isfinite(ts_soft)
+    @test ts != ts_soft
+end
