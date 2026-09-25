@@ -14,6 +14,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("modal/sphere.jl")
             include("modal/cylinder.jl")
             include("modal/spheroid.jl")
+            include("modal/vesm.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "Kirchhoff")
@@ -40,6 +41,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("bem/arbitrary.jl")
             include("bem/edge.jl")
             include("bem/formulations.jl")
+            include("bem/adaptive.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "MFS")

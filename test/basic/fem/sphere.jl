@@ -75,3 +75,22 @@ using Test
         @test isfinite(target_strength(solution))
     end
 end
+
+@testset "Adaptive radial FEM" begin
+    body = Sphere(0.01)
+    k = 2pi * 12000.0 / 1477.4
+    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.05, 1.02))
+        options = (; adaptive = true, m_max = 3, n_elements_start = 10)
+        solution = fem(body, boundary, k; options..., target_tol = 1.0, max_n_elements = 40)
+        @test diagnostics(solution).refinement.converged
+        unconverged = @test_logs (:warn, r"did not converge") fem(
+            body, boundary, k; options..., target_tol = 1e-12, max_n_elements = 20)
+        @test !diagnostics(unconverged).refinement.converged
+        stalled = @test_logs (:warn, r"did not converge") fem(
+            body, boundary, k; options..., target_tol = 1e-12, max_n_elements = 30)
+        @test diagnostics(stalled).refinement.n_elements == 30
+        @test isfinite(AcousticScattering.radial_fem_target_strength_adaptive(
+            boundary, k, 0.01, 0.012; target_tol = 1.0, m_max = 3,
+            n_elements_start = 10, max_n_elements = 40))
+    end
+end

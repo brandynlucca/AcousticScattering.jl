@@ -27,3 +27,12 @@ const AS = AcousticScattering
     p, dp, quad = AS.solve_full_bem(fluid, 0.3, tetra.data; return_diagnostics = false)
     @test length(p) == length(dp) == length(quad)
 end
+
+@testset "Coupled-region target strength" begin
+    nodes = [0.0 1 0 0; 0 0 1 0; 0 0 0 1]
+    triangles = [1 1 1 2; 3 2 4 3; 2 4 3 4]
+    tetra = mesh(nodes, triangles; qorder = 2)
+    region = bem([tetra], [FluidFilled(1.2, 1.1)], 0.3)
+    @test isfinite(target_strength(region))
+    @test target_strength(region) ≈ target_strength(scattering_amplitude(region))
+end
