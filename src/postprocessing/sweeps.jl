@@ -279,6 +279,36 @@ function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondit
     return sweep
 end
 
+"""
+    incidence_angle_sweep(body::Spheroid, boundary::Union{SolidElastic, Shelled{ElasticLayer}}, k, angles; kwargs...)
+
+Sample the elastic prolate spheroid or shell backscatter at fixed exterior wavenumber `k`. The
+transition matrices do not depend on direction, so each azimuthal order is computed once and
+reused for every angle. Accepts `m_max`, `n_max` and `check` as in [`form_function`](@ref).
+"""
+function incidence_angle_sweep(body::Spheroid, boundary::_ElasticSpheroidBoundary,
+        k::Real, angles::AbstractVector{<:Real};
+        m_max::Integer = _default_elastic_orders(boundary, k, body),
+        n_max::Integer = _default_elastic_orders(boundary, k, body), check::Bool = true)
+    _validate_incidence_sweep(angles, 0.0)
+    transition = _elastic_transition_function(boundary, k, body, n_max)
+    guarded = check && boundary isa Shelled && n_max > 2 && m_max > 2
+    reduced = guarded ? _elastic_transition_function(boundary, k, body, n_max - 2) : nothing
+    change = Ref(0.0)
+    sweep = incidence_angle_sweep(angles) do incidence_angle
+        amplitude = _elastic_spheroid_amplitude(transition, k, body, incidence_angle, 0.0,
+            π - incidence_angle, π, m_max, n_max)
+        if guarded
+            coarse = _elastic_spheroid_amplitude(reduced, k, body, incidence_angle, 0.0,
+                π - incidence_angle, π, m_max - 2, n_max - 2)
+            change[] = max(change[], abs(amplitude - coarse) / abs(amplitude))
+        end
+        ModalSolution(body, boundary, k, amplitude)
+    end
+    guarded && _warn_elastic_truncation(change[])
+    return sweep
+end
+
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
     FEMSolution{_ShellFEMSurfaceData}}

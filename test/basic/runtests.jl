@@ -14,6 +14,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("modal/sphere.jl")
             include("modal/cylinder.jl")
             include("modal/spheroid.jl")
+            include("modal/spheroid_elastic.jl")
             include("modal/vesm.jl")
         end
     end

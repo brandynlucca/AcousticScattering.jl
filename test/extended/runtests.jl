@@ -22,6 +22,8 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "modal-")
         @time @safetestset "Modal sphere monopole" include("modal/sphere/monopole.jl")
     selected_file("modal/spheroid.jl") &&
         @time @safetestset "Modal spheroid" include("modal/spheroid.jl")
+    selected_file("modal/spheroid_elastic.jl") &&
+        @time @safetestset "Modal spheroid elastic" include("modal/spheroid_elastic.jl")
     selected_file("modal/cylinder.jl") &&
         @time @safetestset "Modal cylinder" include("modal/cylinder.jl")
 end

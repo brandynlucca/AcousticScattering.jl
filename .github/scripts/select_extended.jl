@@ -24,7 +24,9 @@ function affected_files(path::AbstractString)
     elseif path == "src/analytical/sphere_modal.jl"
         return section("modal/sphere/")
     elseif path == "src/analytical/spheroid_modal.jl"
-        return ["modal/spheroid.jl"]
+        return ["modal/spheroid.jl", "modal/spheroid_elastic.jl"]
+    elseif path == "src/analytical/spheroid_elastic.jl"
+        return ["modal/spheroid_elastic.jl"]
     elseif startswith(path, "src/analytical/cylinder_")
         return ["modal/cylinder.jl"]
     elseif path == "src/analytical/high_frequency.jl"

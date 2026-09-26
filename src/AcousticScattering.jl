@@ -37,6 +37,7 @@ include("analytical/vesm.jl")
 include("analytical/cylinder_modal.jl")
 include("analytical/cylinder_elastic_modal.jl")
 include("analytical/spheroid_modal.jl")
+include("analytical/spheroid_elastic.jl")
 include("analytical/high_frequency.jl")
 include("analytical/bent_cylinder.jl")
 
