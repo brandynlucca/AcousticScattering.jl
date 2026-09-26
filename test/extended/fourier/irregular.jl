@@ -71,12 +71,14 @@ let
 
     @time "Fourier matching: noncanonical bumpy profile" @testset "Fourier matching: noncanonical bumpy profile" begin
         a = 1.0
-        Rtheta(theta) = a * (1 + 0.12 * cos(3theta) - 0.05 * sin(2theta))
+        Rtheta(theta) = a * (1 + 0.12 * cos(3theta) + 0.05 * cos(2theta))
         order = 24
         profile = AS.Irregular(Rtheta, order; npoints = 400)
         mapping = AS.solve_mapping(profile, order; continuation_steps = 12)
 
         @test AS.is_admissible(mapping)
+        # Both poles lie on the axis of symmetry.
+        @test all(w -> abs(AS.mapping_surface(mapping, w)[2]) < 1e-10, (0.0, pi))
         # Self-consistency: the mapped radial distance from the origin at w must match the supplied profile evaluated at theta(w) (Eq. (28)'s relationship, checked pointwise).
         maxerr = maximum(range(0, π; length = 73)) do w
             g, f = AS.mapping_surface(mapping, w)
@@ -113,5 +115,60 @@ let
             dummy_profile, Float64[], Float64[], ComplexF64[1.0, 0.0, 1.0])
         @test AS.mapping_jacobian_squared(inadmissible, 0.0) == 0
         @test !AS.is_admissible(inadmissible)
+    end
+end
+
+let
+    a = 1.0
+    order = 24
+    # Not symmetric fore to aft, so this exercises orientation as well as shape.
+    Rtheta(theta) = a * (1 + 0.12 * cos(3theta) + 0.05 * cos(2theta))
+    profile = AS.Irregular(Rtheta, order; npoints = 400)
+    mapping = AS.solve_mapping(profile, order; continuation_steps = 12)
+    theta0 = pi / 3
+    directions = ((pi - theta0, pi), (theta0, 0.0), (pi / 2, pi / 2), (2pi / 3, pi / 4))
+    # The reference discretizes the surface the mapping actually defines, so only the boundary matching is compared.
+    function mapped_mesh(n)
+        points = [AS.mapping_surface(mapping, w) for w in range(0, pi; length = n + 1)]
+        return AS.MeridianMesh(last.(points), first.(points))
+    end
+    mesh = mapped_mesh(240)
+    function agreement(boundary, k; m_max)
+        fm = fourier(profile, boundary, k; incidence_angle = theta0,
+            mapping_order = order, continuation_steps = 12)
+        bem_sol = AS._bem_oblique(profile, boundary, k, mesh, theta0; m_max)
+        return map(directions) do (angle, azimuth)
+            expected = AS.scattering_amplitude(bem_sol; angle, azimuth)
+            actual = AS.scattering_amplitude(fm; angle, azimuth)
+            (abs(AS.target_strength(actual) - AS.target_strength(expected)),
+                abs(actual - expected) / abs(expected))
+        end
+    end
+
+    @time "Fourier matching: noncanonical asymmetric body vs. independent axisymmetric BEM" @testset "Fourier matching: noncanonical asymmetric body vs. independent axisymmetric BEM" begin
+        @test AS.is_admissible(mapping)
+        for (boundary, k) in ((PressureRelease(), 1.0), (Rigid(), 1.0), (Rigid(), 2.5),
+            (FluidFilled(1.05, 1.02), 1.0), (FluidFilled(1.05, 1.02), 2.5))
+            for (db, rel) in agreement(boundary, k; m_max = 10)
+                @test db < 0.1
+                @test rel < 0.01
+            end
+        end
+    end
+
+    @time "Fourier matching: gas contrast across the noncanonical body's resonance" @testset "Fourier matching: gas contrast across the noncanonical body's resonance" begin
+        boundary = FluidFilled(0.0012, 0.22)
+        ts = Dict{Float64, Float64}()
+        for k in (0.012, 0.0135, 0.0142)
+            for (db, rel) in agreement(boundary, k; m_max = 4)
+                @test db < 0.1
+                @test rel < 0.01
+            end
+            ts[k] = AS.target_strength(fourier(profile, boundary, k;
+                incidence_angle = theta0, mapping_order = order, continuation_steps = 12))
+        end
+        # The peak sits between the flanks, so the comparison spans the resonance rather than a smooth region.
+        @test ts[0.0135] > ts[0.012] + 10
+        @test ts[0.0135] > ts[0.0142] + 10
     end
 end

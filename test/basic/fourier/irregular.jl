@@ -22,3 +22,17 @@ using Test
     @test_throws ArgumentError fourier(body, Rigid(), 0.0; options...)
     @test_throws ArgumentError fourier(body, Rigid(), Inf; options...)
 end
+
+@testset "Irregular profile is a body of revolution" begin
+    @test_throws ArgumentError Irregular(1.0, [0.02], [0.01])
+    # The profile is mirrored about the axis, so a sine-like function fits a cosine series.
+    body = Irregular(theta -> 1 + 0.1 * sin(theta), 6)
+    @test all(iszero, body.rs)
+    @test AcousticScattering.profile_radius(body, pi / 3) ≈
+          AcousticScattering.profile_radius(body, -pi / 3)
+    body = Irregular(theta -> 1 + 0.1 * cos(3theta) + 0.05 * cos(2theta), 8)
+    mapping = AcousticScattering.solve_mapping(body, 8; continuation_steps = 4)
+    for w in (0.0, pi)
+        @test abs(AcousticScattering.mapping_surface(mapping, w)[2]) < 1e-10
+    end
+end

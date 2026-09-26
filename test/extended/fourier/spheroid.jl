@@ -147,3 +147,28 @@ let
         end
     end
 end
+
+let
+    @time "Fourier matching: default settings for elongated spheroids against axisymmetric BEM" @testset "Fourier matching: default settings for elongated spheroids against axisymmetric BEM" begin
+        theta0 = pi / 3
+        directions = ((pi - theta0, pi), (theta0, 0.0), (pi / 2, pi / 2))
+        # (aspect ratio, ka, boundary) at the default mapping order and mode count.
+        cases = ((3.0, 3.0, Rigid()), (3.0, 1.0, FluidFilled(1.05, 1.02)),
+            (4.0, 3.0, PressureRelease()), (5.0, 3.0, PressureRelease()),
+            (5.0, 1.0, FluidFilled(1.05, 1.02)))
+        for (aspect, ka, boundary) in cases, body in (Spheroid(aspect, 1.0),)
+
+            k = ka / aspect
+            bem_sol = AS.bem(body, boundary, k; method = :axisymmetric,
+                incidence_angle = theta0, n = 240, m_max = 12)
+            solution = fourier(body, boundary, k; incidence_angle = theta0)
+            @test diagnostics(solution).converged
+            for (angle, azimuth) in directions
+                expected = AS.scattering_amplitude(bem_sol; angle, azimuth)
+                actual = AS.scattering_amplitude(solution; angle, azimuth)
+                @test abs(AS.target_strength(actual) - AS.target_strength(expected)) < 0.1
+                @test abs(actual - expected) / abs(expected) < 0.01
+            end
+        end
+    end
+end

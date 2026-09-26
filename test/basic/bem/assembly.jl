@@ -87,6 +87,23 @@ end
     end
 end
 
+@testset "Panel pairs across a cylinder cap corner match adaptive integration" begin
+    k = 2.0
+    ps = AS.panels(AS.cylinder_mesh(1.0, 4.0, 24))
+    for (i, j) in ((5, 4), (4, 5), (20, 21), (21, 20)), m in (0, 3)
+
+        pj = ps[j]
+        xρ, xz = ps[i].rhom, ps[i].zm
+        projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
+        reference = AS.quadgk(0.0, 1.0; rtol = 1e-13) do s
+            ρ2, z2 = AS._panel_point(pj, s)
+            return AS._azimuthal_dGdn(k, xρ, xz, ρ2, z2, pj.nrho, pj.nz; m, rtol = 1e-13,
+                       meridian_projection = projection) * ρ2 * pj.L
+        end[1]
+        @test AS._pair_K(k, xρ, xz, pj, false, 1e-6; m) ≈ reference rtol = 1e-10
+    end
+end
+
 @testset "Oblique solve across the mode chunk boundary" begin
     ka = 1.0
     reference = scattering_amplitude(modal(Sphere(1.0), Rigid(), ka))

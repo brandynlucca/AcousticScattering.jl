@@ -1067,8 +1067,8 @@ coverage. Both convert `body` to an equivalent [`Irregular`](@ref) internally an
 for interface consistency and cross-checking, not as the recommended solver. The returned
 [`FMSolution`](@ref) keeps the original `Sphere`/`Spheroid` in its `body` field.
 
-See [Fourier matching](@ref fourier-matching-theory) for `mapping_order`/`m_max`/`n_max`
-defaults and their validated aspect-ratio range.
+A spheroid with aspect ratio above 2.5 defaults to a higher `mapping_order` and a matching `m_max`/`n_max`.
+See [Fourier matching](@ref fourier-matching-theory) for the validated aspect-ratio range.
 """
 function fourier(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwargs...)
     irregular_body = Irregular(body.radius, Float64[], Float64[])
@@ -1077,14 +1077,26 @@ function fourier(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwa
         sol.b_check)
 end
 
+const _FM_ELONGATED_ASPECT = 2.5
+
+# Mapping order and mode count for a spheroid. The usable `n_max` is limited by the mapping order, so elongated bodies take a high order and a matching mode count.
+function _spheroid_fourier_defaults(body::Spheroid, mapping_order, options)
+    aspect = max(body.a, body.b) / min(body.a, body.b)
+    aspect > _FM_ELONGATED_ASPECT || return (
+        something(mapping_order, clamp(round(Int, 6aspect), 8, 64)), options)
+    order = something(mapping_order, clamp(round(Int, 20aspect), 16, 96))
+    modes = round(Int, order / (2aspect)) + 2
+    (haskey(options, :m_max) || haskey(options, :n_max)) && return order, options
+    return order, (; m_max = modes, options...)
+end
+
 function fourier(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
-        mapping_order::Integer = clamp(
-            round(Int, 6 * max(body.a, body.b) / min(body.a, body.b)), 8, 64),
-        kwargs...)
+        mapping_order::Union{Nothing, Integer} = nothing, kwargs...)
+    mapping_order, options = _spheroid_fourier_defaults(body, mapping_order, kwargs)
     irregular_body = Irregular(mapping_order) do theta
         1 / sqrt((cos(theta) / body.a)^2 + (sin(theta) / body.b)^2)
     end
-    sol = fourier(irregular_body, boundary, k; mapping_order, kwargs...)
+    sol = fourier(irregular_body, boundary, k; mapping_order, options...)
     return FMSolution(body, sol.boundary, sol.k, sol.mapping, sol.b, sol.incidence_angle,
         sol.b_check)
 end

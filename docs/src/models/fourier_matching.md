@@ -15,10 +15,12 @@ incidence_angle_sweep(body::Irregular, boundary, k, angles)
 For a meridian profile ``R(\theta)`` (radial distance from the origin, ``\theta`` the polar angle), expand it in a Fourier series and solve for an angle-correction series ``\theta(w)`` such that the mapped coordinate system becomes exactly circular at the body surface
 
 ```math
-R(\theta) = a + \sum_{n\ge1}\left[r_n^c\cos(n\theta) + r_n^s\sin(n\theta)\right],
+R(\theta) = a + \sum_{n\ge1} r_n^c\cos(n\theta),
 \qquad
 \theta(w) = w + \sum_{l\ge1}\left[\delta_l^c\cos(lw) + \delta_l^s\sin(lw)\right].
 ```
+
+Both poles lie on the axis, so only cosine terms appear. Odd cosine harmonics still allow fore-aft asymmetry. `Irregular` fits the mirrored profile and rejects nonzero sine coefficients.
 
 The ``\delta`` coefficients solve a nonlinear system (`NLsolve.jl`, forward-mode automatic differentiation), using a continuation homotopy for bodies far from circular. The mapping is rejected (`is_admissible`) if its Jacobian vanishes anywhere outside the body.
 
@@ -56,22 +58,24 @@ Fourier matching does not converge monotonically in `n_max` for elongated bodies
 
 ## Accuracy envelope
 
-Smallest error against axisymmetric BEM among the truncations that pass the guard, with its `n_max`. `none` means no truncation passes, with the best error in parentheses. Prolate spheroids at incidence ``\pi/3``, default `mapping_order`, fluid contrasts `1.05` and `1.02`.
+Worst complex-amplitude error against axisymmetric BEM over backscatter, forward and off-plane directions, at the default settings of `fourier(Spheroid(aspect, 1), ...)`. Prolate spheroids at incidence ``\pi/3``, fluid contrasts `1.05` and `1.02`. `!` marks a solve where the truncation guard warns.
 
 | aspect | ``ka`` | pressure-release | rigid | fluid |
 |:--|:--|:--|:--|:--|
-| 1.5 | 1 | `5e-5` (6) | `5e-5` (10) | `2e-4` (10) |
-| 2 | 1 | `4e-5` (6) | `6e-5` (20) | `2e-4` (10) |
-| 3 | 1 | `6e-5` (16) | none (`3e-2`) | `4e-3` (20) |
-| 5 | 1 | `3e-4` (4) | none (`7e-2`) | none (`5e-2`) |
-| 1.5 | 3 | `2e-4` (8) | `2e-4` (10) | `6e-3` (10) |
-| 2 | 3 | `2e-4` (8) | `4e-4` (24) | `2e-4` (10) |
-| 3 | 3 | `3e-4` (16) | none (`4e-3`) | `9e-4` (24) |
-| 5 | 3 | none (`7e-3`) | none (`9e-2`) | none (`5e-2`) |
+| 1.5 | 1 | `3e-5` | `4e-5` | `1e-4` |
+| 2 | 1 | `3e-5` | `5e-5` | `2e-4` |
+| 3 | 1 | `2e-5` | `8e-4` | `3e-4` |
+| 5 | 1 | `4e-5` | `3e-2` | `8e-3` |
+| 1.5 | 3 | `1e-4` | `2e-4` | `4e-3` |
+| 2 | 3 | `2e-4` | `4e-4` | `4e-4` |
+| 3 | 3 | `7e-5` | `5e-4` | `2e-4` |
+| 5 | 3 | `2e-4` | `3e-2` `!` | `5e-3` |
 
-Up to 2:1 all boundaries meet the 0.1 dB and 1% gates. At 5:1 the default `n_max` is wrong for every boundary. The guard checks self-consistency, not error. Use `bem` for elongated bodies.
+At 5:1 the rigid boundary reaches only a few percent and the fluid boundary is marginal. Use `bem` for rigid bodies beyond 4:1.
+
+The usable `n_max` is limited by `mapping_order`. Beyond about ``\mathrm{mapping\_order}/(2\,\mathrm{aspect})+2`` the error grows rapidly, so elongated bodies (aspect above 2.5) default to `mapping_order = 20*aspect` (at most 96) and `n_max = m_max` set by that bound. The truncation guard can pass a result with an error of up to a few percent for a rigid 5:1 body. The quadrature tolerance `rtol` and node cap `maxevals` do not change the error at these settings.
 
 ## Validation
 
-Reconstruction and mapping convergence are checked against a sphere (exact) and prolate spheroids up to 10:1 aspect ratio (against the exact ellipse equation). All three boundary conditions are checked against the exact sphere modal solution and, for a prolate spheroid at oblique incidence up to 1.5:1 aspect ratio, against independent axisymmetric BEM, at backscatter,
-forward scatter and off-plane bistatic angles. The fluid boundary is checked at both weak (density and sound-speed contrasts near ``1``) and gas (strong) contrast. [Reeder et al. (2004)](https://doi.org/10.1121/1.1648318) validate the method against measured fish morphology.
+Reconstruction and mapping convergence are checked against a sphere (exact) and prolate spheroids up to 10:1 aspect ratio (against the exact ellipse equation). All three boundary conditions are checked against the exact sphere modal solution and, for prolate spheroids at oblique incidence up to 5:1 aspect ratio, against independent axisymmetric BEM, at backscatter,
+forward scatter and off-plane bistatic angles. The fluid boundary is checked at both weak (density and sound-speed contrasts near ``1``) and gas (strong) contrast. A fore-aft asymmetric noncanonical body (``R(\theta)=1+0.12\cos 3\theta+0.05\cos 2\theta``) agrees with axisymmetric BEM on the mapped surface within `3e-4` in complex amplitude for all three boundaries, including gas contrast across its resonance. [Reeder et al. (2004)](https://doi.org/10.1121/1.1648318) validate the method against measured fish morphology.

@@ -520,7 +520,7 @@ function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, r
 end
 
 # Meridian separation selects panel quadrature; ring separation separately selects azimuthal quadrature.
-const _AZIMUTHAL_FAR_FACTOR = 0.5
+const _AZIMUTHAL_FAR_FACTOR = 0.75
 
 # Whether (ρ,z) is far enough from panel `pj` (relative to the panel's own
 # arc length) for the fixed-order azimuthal rule to be safe.
