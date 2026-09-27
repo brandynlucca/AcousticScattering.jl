@@ -1,6 +1,6 @@
 # [FEM and shell coupling](@id fem-theory)
 
-The FEM paths discretize acoustic or elastic differential equations and couple them to outgoing acoustic fields. Radial and meridian formulations are available. Full 3D volume FEM is not supported.
+The FEM paths discretize acoustic or elastic differential equations and couple them to outgoing acoustic fields. Radial and meridian formulations are available. Full 3D volume FEM is available for spheres and spheroids.
 
 ## Radial acoustic FEM and DtN
 
@@ -181,6 +181,35 @@ Check these controls separately:
 - `rtol`: acoustic boundary-integral quadrature tolerance.
 
 Compare complex amplitude, including phase, under refinement. Near elastic or cavity resonances, both meridional and thickness resolution can move the response substantially. Reducing quadrature tolerance alone does not resolve a coarse structural mesh. The coupled acoustic formulation has no irregular-frequency stabilization, so convergence of a single linear solve does not establish accuracy at every frequency.
+
+## Full 3D volume FEM
+
+`method = :volume` meshes the body and the surrounding fluid with curved order-2 tetrahedra. Fluid regions carry pressure and solid regions carry displacement, with continuity of normal displacement and traction across interfaces. It supports `Sphere` and `Spheroid` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries, with a fluid or empty interior.
+
+The default `closure = :pml` truncates the exterior with a perfectly matched layer of thickness `pml_thickness`, one wavelength by default. It is a sphere of radius `domain_radius`, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that domain is under 60% of the spherical volume. `closure = :pml_spherical` and `:pml_spheroidal` force a shape, and `closure = :dtn` uses the exact Dirichlet-to-Neumann map on a sphere instead. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
+
+```julia
+solution = fem(Spheroid(0.75, 0.25), SolidElastic(2.7, 4.2, 2.1), 1.0;
+    method = :volume, incidence_angle = pi / 3)
+scattering_amplitude(solution; angle = pi, azimuth = 0.0)
+```
+
+Set `points_per_wavelength` for the fluid and the shortest solid wave, or `h` and `h_body` directly. `solver = :auto` uses a direct sparse solve below 60,000 unknowns and GMRES above, preconditioned by an incomplete LU factorization of the matrix with its wave terms shifted by `1 + i`. It falls back to the direct solve if GMRES does not converge, and `diagnostics(solution)` reports the solver and its iteration count. Use `solver = :direct` or `:iterative` to force one, and `ilu_tolerance` and `solver_tolerance` to tune the iteration. An aluminium sphere at `ka = 6` with 210,000 unknowns solves in about 3 minutes and agrees with the modal series to `0.4%`. Cost grows with the domain volume in wavelengths, so use the meridian, transition-matrix or BEM solvers where they apply and reserve volume FEM for bodies they do not cover.
+
+### Coupled fluid and elastic regions
+
+`fem(bodies, materials, k; method = :volume)` solves nested or disjoint regions, such as a fish body with a gas-filled swimbladder or a bony inclusion. Each region is a `Sphere` or `Spheroid` with the contrasts of its `FluidFilled` or `SolidElastic` material relative to the exterior. `parents`, `centers` and `orientations` place the regions, where each orientation is the direction of the symmetry axis and the origin is the phase reference of the far field.
+
+```julia
+materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]
+tilt = deg2rad(10)
+solution = fem([Spheroid(0.1, 0.02), Spheroid(0.025, 0.007)], materials, 2pi * 2250 / 1477.4;
+    method = :volume, incidence_angle = pi / 2, centers = [[0, 0, 0], [0.003, 0, 0.010]],
+    orientations = [[0, 0, 1], [sin(tilt), 0, cos(tilt)]])
+target_strength(solution)
+```
+
+The mesh size inside each region follows its own wavelength, so a gas region is refined much more than the flesh around it. A tilted, displaced bladder at 2250 Hz agrees with the coupled-region `bem` to `0.4%` in complex amplitude. An elastic shell built from a solid region around a fluid region agrees with the modal series for a sphere and the transition matrix for a spheroid to a few percent, and the elements in a thin layer are sized from its thickness.
 
 ## Solve diagnostics
 

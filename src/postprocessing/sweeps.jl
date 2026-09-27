@@ -284,7 +284,7 @@ end
 
 Sample the elastic prolate spheroid or shell backscatter at fixed exterior wavenumber `k`. The
 transition matrices do not depend on direction, so each azimuthal order is computed once and
-reused for every angle. Accepts `m_max`, `n_max` and `check` as in [`form_function`](@ref).
+reused for every angle. Accepts `m_max`, `n_max` and `check` as in `form_function`.
 """
 function incidence_angle_sweep(body::Spheroid, boundary::_ElasticSpheroidBoundary,
         k::Real, angles::AbstractVector{<:Real};

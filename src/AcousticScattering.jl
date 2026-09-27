@@ -12,6 +12,7 @@ using Gmsh: gmsh
 using HMatrices: HMatrices
 using LinearMaps: LinearMap
 using IterativeSolvers: IterativeSolvers
+using IncompleteLU: IncompleteLU
 using NLsolve: NLsolve
 using ForwardDiff: ForwardDiff
 using StaticArrays: SVector, SMatrix, MVector
@@ -51,6 +52,7 @@ include("engine/elastic_radial_fem.jl")
 include("engine/fluid_shell_radial_fem.jl")
 include("engine/cylinder_elastic_radial_fem.jl")
 include("engine/spheroid_meridian_fem.jl")
+include("engine/fem3d.jl")
 include("engine/mfs.jl")
 include("engine/shell_fem.jl")
 include("engine/shell_fem_general.jl")
@@ -63,6 +65,7 @@ include("engine/hybrid_general_shell.jl")
 include("postprocessing/farfield.jl")
 
 include("api.jl")
+include("engine/fem3d_driver.jl")
 include("surface_validation.jl")
 include("surface_mesh.jl")
 include("cylinder_surface.jl")

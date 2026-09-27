@@ -31,6 +31,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("fem/sphere.jl")
             include("fem/spheroid.jl")
             include("fem/cylinder.jl")
+            include("fem/volume.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "BEM")

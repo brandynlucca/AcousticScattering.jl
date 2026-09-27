@@ -8,8 +8,9 @@ Start with the least costly method that supports both your physics and your desi
     <tr>
       <th>Boundary condition</th>
       <th tabindex="0" data-tooltip="Analytical series solution. Exact for the sphere and spheroid, an approximation for finite cylinders.">Modal</th>
+      <th tabindex="0" data-tooltip="Transition-matrix solution in spheroidal coordinates for elastic spheroids and shells. Called through modal.">T-matrix</th>
       <th tabindex="0" data-tooltip="High-frequency physical-optics approximation. Not established as valid at low frequency.">Kirchhoff</th>
-      <th tabindex="0" data-tooltip="No full 3D volume implementation. Only radial, meridian and shell reductions.">FEM</th>
+      <th tabindex="0" data-tooltip="Radial, meridian and shell reductions, and full 3D volume FEM for spheres and spheroids.">FEM</th>
       <th tabindex="0" data-tooltip="Boundary element method. Discretizes boundary integral equations over an axisymmetric or supplied mesh.">BEM</th>
       <th tabindex="0" data-tooltip="Method of fundamental solutions. Fits fields produced by fictitious point sources.">MFS</th>
       <th tabindex="0" data-tooltip="Fourier matching between a canonical body and a general numerical solver.">Fourier</th>
@@ -22,13 +23,14 @@ Start with the least costly method that supports both your physics and your desi
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use an exact finite-length reduction. Bent cylinders use a near-broadside correction. Neither is an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
+      <td></td>
       <td>
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>
       </td>
       <td>
-        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction.">ℹ️</span>,
-        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction, or full 3D volume FEM.">ℹ️</span>,
         <a href="../fem/#fem-theory">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only, for straight cylinders. FEM does not model bend curvature and always uses flat caps.">ℹ️</span>
       </td>
       <td>
@@ -53,13 +55,14 @@ Start with the least costly method that supports both your physics and your desi
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use an exact finite-length reduction. Bent cylinders use a near-broadside correction. Neither is an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
+      <td></td>
       <td>
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>
       </td>
       <td>
-        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction.">ℹ️</span>,
-        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction, or full 3D volume FEM.">ℹ️</span>,
         <a href="../fem/#fem-theory">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only, for straight cylinders. FEM does not model bend curvature and always uses flat caps.">ℹ️</span>
       </td>
       <td>
@@ -84,13 +87,14 @@ Start with the least costly method that supports both your physics and your desi
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use an exact finite-length reduction. Bent cylinders use a near-broadside correction. Neither is an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
+      <td></td>
       <td>
         Sphere, Spheroid,
         <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface approximation.">ℹ️</span>
       </td>
       <td>
-        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction.">ℹ️</span>,
-        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction, or full 3D volume FEM.">ℹ️</span>,
         <a href="../fem/#fem-theory">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Meridian reduction only, for straight cylinders. FEM does not model bend curvature and always uses flat caps.">ℹ️</span>
       </td>
       <td>
@@ -115,9 +119,13 @@ Start with the least costly method that supports both your physics and your desi
         Sphere,
         Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders only, using a finite-length approximation. Not an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
+      <td>
+        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix in spheroidal coordinates, prolate or oblate.">ℹ️</span>
+      </td>
       <td></td>
       <td>
-        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction, or full 3D volume FEM.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM only, prolate or oblate.">ℹ️</span>,
         <a href="../fem/#fem-theory">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction, for straight cylinders only. Not an exact closed-finite-cylinder solution. FEM does not model bend curvature.">ℹ️</span>
       </td>
       <td></td>
@@ -130,11 +138,29 @@ Start with the least costly method that supports both your physics and your desi
         Sphere,
         Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders only, using a finite-length approximation. Not an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
+      <td>
+        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
+      </td>
       <td></td>
       <td>
-        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction, or coupled thin/general structural shell FEM.">ℹ️</span>,
-        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Coupled thin/general structural shell FEM only. The thin method supports axial incidence.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction, coupled thin/general structural shell FEM, or full 3D volume FEM.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Coupled thin/general structural shell FEM, where the thin method supports axial incidence, or full 3D volume FEM.">ℹ️</span>,
         <a href="../fem/#fem-theory">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial reduction only, for straight cylinders. Not an exact closed-finite-cylinder solution. FEM does not model bend curvature.">ℹ️</span>
+      </td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Elastic shell, empty interior</td>
+      <td></td>
+      <td>
+        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
+      </td>
+      <td></td>
+      <td>
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM only.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM only, prolate or oblate.">ℹ️</span>
       </td>
       <td></td>
       <td></td>
@@ -143,6 +169,7 @@ Start with the least costly method that supports both your physics and your desi
     <tr>
       <td>Fluid shell, fluid or vacuum interior</td>
       <td>Sphere</td>
+      <td></td>
       <td>
         <a href="../kirchhoff/#kirchhoff-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Layer-reflection approximation.">ℹ️</span>
       </td>
@@ -165,6 +192,7 @@ Start with the least costly method that supports both your physics and your desi
       <td></td>
       <td></td>
       <td></td>
+      <td></td>
     </tr>
     <tr>
       <td>Coupled fluid regions, nested or disjoint</td>
@@ -173,6 +201,10 @@ Start with the least costly method that supports both your physics and your desi
       </td>
       <td></td>
       <td></td>
+      <td>
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM of nested or disjoint fluid and elastic regions, with any pose.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM of nested or disjoint fluid and elastic regions, with any pose.">ℹ️</span>
+      </td>
       <td>
         <a href="../boundary_methods/#coupled-fluid-regions">Arbitrary</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Arbitrary means a user-supplied surface mesh of any shape. Every interface is a supplied mesh, each forming one connected boundary. Contrasts are relative to the unbounded exterior.">ℹ️</span>
       </td>
@@ -187,7 +219,7 @@ Start with the least costly method that supports both your physics and your desi
 
 - Use sphere or spheroid modal methods as analytical references, while checking series convergence and special-function conditioning. 
 - Use Kirchhoff to explore physical-optics behavior. A numerically converged surface integral   does not establish validity of physical optics at low frequency. 
-- Use FEM or BEM when checking analytical reductions, geometry discretization, or interface   coupling. Compare against a canonical case first.
+- Use FEM or BEM when checking analytical reductions, geometry discretization, or interface   coupling. Compare against a canonical case first. Full 3D volume FEM is the general-purpose reference for elastic and shelled spheres and spheroids.
 - Use MFS when source placement is well controlled and its supported geometry suits the problem.
 - Use BEM surface results for repeated observation-angle queries. Supported radial FEM spheres also provide complex backscatter. Cylinder radial and meridian FEM paths retain target strength   only.
 - Use Fourier matching for a smooth irregular body of revolution between the canonical (sphere/spheroid) and general numerical (BEM/MFS/FEM) solvers. See [Fourier matching](@ref fourier-matching-theory).

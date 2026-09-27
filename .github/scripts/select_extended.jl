@@ -52,6 +52,8 @@ function affected_files(path::AbstractString)
         return section("bem/")
     elseif path == "src/engine/spheroid_meridian_fem.jl"
         return ["fem/spheroid/meridian.jl", "fem/spheroid/coupled.jl"]
+    elseif path in ("src/engine/fem3d.jl", "src/engine/fem3d_driver.jl")
+        return ["fem/sphere/volume.jl", "fem/spheroid/volume.jl"]
     elseif path == "src/engine/cylinder_meridian_fem.jl"
         return ["fem/cylinder/meridian.jl"]
     elseif path == "src/engine/cylinder_elastic_radial_fem.jl"

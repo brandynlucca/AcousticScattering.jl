@@ -34,7 +34,16 @@ Increase `m_max` to test truncation. The keyword uses “m” although the sum h
 Separation in prolate/oblate spheroidal coordinates yields angular and radial spheroidal wave functions. Rigid/soft boundaries decouple appropriate modes. A penetrable spheroid generally couples angular degrees because interior and exterior wavenumbers differ.
 
 `FluidFilled(...; coupling = :full)` solves the off-diagonal coupling system. `:diagonal` neglects that coupling and changes the model approximation. Spheroidal wave functions are evaluated with SpheroidalWaves. Increase both `m_max` and `n_max`.
+
 Higher orders can become unreliable when radial functions are poorly conditioned. [Furusawa (1988)](https://www.jstage.jst.go.jp/article/ast1980/9/1/9_1_13/_article) develops the prolate spheroidal fish-target models behind this treatment.
+
+## [Elastic spheroid transition matrix](@id tmatrix-theory)
+
+An elastic spheroid or shell couples all spheroidal degrees, so it is solved as a dense transition matrix rather than a diagonal or banded series. The matrix comes from Betti surface integrals evaluated numerically on each interface. It is selected through `modal` and appears as its own column in [Choosing a solver](@ref solver-selection).
+
+`SolidElastic` on a `Spheroid` uses the transition matrix in spheroidal coordinates (Hackman, J. Acoust. Soc. Am. 75, 35-45, 1984). It reduces to the elastic sphere as the aspect ratio approaches one and to the rigid spheroid as the solid becomes stiff and dense.
+
+`Shelled(ElasticLayer(...), FluidInterior(...) or VacuumInterior(), radius_ratio)` on a `Spheroid` is an elastic shell with a confocal inner surface, whose equatorial semi-axis is `radius_ratio` times the outer one. An oblate shell needs a `radius_ratio` above the focal ratio so that this surface exists. Elongated and thin shells converge slowly in `n_max`. Each shell solve is repeated with `m_max` and `n_max` reduced by 2 and warns when the amplitude changes by more than 1%. Use `n_max` near 30 for a 3:1 shell with `radius_ratio = 0.8`, and check against `bem` beyond that.
 
 ## Finite and bent cylinders
 

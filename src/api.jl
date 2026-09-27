@@ -392,6 +392,11 @@ end
 
 # --- `fem`: radial FEM+DtN and meridian FEM ---------------------------------
 
+function _fem_volume_solution(body, boundary, k::Real; kwargs...)
+    return FEMSolution(
+        body, boundary, k, :volume, _fem_volume(body, boundary, k; kwargs...))
+end
+
 """
     fem(body::AbstractBody, boundary::AbstractBoundaryCondition, k; method=:radial, R=1.2*characteristic_radius, incidence_angle=π/2, adaptive=false, kwargs...)
 
@@ -407,6 +412,15 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
 - `:meridian`: 2D (ρ,z) meridian FEM with the angular part discretized. `Sphere` supports only
   axial incidence. `Cylinder`/`Spheroid` support general `incidence_angle`.
 
+- `:volume`: full-3D finite elements on curved order-2 tetrahedra. Covers `Sphere` and `Spheroid`
+  with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries,
+  with a fluid or empty interior. A perfectly matched layer closes the exterior, spherical or
+  (`closure = :pml_spheroidal`) a confocal spheroid, and `closure = :pml` picks the smaller domain. An
+  exact Dirichlet-to-Neumann map is available with `closure = :dtn`. Accepts `incidence_angle`,
+  `incidence_azimuth`, `points_per_wavelength`, `domain_radius`, `clearance`, `pml_thickness`,
+  `pml_sigma`, and `solver` (`:auto`, `:direct` or `:iterative`), and supports `angle`/`azimuth` in
+  [`scattering_amplitude`](@ref).
+
 `R` is the Dirichlet-to-Neumann truncation radius in m, default `1.2` times the body's
 characteristic radius. See `fem(shell::Shell, ...)` for the elastic-shell/fluid-coupling case.
 
@@ -415,6 +429,7 @@ See [FEM and shell coupling](@ref fem-theory) for field normalization and per-bo
 """
 function fem(body::Sphere, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :radial, R::Real = 1.2body.radius, adaptive::Bool = false, kwargs...)
+    method === :volume && return _fem_volume_solution(body, boundary, k; kwargs...)
     reports = _SolveReports()
     if method === :radial
         modes = adaptive ?
@@ -439,8 +454,9 @@ end
 
 function fem(
         body::Sphere, boundary::SolidElastic, k::Real; method::Symbol = :radial, kwargs...)
-    method === :radial ||
-        throw(ArgumentError("fem(::Sphere, ::SolidElastic, ...) only supports method=:radial"))
+    method === :volume && return _fem_volume_solution(body, boundary, k; kwargs...)
+    method === :radial || throw(ArgumentError(
+        "fem(::Sphere, ::SolidElastic, ...) supports method=:radial or :volume, got $method"))
     reports = _SolveReports()
     modes = _solid_elastic_sphere_radial_fem_modes(
         k, body.radius; solve_reports = reports,
@@ -454,8 +470,9 @@ end
 function fem(
         body::Sphere, boundary::Shelled{ElasticLayer, FluidInterior},
         k::Real; method::Symbol = :radial, kwargs...)
-    method === :radial ||
-        throw(ArgumentError("fem(::Sphere, ::Shelled{ElasticLayer,FluidInterior}, ...) only supports method=:radial"))
+    method === :volume && return _fem_volume_solution(body, boundary, k; kwargs...)
+    method === :radial || throw(ArgumentError(
+        "fem(::Sphere, ::Shelled{ElasticLayer,FluidInterior}, ...) supports method=:radial or :volume, got $method"))
     reports = _SolveReports()
     identical_fluid = boundary.material.interior_coupling === :identical_fluid
     modes = _elastic_shell_sphere_radial_fem_modes(
@@ -521,14 +538,81 @@ function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled
         method::Symbol = :meridian, R::Real = 1.2max(body.a, body.b), incidence_angle::Real = π /
                                                                                               2,
         m_max::Integer = _default_mode_count(k * max(body.a, body.b)), kwargs...)
-    method === :meridian ||
-        throw(ArgumentError("fem(::Spheroid, ...) only supports method=:meridian"))
+    method === :volume &&
+        return _fem_volume_solution(body, boundary, k; incidence_angle, kwargs...)
+    method === :meridian || throw(ArgumentError(
+        "fem(::Spheroid, ...) supports method=:meridian or :volume, got $method"))
     reports = _SolveReports()
     ts = spheroid_meridian_fem_target_strength(
         boundary, k, body.a, body.b, R, incidence_angle; m_max, solve_reports = reports, kwargs...)
     report = _summarize_solves(reports; method, solver_options = (;
         R, incidence_angle, m_max, kwargs...))
     return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
+end
+
+struct _VolumeRegionGeometry <: AbstractBody
+    bodies::Vector{AbstractBody}
+    centers::Vector{Vector{Float64}}
+    orientations::Vector{Vector{Float64}}
+    parents::Vector{Int}
+end
+
+struct _VolumeRegionMaterials <: AbstractBoundaryCondition
+    materials::Vector{AbstractBoundaryCondition}
+end
+
+"""
+    fem(bodies::AbstractVector{<:Union{Sphere,Spheroid}}, materials::AbstractVector{<:Union{FluidFilled,SolidElastic}}, k;
+        method=:volume, parents=collect(0:length(bodies)-1), centers, orientations,
+        incidence_angle=π/2, incidence_azimuth=0, kwargs...)
+
+Full-3D volume FEM of coupled fluid and elastic regions, for example a fish body with a gas-filled
+swimbladder and a bony backbone. Region `i` is `bodies[i]` with the contrasts of `materials[i]`
+relative to the unbounded exterior. `parents[i]` is the region immediately outside it, with `0` for the
+exterior, and the default is a nested chain. `centers[i]` is the region's center and
+`orientations[i]` the direction of its symmetry axis, in the frame whose origin is the phase
+reference of the far field. Regions may be nested or disjoint but must not partially overlap.
+The keywords of the single-body `method = :volume` apply, except `closure = :pml_spheroidal`.
+
+Returns a [`FEMSolution`](@ref). Post-process with `scattering_amplitude(sol; angle, azimuth)`
+or `target_strength(sol; angle, azimuth)`.
+"""
+function fem(bodies::AbstractVector{<:AbstractBody},
+        materials::AbstractVector{<:AbstractBoundaryCondition}, k::Real;
+        method::Symbol = :volume,
+        parents::AbstractVector{<:Integer} = collect(0:(length(bodies) - 1)),
+        centers = [zeros(3) for _ in bodies],
+        orientations = [[0.0, 0.0, 1.0] for _ in bodies], kwargs...)
+    method === :volume || throw(ArgumentError(
+        "fem(::AbstractVector, ::AbstractVector, ...) only supports method=:volume"))
+    all(b -> b isa Union{Sphere, Spheroid}, bodies) || throw(ArgumentError(
+        "region bodies must be Sphere or Spheroid"))
+    all(m -> m isa Union{FluidFilled, SolidElastic}, materials) || throw(ArgumentError(
+        "region materials must be FluidFilled or SolidElastic"))
+    data = _fem_volume_regions(
+        bodies, materials, k; parents, centers, orientations, kwargs...)
+    geometry = _VolumeRegionGeometry(collect(AbstractBody, bodies),
+        [Float64.(c) for c in centers], [Float64.(o) for o in orientations],
+        collect(Int, parents))
+    return FEMSolution(
+        geometry, _VolumeRegionMaterials(collect(AbstractBoundaryCondition, materials)), k,
+        :volume, data)
+end
+
+function fem(body::Sphere, boundary::Shelled{ElasticLayer, VacuumInterior}, k::Real;
+        method::Symbol = :volume, kwargs...)
+    method === :volume || throw(ArgumentError(
+        "fem(::Sphere, ::Shelled{ElasticLayer,VacuumInterior}, ...) only supports method=:volume"))
+    return _fem_volume_solution(body, boundary, k; kwargs...)
+end
+
+function fem(body::Spheroid,
+        boundary::Union{SolidElastic,
+            Shelled{ElasticLayer, <:Union{FluidInterior, VacuumInterior}}},
+        k::Real; method::Symbol = :volume, incidence_angle::Real = π / 2, kwargs...)
+    method === :volume || throw(ArgumentError(
+        "fem(::Spheroid, ::Union{SolidElastic,Shelled{ElasticLayer}}, ...) only supports method=:volume"))
+    return _fem_volume_solution(body, boundary, k; incidence_angle, kwargs...)
 end
 
 # --- Shared geometry helpers (bem/mfs) --------------------------------------
@@ -1237,6 +1321,18 @@ function scattering_amplitude(sol::FEMSolution{_ScalarFEMData}; kwargs...)
         "retains only target strength. Use target_strength(sol) " *
         "instead, or use modal(...)/kirchhoff(...) for this body/boundary combination if you need " *
         "the complex amplitude."))
+end
+
+function scattering_amplitude(sol::FEMSolution{_VolumeFEMData};
+        angle::Real = π - sol.data.incidence_angle,
+        azimuth::Real = sol.data.incidence_azimuth + π)
+    return _volume_amplitude(sol.data, sol.k; angle, azimuth)
+end
+
+function target_strength(sol::FEMSolution{_VolumeFEMData};
+        angle::Real = π - sol.data.incidence_angle,
+        azimuth::Real = sol.data.incidence_azimuth + π)
+    return target_strength(scattering_amplitude(sol; angle, azimuth))
 end
 
 function target_strength(sol::FEMSolution{_ShellFEMSurfaceData};
