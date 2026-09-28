@@ -1,6 +1,6 @@
 # [Transition-matrix solutions](@id tmatrix-theory)
 
-`tmatrix` solves scattering by elastic prolate and oblate spheroids and elastic shells in spheroidal coordinates (Hackman, J. Acoust. Soc. Am. 75, 35-45, 1984). It returns a `TMatrixSolution`.
+`tmatrix` solves scattering by elastic prolate and oblate spheroids and elastic shells in spheroidal coordinates ([Hackman, 1984](https://doi.org/10.1121/1.390297)). It returns a `TMatrixSolution`.
 
 ## Field expansions
 

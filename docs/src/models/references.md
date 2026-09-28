@@ -24,6 +24,10 @@ These references cover the scattering models and numerical methods discussed in 
   Society of America, 114, 2799–2811.
   [DOI: 10.1121/1.1616925](https://doi.org/10.1121/1.1616925).
   Shell kinematics, elastic operators, and natural frequencies.
+- Hackman, R. H. (1984). *The transition matrix for acoustic and elastic wave scattering in
+  prolate spheroidal coordinates*. Journal of the Acoustical Society of America, 75, 35-45.
+  [DOI: 10.1121/1.390297](https://doi.org/10.1121/1.390297).
+  Spheroidal-coordinate transition matrix underlying `tmatrix`.
 - Yan, Z. Y. (2017). *Simulation of sound transmission through thin elastic shell by the
   coupled FEM/BEM*. International Conference on Computational Methods.
   [Conference paper](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf).
