@@ -111,23 +111,36 @@ function _elastic_surface_samples(m::Integer, n_max::Integer, f::Real, xi0::Real
     basis = _elastic_basis_list(m, n_max)
     samples = zeros(6, length(basis), length(etas))
     frames = [_elastic_node_frame(f, xi0, eta, phi, spheroid) for eta in etas]
-    for (b, (tau, parity, l)) in enumerate(basis)
-        c = tau == 3 ? kL * f : kT * f
-        wavenumber = tau == 3 ? kL : kT
-        Rjet, lambda = _elastic_radial_jet(m, l, c, xi0, spheroid; radial_kind)
-        Sjets = _elastic_angular_jets(m, l, c, etas, lambda, spheroid)
-        for (q, eta) in enumerate(etas)
-            p, exi, eeta, ephi = frames[q]
-            u = _elastic_basis_field(
-                tau, m, f, xi0, eta, Rjet, Sjets[q], lambda, wavenumber, parity, spheroid)
-            value = u(p)
-            J = ForwardDiff.jacobian(u, p)
-            traction = (lame_lambda * (J[1, 1] + J[2, 2] + J[3, 3]) * I(3) +
-                        mu * (J + J')) * exi
-            samples[:, b, q] .= (dot(value, exi) / cos_m, dot(value, eeta) / cos_m,
-                m == 0 ? 0.0 : dot(value, ephi) / sin_m,
-                dot(traction, exi) / cos_m, dot(traction, eeta) / cos_m,
-                m == 0 ? 0.0 : dot(traction, ephi) / sin_m)
+    # Each degree's basis function is independent (own SpheroidalWaves calls, own column of
+    # `samples`), so this parallelizes over the outer index directly. Empirically confirmed
+    # thread-safe against SpheroidalWaves v0.5.1, see benchmarks/swf_thread_safety_audit.jl.
+    fill_basis!(b) =
+        let (tau, parity, l) = basis[b]
+            c = tau == 3 ? kL * f : kT * f
+            wavenumber = tau == 3 ? kL : kT
+            Rjet, lambda = _elastic_radial_jet(m, l, c, xi0, spheroid; radial_kind)
+            Sjets = _elastic_angular_jets(m, l, c, etas, lambda, spheroid)
+            for (q, eta) in enumerate(etas)
+                p, exi, eeta, ephi = frames[q]
+                u = _elastic_basis_field(
+                    tau, m, f, xi0, eta, Rjet, Sjets[q], lambda, wavenumber, parity, spheroid)
+                value = u(p)
+                J = ForwardDiff.jacobian(u, p)
+                traction = (lame_lambda * (J[1, 1] + J[2, 2] + J[3, 3]) * I(3) +
+                            mu * (J + J')) * exi
+                samples[:, b, q] .= (dot(value, exi) / cos_m, dot(value, eeta) / cos_m,
+                    m == 0 ? 0.0 : dot(value, ephi) / sin_m,
+                    dot(traction, exi) / cos_m, dot(traction, eeta) / cos_m,
+                    m == 0 ? 0.0 : dot(traction, ephi) / sin_m)
+            end
+        end
+    if Threads.nthreads() > 1
+        Threads.@threads for b in eachindex(basis)
+            fill_basis!(b)
+        end
+    else
+        for b in eachindex(basis)
+            fill_basis!(b)
         end
     end
     return basis, samples
