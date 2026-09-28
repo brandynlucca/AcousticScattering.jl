@@ -287,6 +287,32 @@ function _validate_surface_edge(a, b, edge)
 end
 
 """
+    kirchhoff(surface::Mesh, boundary, k; incidence_angle=π/2, incidence_azimuth=0)
+
+Kirchhoff (physical-optics) backscattering amplitude on a supplied full-3D `surface`, retaining
+its actual shape, normals and any endcaps: the same surface integral the canonical-shape methods
+evaluate in closed form, `f = Rc·(k/2π) ∫∫_illuminated (n̂·d̂) e^{2ik d̂·y} dS` (`Rc` from
+`reflection_coefficient`, `d̂` the incident direction, illuminated where `n̂·d̂ > 0`), now
+a direct sum over `surface`'s own quadrature nodes. Reproduces `kirchhoff(Sphere/Spheroid, ...)`
+to mesh-discretization accuracy when fed a matching generated mesh. Illumination is the local
+outward normal against the incident direction, not a hidden-surface check, so a concave surface
+can misclassify a self-shadowed region as illuminated. Returns a [`KirchhoffSolution`](@ref).
+"""
+function kirchhoff(surface::Mesh{<:Inti.Quadrature}, boundary::AbstractBoundaryCondition,
+        k::Real; incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0)
+    Rc = reflection_coefficient(boundary)
+    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
+    total = zero(ComplexF64)
+    for q in surface.data
+        nd = dot(q.normal, direction)
+        nd > 0 || continue
+        total += nd * cis(2k * dot(direction, q.coords)) * q.weight
+    end
+    f = Rc * (k / (2π)) * total
+    return KirchhoffSolution(surface.body, boundary, Float64(k), f)
+end
+
+"""
     bem(surface::Mesh, boundary, k; incidence_angle=π/2, incidence_azimuth=0, kwargs...)
 
 Solve scattering on a supplied full-3D `surface` with rigid, pressure-release or homogeneous
