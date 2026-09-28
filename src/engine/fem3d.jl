@@ -1,5 +1,4 @@
-# Full-3D finite elements on order-2 curved tetrahedra (Gmsh meshes, Ferrite element integrals). The scattered pressure is solved in
-# the fluid regions and the displacement in an elastic body, with a spherical PML or an exact spherical Dirichlet-to-Neumann exterior closure.
+# Full-3D finite elements on order-2 curved tetrahedra (Gmsh meshes, Ferrite integrals) with a PML or exact spherical DtN exterior closure.
 
 const _VOLUME_IP = Ferrite.Lagrange{Ferrite.RefTetrahedron, 2}()
 const _VOLUME_GIP = Ferrite.geometric_interpolation(Ferrite.QuadraticTetrahedron)
@@ -13,26 +12,23 @@ const _REGION_FLUID = 2
 const _REGION_PML = 3
 const _REGION_INTERIOR = 4
 
-# Rotation taking the body frame to the frame in which the incident wave travels along +z.
-function _volume_rotation(incidence_angle::Real, incidence_azimuth::Real)
-    cz, sz = cos(incidence_azimuth), sin(incidence_azimuth)
-    cy, sy = cos(incidence_angle), sin(incidence_angle)
-    Rz = [cz sz 0; -sz cz 0; 0 0 1]
-    Ry = [cy 0 -sy; 0 1 0; sy 0 cy]
-    return Ry * Rz
-end
-
-# Whether every element of the grid has a positive Jacobian at all quadrature points.
-function _volume_valid_grid(grid)
-    cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
-    for cell in grid.cells
-        try
-            Ferrite.reinit!(cv, cell, [grid.nodes[i].x for i in cell.nodes])
-        catch
-            return false
+# Whether every kept element of the grid has a positive Jacobian at all quadrature points.
+function _volume_valid_grid(grid, labels)
+    valid = Threads.Atomic{Bool}(true)
+    nthreads = Threads.nthreads()
+    Threads.@threads :static for t in 1:nthreads
+        cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
+        for cell_id in t:nthreads:length(grid.cells)
+            labels[cell_id] == 0 && continue
+            cell = grid.cells[cell_id]
+            try
+                Ferrite.reinit!(cv, cell, [grid.nodes[i].x for i in cell.nodes])
+            catch
+                valid[] = false
+            end
         end
     end
-    return true
+    return valid[]
 end
 
 _body_level(x, semi_axes) = (x[1]^2 + x[2]^2) / semi_axes[1]^2 + x[3]^2 / semi_axes[2]^2
@@ -41,10 +37,7 @@ _body_level(x, semi_axes) = (x[1]^2 + x[2]^2) / semi_axes[1]^2 + x[3]^2 / semi_a
 const _MESH_REGION_SIZE = Ref{Any}(nothing)
 _mesh_size_callback(dim, tag, x, y, z, lc) = _MESH_REGION_SIZE[](x, y, z, lc)
 
-# Order-2 tetrahedral mesh of the bodies, each a spheroid of `axes`, `center` and `rotation` in the solution frame with its own
-# surface `size`, inside the spheroid `domain_axes` rotated by `domain_rotation`. When `interface_axes` is not `nothing` the fluid and
-# PML regions split at that spheroid. `classify` maps a cell centroid to its region label and index, and `region_size` maps a point
-# to the element size wanted inside its region. Returns the grid, the labels (0 for dropped cells) and the region indices.
+# Order-2 tetrahedral mesh of the posed bodies inside the domain spheroid, returning the grid, the cell labels (0 if dropped) and region indices.
 function _volume_mesh(
         bodies, interface_axes, domain_axes, domain_rotation, sizes, classify, region_size)
     local coords, conn
@@ -57,7 +50,7 @@ function _volume_mesh(
             min(minimum(b.size for b in bodies), sizes.fluid, sizes.interface, sizes.domain) /
             2)
         gmsh.option.setNumber("Mesh.ElementOrder", 2)
-        gmsh.option.setNumber("Mesh.HighOrderOptimize", get(sizes, :optimize, 1))
+        gmsh.option.setNumber("Mesh.HighOrderOptimize", get(sizes, :optimize, 0))
         outer_sphere = gmsh.model.occ.addSphere(0, 0, 0, 1.0)
         gmsh.model.occ.dilate([(3, outer_sphere)], 0, 0, 0, domain_axes[1], domain_axes[1],
             domain_axes[2])
@@ -120,7 +113,9 @@ function _volume_mesh(
             gmsh.model.mesh.field.add("Threshold", distance + 1)
             gmsh.model.mesh.field.setNumber(distance + 1, "InField", distance)
             gmsh.model.mesh.field.setNumber(distance + 1, "SizeMin", size)
-            gmsh.model.mesh.field.setNumber(distance + 1, "SizeMax", sizes.fluid)
+            # A thin feature only needs to grade up to a nearby scale; the global MeshSizeMax ceiling
+            # still applies everywhere once a point falls outside every field's own reach.
+            gmsh.model.mesh.field.setNumber(distance + 1, "SizeMax", min(sizes.fluid, 8size))
             gmsh.model.mesh.field.setNumber(distance + 1, "DistMin", size)
             gmsh.model.mesh.field.setNumber(distance + 1, "DistMax", reach)
             push!(fields, distance + 1)
@@ -141,19 +136,10 @@ function _volume_mesh(
         _MESH_REGION_SIZE[] = nothing
         gmsh.finalize()
     end
-    function order_cell(c)
-        vertices, mids = c[1:4], c[5:10]
-        placed = map(_VOLUME_EDGES) do (i, j)
-            target = (coords[:, vertices[i]] + coords[:, vertices[j]]) / 2
-            mids[argmin([norm(coords[:, m] - target) for m in mids])]
-        end
-        ordered = vcat(vertices, collect(placed))
-        edges = [coords[:, ordered[i]] - coords[:, ordered[1]] for i in 2:4]
-        det(hcat(edges...)) < 0 && (ordered = ordered[[1, 3, 2, 4, 7, 6, 5, 8, 10, 9]])
-        return ordered
+    cells = Vector{Ferrite.QuadraticTetrahedron}(undef, size(conn, 2))
+    Threads.@threads for j in axes(conn, 2)
+        cells[j] = Ferrite.QuadraticTetrahedron(_ferrite_tet10(coords, view(conn, :, j)))
     end
-    cells = [Ferrite.QuadraticTetrahedron(Tuple(order_cell(conn[:, j])))
-             for j in axes(conn, 2)]
     grid = Ferrite.Grid(cells, [Ferrite.Node(Tuple(coords[:, i])) for i in axes(coords, 2)])
     classified = map(axes(conn, 2)) do j
         centre = sum(coords[:, i] for i in conn[1:4, j]) / 4
@@ -164,6 +150,24 @@ function _volume_mesh(
         return (outside ? _REGION_PML : _REGION_FLUID, 0)
     end
     return grid, first.(classified), last.(classified)
+end
+
+# Ferrite node order of a Gmsh second-order tetrahedron, whose last two edge nodes are swapped and which is reversed if inverted.
+function _ferrite_tet10(coords, c)
+    ordered = (c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[10], c[9])
+    a, b, d = ordered[1], ordered[2], ordered[3]
+    e = ordered[4]
+    u = (coords[1, b] - coords[1, a], coords[2, b] - coords[2, a],
+        coords[3, b] - coords[3, a])
+    v = (coords[1, d] - coords[1, a], coords[2, d] - coords[2, a],
+        coords[3, d] - coords[3, a])
+    w = (coords[1, e] - coords[1, a], coords[2, e] - coords[2, a],
+        coords[3, e] - coords[3, a])
+    determinant = u[1] * (v[2] * w[3] - v[3] * w[2]) - u[2] * (v[1] * w[3] - v[3] * w[1]) +
+                  u[3] * (v[1] * w[2] - v[2] * w[1])
+    determinant < 0 && return (ordered[1], ordered[3], ordered[2], ordered[4], ordered[7],
+        ordered[6], ordered[5], ordered[8], ordered[10], ordered[9])
+    return ordered
 end
 
 # Rotate every entity in `tools` about the origin by the matrix `rotation`, as an active rotation about its axis.
@@ -258,14 +262,16 @@ function _domain_level(domain, x)
 end
 
 # Tensor A and scalar d of the PML equation div(A grad p) + k^2 d p = 0 at a point of the solution frame.
-function _pml_operator(pml, x)
+function _pml_operator(pml, x::SVector{3, Float64})
     if pml.kind === :spherical
         r = norm(x)
         gamma, lambda = _pml_stretch(r, pml.R, pml.thickness, pml.sigma0)
         er = x / r
-        return (lambda^2 / gamma) * (er * er') + gamma * (I - er * er'), gamma * lambda^2
+        projector = er * er'
+        return (lambda^2 / gamma) * projector + gamma * (I - projector), gamma * lambda^2
     end
-    xb = pml.rotation' * x
+    rotation = SMatrix{3, 3, Float64}(pml.rotation)
+    xb = rotation' * x
     xi, eta = _spheroidal_coordinates(pml.kind, pml.c, xb)
     gradient = ForwardDiff.gradient(y -> _spheroidal_coordinates(pml.kind, pml.c, y)[1], xb)
     e_xi = gradient / norm(gradient)
@@ -276,17 +282,17 @@ function _pml_operator(pml, x)
     s_eta = sqrt((stretched^2 + sign * eta^2) / (xi^2 + sign * eta^2))
     s_phi = sqrt((stretched^2 + sign) / (xi^2 + sign))
     s_xi = xi_derivative * s_eta / s_phi
-    azimuthal = [-xb[2], xb[1], 0.0]
-    tensor = e_xi * e_xi' / s_xi^2
+    azimuthal = SVector{3, Float64}(-xb[2], xb[1], 0.0)
+    tensor = (e_xi * e_xi') / s_xi^2
     if norm(azimuthal) > 1e-10 * max(norm(xb), pml.c)
         e_phi = azimuthal / norm(azimuthal)
         e_eta = cross(e_phi, e_xi)
-        tensor += e_eta * e_eta' / s_eta^2 + e_phi * e_phi' / s_phi^2
+        tensor += (e_eta * e_eta') / s_eta^2 + (e_phi * e_phi') / s_phi^2
     else
         tensor += (I - e_xi * e_xi') / s_eta^2
     end
     d = s_xi * s_eta * s_phi
-    return d * pml.rotation * tensor * pml.rotation', d
+    return d * rotation * tensor * rotation', d
 end
 
 # Nodes carry the pressure dof `node` and the displacement dofs `n_nodes + 3(node - 1) + component`.
@@ -308,8 +314,6 @@ function _facet_loop(body, grid, list)
     end
 end
 
-_volume_incident(x, k) = cis(k * x[3])
-
 # Node numbers of the facets in a (cell, local facet) list.
 function _facet_nodes(grid, list)
     nodes = Set{Int}()
@@ -322,94 +326,223 @@ function _facet_nodes(grid, list)
     return sort!(collect(nodes))
 end
 
-# Global sparse system and load for the scattered pressure and, in an elastic body, the displacement.
-function _volume_system(grid, labels, ids, facets, k, model, pml)
+# Dot product of a vector with a three-component vector or tensor.
+_dot3(a, b) = a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+
+_volume_incident(x, k, direction) = cis(k * _dot3(direction, x))
+
+# Unit vector of the incident wave direction in the solution frame.
+function _volume_direction(incidence_angle, incidence_azimuth)
+    return [sin(incidence_angle) * cos(incidence_azimuth),
+        sin(incidence_angle) * sin(incidence_azimuth), cos(incidence_angle)]
+end
+
+# Stiffness-like and squared-wavenumber-like parts of the global matrix, which add to the system matrix.
+struct _VolumeMatrices
+    stiff::SparseMatrixCSC{ComplexF64, Int32}
+    mass::SparseMatrixCSC{ComplexF64, Int32}
+end
+
+# Sparse matrix `stiff + factor * mass`, so that `factor = 1` is the system matrix and `1 + i` its complex-shifted preconditioner.
+_volume_sparse(m::_VolumeMatrices, factor) = m.stiff + factor * m.mass
+
+# Number of cells whose element matrices are held as triplets before they are reduced to a sparse matrix.
+const _VOLUME_ASSEMBLY_CHUNK = 40_000
+
+# Reference values of the shape functions at the cell quadrature points.
+function _volume_reference_values()
+    cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
+    nb = Ferrite.getnbasefunctions(cv)
+    return [Ferrite.shape_value(cv, q, i) for q in 1:Ferrite.getnquadpoints(cv), i in 1:nb]
+end
+
+# Element matrices of the fluid, PML and elastic cells, assembled over threads with the squared-wavenumber terms kept apart in `mass`.
+function _volume_matrices(grid, labels, ids, facets, k, model, pml)
     n_nodes = Ferrite.getnnodes(grid)
-    rows, cols, values = Int[], Int[], ComplexF64[]
-    mass_rows, mass_cols, mass_values = Int[], Int[], ComplexF64[]
+    ncells = length(grid.cells)
+    nb = Ferrite.getnbasefunctions(_VOLUME_IP)
+    N = 4n_nodes
+    counts = [labels[c] == 0 ? 0 : (labels[c] == _REGION_SOLID ? 9nb^2 : nb^2)
+              for c in 1:ncells]
+    reference = _volume_reference_values()
+    nq = size(reference, 1)
+    nthreads = Threads.nthreads()
+    empty = SparseMatrixCSC{ComplexF64, Int32}(
+        N, N, ones(Int32, N + 1), Int32[], ComplexF64[])
+    stiff_total, mass_total = empty, empty
+    for chunk in Iterators.partition(1:ncells, _VOLUME_ASSEMBLY_CHUNK)
+        chunk_offsets = cumsum(counts[chunk]) .- counts[chunk]
+        total = sum(counts[chunk])
+        rows, cols = Vector{Int32}(undef, total), Vector{Int32}(undef, total)
+        stiff, mass = zeros(ComplexF64, total), zeros(ComplexF64, total)
+        Threads.@threads :static for t in 1:nthreads
+            cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
+            G = zeros(nb, 3)
+            S, M = zeros(ComplexF64, nb, nb), zeros(ComplexF64, nb, nb)
+            B, MB = zeros(ComplexF64, 3nb, 3nb), zeros(3nb, 3nb)
+            D = zeros(nb, 3)
+            for local_id in t:nthreads:length(chunk)
+                cell_id = chunk[local_id]
+                label = labels[cell_id]
+                label == 0 && continue
+                cell = grid.cells[cell_id]
+                coords = [grid.nodes[i].x for i in cell.nodes]
+                Ferrite.reinit!(cv, cell, coords)
+                offset = chunk_offsets[local_id]
+                if label == _REGION_SOLID
+                    rho, lame, mu, reduced = model.solid isa Vector ?
+                                             model.solid[ids[cell_id]] : model.solid
+                    fill!(B, 0.0)
+                    fill!(MB, 0.0)
+                    fill!(D, 0.0)
+                    volume = 0.0
+                    for q in 1:nq
+                        dV = Ferrite.getdetJdV(cv, q)
+                        volume += dV
+                        for i in 1:nb
+                            g = Ferrite.shape_gradient(cv, q, i)
+                            G[i, 1], G[i, 2], G[i, 3] = g[1], g[2], g[3]
+                            for a in 1:3
+                                D[i, a] += G[i, a] * dV
+                            end
+                        end
+                        for j in 1:nb, i in 1:nb
+
+                            gg = G[i, 1] * G[j, 1] + G[i, 2] * G[j, 2] + G[i, 3] * G[j, 3]
+                            for a in 1:3, b in 1:3
+
+                                v = mu * G[i, b] * G[j, a]
+                                reduced || (v += lame * G[i, a] * G[j, b])
+                                a == b && (v += mu * gg)
+                                B[3(i - 1) + a, 3(j - 1) + b] += v * dV
+                            end
+                            nn = reference[q, i] * reference[q, j] * dV
+                            for a in 1:3
+                                MB[3(i - 1) + a, 3(j - 1) + a] -= rho * k^2 * nn
+                            end
+                        end
+                    end
+                    if reduced
+                        # A nearly incompressible solid takes its dilatation as one value per element, which avoids locking.
+                        for j in 1:nb, b in 1:3, i in 1:nb, a in 1:3
+                            B[3(i - 1) + a, 3(j - 1) + b] += lame * D[i, a] * D[j, b] /
+                                                             volume
+                        end
+                    end
+                    for j in 1:nb, b in 1:3, i in 1:nb, a in 1:3
+                        ii, jj = 3(i - 1) + a, 3(j - 1) + b
+                        p = offset + (3(j - 1) + b - 1) * 3nb + ii
+                        rows[p] = _displacement_dof(n_nodes, cell.nodes[i], a)
+                        cols[p] = _displacement_dof(n_nodes, cell.nodes[j], b)
+                        stiff[p] = B[ii, jj]
+                        mass[p] = MB[ii, jj]
+                    end
+                else
+                    density, wavenumber = if label != _REGION_INTERIOR
+                        (1.0, k)
+                    elseif model.interior isa Vector
+                        model.interior[ids[cell_id]]
+                    else
+                        model.interior
+                    end
+                    fill!(S, 0)
+                    fill!(M, 0)
+                    for q in 1:nq
+                        dV = Ferrite.getdetJdV(cv, q)
+                        for i in 1:nb
+                            g = Ferrite.shape_gradient(cv, q, i)
+                            G[i, 1], G[i, 2], G[i, 3] = g[1], g[2], g[3]
+                        end
+                        if label == _REGION_PML
+                            x = Ferrite.spatial_coordinate(cv, q, coords)
+                            A, d = _pml_operator(pml, SVector{3, Float64}(x[1], x[2], x[3]))
+                            for j in 1:nb
+                                tx = A[1, 1] * G[j, 1] + A[1, 2] * G[j, 2] +
+                                     A[1, 3] * G[j, 3]
+                                ty = A[2, 1] * G[j, 1] + A[2, 2] * G[j, 2] +
+                                     A[2, 3] * G[j, 3]
+                                tz = A[3, 1] * G[j, 1] + A[3, 2] * G[j, 2] +
+                                     A[3, 3] * G[j, 3]
+                                for i in 1:j
+                                    S[i, j] += dV *
+                                               (G[i, 1] * tx + G[i, 2] * ty + G[i, 3] * tz)
+                                    M[i, j] -= wavenumber^2 * d * reference[q, i] *
+                                               reference[q, j] * dV
+                                end
+                            end
+                        else
+                            w = dV / density
+                            for j in 1:nb, i in 1:j
+
+                                S[i, j] += w * (G[i, 1] * G[j, 1] + G[i, 2] * G[j, 2] +
+                                            G[i, 3] * G[j, 3])
+                                M[i, j] -= wavenumber^2 * w * reference[q, i] *
+                                           reference[q, j]
+                            end
+                        end
+                    end
+                    for j in 1:nb, i in 1:nb
+
+                        lo, hi = min(i, j), max(i, j)
+                        p = offset + (j - 1) * nb + i
+                        rows[p] = _pressure_dof(cell.nodes[i])
+                        cols[p] = _pressure_dof(cell.nodes[j])
+                        stiff[p] = S[lo, hi]
+                        mass[p] = M[lo, hi]
+                    end
+                end
+            end
+        end
+        stiff_total += sparse(rows, cols, stiff, N, N)
+        mass_total += sparse(rows, cols, mass, N, N)
+    end
+    # Elastic body: continuity of normal displacement and traction, with n pointing out of the solid.
+    extra_rows, extra_cols = Int32[], Int32[]
+    extra_stiff, extra_mass = ComplexF64[], ComplexF64[]
+    if model.kind in (:solid, :shell, :regions)
+        for list in (facets[:solid_fluid], facets[:solid_interior])
+            _facet_loop(grid, list) do nodes, N, x, n, dS
+                for (i, ni) in enumerate(nodes), (j, nj) in enumerate(nodes), c in 1:3
+                    push!(extra_rows, _pressure_dof(ni))
+                    push!(extra_cols, _displacement_dof(n_nodes, nj, c))
+                    push!(extra_stiff, 0)
+                    push!(extra_mass, k^2 * n[c] * N[i] * N[j] * dS)
+                    push!(extra_rows, _displacement_dof(n_nodes, ni, c))
+                    push!(extra_cols, _pressure_dof(nj))
+                    push!(extra_stiff, n[c] * N[i] * N[j] * dS)
+                    push!(extra_mass, 0)
+                end
+            end
+        end
+    end
+    stiff_total += sparse(extra_rows, extra_cols, extra_stiff, N, N)
+    mass_total += sparse(extra_rows, extra_cols, extra_mass, N, N)
+    return _VolumeMatrices(stiff_total, mass_total)
+end
+
+# Load of the incident plane wave travelling along `direction` on the scattered pressure and displacement unknowns.
+function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
     load = zeros(ComplexF64, 4n_nodes)
     cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
     nb = Ferrite.getnbasefunctions(cv)
-    # The terms proportional to the squared wavenumber are also collected in `mass`, which the iterative solver shifts.
-    function push_block!(dofs, block, mass_block)
-        for (i, di) in enumerate(dofs), (j, dj) in enumerate(dofs)
-
-            push!(rows, di)
-            push!(cols, dj)
-            push!(values, block[i, j] + mass_block[i, j])
-            push!(mass_rows, di)
-            push!(mass_cols, dj)
-            push!(mass_values, mass_block[i, j])
-        end
-    end
+    # Total-field source of the incident wave inside a fluid body.
     for (cell_id, cell) in enumerate(grid.cells)
-        label = labels[cell_id]
-        label == 0 && continue
+        labels[cell_id] == _REGION_INTERIOR || continue
+        density, wavenumber = model.interior isa Vector ? model.interior[ids[cell_id]] :
+                              model.interior
         coords = [grid.nodes[i].x for i in cell.nodes]
         Ferrite.reinit!(cv, cell, coords)
-        nodes = collect(cell.nodes)
-        if label == _REGION_SOLID
-            rho, lame, mu = model.solid isa Vector ? model.solid[ids[cell_id]] : model.solid
-            block = zeros(ComplexF64, 3nb, 3nb)
-            mass_block = zeros(ComplexF64, 3nb, 3nb)
-            for q in 1:Ferrite.getnquadpoints(cv)
-                dV = Ferrite.getdetJdV(cv, q)
-                G = [Ferrite.shape_gradient(cv, q, i)[c] for i in 1:nb, c in 1:3]
-                N = [Ferrite.shape_value(cv, q, i) for i in 1:nb]
-                for a in 1:3, b in 1:3
-
-                    part = (lame * G[:, a] * G[:, b]' .+ mu * G[:, b] * G[:, a]') .* dV
-                    a == b && (part = part .+ (mu .* (G * G')) .* dV)
-                    for i in 1:nb, j in 1:nb
-
-                        block[3(i - 1) + a, 3(j - 1) + b] += part[i, j]
-                        a == b &&
-                            (mass_block[3(i - 1) + a, 3(j - 1) + b] -= rho * k^2 * N[i] *
-                                                                       N[j] * dV)
-                    end
-                end
-            end
-            push_block!(
-                [_displacement_dof(n_nodes, nodes[i], c) for i in 1:nb for c in 1:3], block,
-                mass_block)
-        else
-            density, wavenumber = if label != _REGION_INTERIOR
-                (1.0, k)
-            elseif model.interior isa Vector
-                model.interior[ids[cell_id]]
-            else
-                model.interior
-            end
-            block = zeros(ComplexF64, nb, nb)
-            mass_block = zeros(ComplexF64, nb, nb)
-            source = zeros(ComplexF64, nb)
-            for q in 1:Ferrite.getnquadpoints(cv)
-                dV = Ferrite.getdetJdV(cv, q)
-                G = [Ferrite.shape_gradient(cv, q, i)[c] for i in 1:nb, c in 1:3]
-                N = [Ferrite.shape_value(cv, q, i) for i in 1:nb]
-                if label == _REGION_PML
-                    x = collect(Ferrite.spatial_coordinate(cv, q, coords))
-                    tensor, d = _pml_operator(pml, x)
-                    block .+= (G * tensor * G') .* dV
-                    mass_block .-= wavenumber^2 * d .* (N * N') .* dV
-                else
-                    block .+= (G * G') .* dV ./ density
-                    mass_block .-= wavenumber^2 .* (N * N') .* dV ./ density
-                    if label == _REGION_INTERIOR
-                        # Total-field source of the incident wave inside a fluid body.
-                        x = Ferrite.spatial_coordinate(cv, q, coords)
-                        pinc = _volume_incident(x, k)
-                        for i in 1:nb
-                            gradient = im * k * pinc * G[i, 3]
-                            source[i] -= (gradient - wavenumber^2 * pinc * N[i]) * dV /
-                                         density
-                        end
-                    end
-                end
-            end
-            push_block!([_pressure_dof(n) for n in nodes], block, mass_block)
-            for (i, n) in enumerate(nodes)
-                load[_pressure_dof(n)] += source[i]
+        for q in 1:Ferrite.getnquadpoints(cv)
+            dV = Ferrite.getdetJdV(cv, q)
+            x = Ferrite.spatial_coordinate(cv, q, coords)
+            pinc = _volume_incident(x, k, direction)
+            for i in 1:nb
+                g = Ferrite.shape_gradient(cv, q, i)
+                gradient = im * k * pinc * _dot3(direction, g)
+                load[_pressure_dof(cell.nodes[i])] -= (gradient -
+                                                       wavenumber^2 * pinc *
+                                                       Ferrite.shape_value(cv, q, i)) * dV /
+                                                      density
             end
         end
     end
@@ -417,8 +550,8 @@ function _volume_system(grid, labels, ids, facets, k, model, pml)
     if model.kind === :rigid
         _facet_loop(grid, facets[:fluid_bare]) do nodes, N, x, n, dS
             for (i, node) in enumerate(nodes)
-                load[_pressure_dof(node)] -= im * k * n[3] * _volume_incident(x, k) * N[i] *
-                                             dS
+                load[_pressure_dof(node)] -= im * k * _dot3(direction, n) *
+                                             _volume_incident(x, k, direction) * N[i] * dS
             end
         end
     end
@@ -426,41 +559,28 @@ function _volume_system(grid, labels, ids, facets, k, model, pml)
     if model.kind in (:fluid, :regions)
         _facet_loop(grid, facets[:fluid_interior]) do nodes, N, x, n, dS
             for (i, node) in enumerate(nodes)
-                load[_pressure_dof(node)] += im * k * n[3] * _volume_incident(x, k) * N[i] *
-                                             dS
+                load[_pressure_dof(node)] += im * k * _dot3(direction, n) *
+                                             _volume_incident(x, k, direction) * N[i] * dS
             end
         end
     end
-    # Elastic body: continuity of normal displacement and traction, with n pointing out of the solid.
     if model.kind in (:solid, :shell, :regions)
         for (list, is_exterior) in ((facets[:solid_fluid], true), (
             facets[:solid_interior], false))
             _facet_loop(grid, list) do nodes, N, x, n, dS
-                pinc = _volume_incident(x, k)
+                pinc = _volume_incident(x, k, direction)
                 for (i, ni) in enumerate(nodes)
                     is_exterior &&
-                        (load[_pressure_dof(ni)] += im * k * n[3] * pinc * N[i] * dS)
+                        (load[_pressure_dof(ni)] += im * k * _dot3(direction, n) *
+                                                    pinc * N[i] * dS)
                     for c in 1:3
                         load[_displacement_dof(n_nodes, ni, c)] -= pinc * n[c] * N[i] * dS
-                    end
-                    for (j, nj) in enumerate(nodes), c in 1:3
-
-                        for (r, cl, v) in ((rows, cols, values), (
-                            mass_rows, mass_cols, mass_values))
-                            push!(r, _pressure_dof(ni))
-                            push!(cl, _displacement_dof(n_nodes, nj, c))
-                            push!(v, k^2 * n[c] * N[i] * N[j] * dS)
-                        end
-                        push!(rows, _displacement_dof(n_nodes, ni, c))
-                        push!(cols, _pressure_dof(nj))
-                        push!(values, n[c] * N[i] * N[j] * dS)
                     end
                 end
             end
         end
     end
-    return sparse(rows, cols, values, 4n_nodes, 4n_nodes), load, n_nodes,
-    sparse(mass_rows, mass_cols, mass_values, 4n_nodes, 4n_nodes)
+    return load
 end
 
 function _harmonic_norms(L)
@@ -485,36 +605,57 @@ function _harmonics_upto(L, cos_theta, phi, norms)
     return [norms[l + 1, m + 1] * P[l + 1, m + 1] * cis(m * phi) for l in 0:L for m in 0:l]
 end
 
-# Exact Dirichlet-to-Neumann operator on the sphere of radius R over the boundary nodes of `list`, for degrees up to L.
-function _dtn_matrix(grid, list, n_nodes, k, R, L)
-    boundary = Dict{Int, Int}()
-    _facet_loop(grid, list) do nodes, N, x, n, dS
-        for node in nodes
-            haskey(boundary, node) || (boundary[node] = length(boundary) + 1)
-        end
-    end
+# Factors of the exact Dirichlet-to-Neumann operator on the sphere of radius R over the boundary nodes of `list`, for degrees up to L.
+function _dtn_factors(grid, list, k, R, L)
+    boundary = Dict(node => index for (index, node) in enumerate(_facet_nodes(grid, list)))
     norms = _harmonic_norms(L)
     labels = [(l, m) for l in 0:L for m in 0:l]
-    C = zeros(ComplexF64, length(labels), length(boundary))
+    Cr = zeros(length(labels), length(boundary))
+    Ci = zeros(length(labels), length(boundary))
     _facet_loop(grid, list) do nodes, N, x, n, dS
         Y = _harmonics_upto(L, x[3] / norm(x), atan(x[2], x[1]), norms)
-        for (i, node) in enumerate(nodes), h in eachindex(Y)
-
-            C[h, boundary[node]] += conj(Y[h]) * N[i] * dS
+        for (i, node) in enumerate(nodes)
+            haskey(boundary, node) || continue
+            for h in eachindex(Y)
+                Cr[h, boundary[node]] += real(Y[h]) * N[i] * dS
+                Ci[h, boundary[node]] -= imag(Y[h]) * N[i] * dS
+            end
         end
     end
-    coefficient = [k * hsd(l, k * R) / hs(l, k * R) for (l, m) in labels]
-    weight = [m == 0 ? 1.0 : 2.0 for (l, m) in labels]
-    Cr, Ci = real.(C), imag.(C)
-    T = (Cr' * ((coefficient .* weight) .* Cr) + Ci' * ((coefficient .* weight) .* Ci)) /
-        R^2
+    weights = [(m == 0 ? 1.0 : 2.0) * k * hsd(l, k * R) / hs(l, k * R) / R^2
+               for (l, m) in labels]
     nodes = Vector{Int}(undef, length(boundary))
     for (node, index) in boundary
         nodes[index] = node
     end
+    return (; nodes, Cr, Ci, weights)
+end
+
+# The operator applied to values `x` on the boundary nodes.
+function _dtn_apply(f, x)
+    return f.Cr' * (f.weights .* (f.Cr * x)) + f.Ci' * (f.weights .* (f.Ci * x))
+end
+
+# Dense global matrix of the Dirichlet-to-Neumann operator.
+function _dtn_matrix(f, n_nodes)
+    T = f.Cr' * (f.weights .* f.Cr) + f.Ci' * (f.weights .* f.Ci)
     return sparse(
-        repeat(nodes, outer = length(nodes)), repeat(nodes, inner = length(nodes)),
+        repeat(f.nodes, outer = length(f.nodes)), repeat(f.nodes, inner = length(f.nodes)),
         vec(T), 4n_nodes, 4n_nodes)
+end
+
+# Mass matrix of the pressure on the facets of `list`.
+function _boundary_mass(grid, list, n_nodes)
+    rows, cols, values = Int[], Int[], Float64[]
+    _facet_loop(grid, list) do nodes, N, x, n, dS
+        for (i, ni) in enumerate(nodes), (j, nj) in enumerate(nodes)
+
+            push!(rows, _pressure_dof(ni))
+            push!(cols, _pressure_dof(nj))
+            push!(values, N[i] * N[j] * dS)
+        end
+    end
+    return sparse(rows, cols, values, 4n_nodes, 4n_nodes)
 end
 
 # Coefficients of the scattered pressure on the extraction sphere against conj(Y_lm) and against (-1)^m Y_lm, for the positive and negative orders.
@@ -534,15 +675,39 @@ function _volume_coefficients(solution, grid, list, n_nodes, L)
     return positive, negative
 end
 
+# Result of `fem(...; method = :volume)`, holding harmonic coefficients of the scattered pressure or the volume extraction data `shell`.
+struct _VolumeFEMData
+    positive::Vector{ComplexF64}
+    negative::Vector{ComplexF64}
+    R::Float64
+    L::Int
+    shell::Union{Nothing, NamedTuple}
+    rotation::Matrix{Float64}
+    incidence_angle::Float64
+    incidence_azimuth::Float64
+    diagnostics::NamedTuple
+    system::Any
+    solution::Vector{ComplexF64}
+end
+
+function _volume_amplitude(d::_VolumeFEMData, k::Real; angle::Real, azimuth::Real)
+    direction = d.rotation *
+                [sin(angle) * cos(azimuth), sin(angle) * sin(azimuth), cos(angle)]
+    d.shell === nothing || return _volume_extraction_amplitude(d.shell, k, direction)
+    return _volume_far_field(d.positive, d.negative, k, d.R, d.L, direction)
+end
+
 # Smooth step from 0 at t = 0 to 1 at t = 1 with two continuous derivatives.
 _smoothstep(t) = t <= 0 ? zero(t) : t >= 1 ? one(t) : t^3 * (10 + t * (6t - 15))
 
-# Data of the volume far-field integral. The cutoff chi rises from 0 at level `lower` to 1 at level `upper` and the fluid cells
-# between those levels supply the quadrature points of p * (Laplacian(chi) - 2ik n . grad(chi)) exp(-ik n . x).
-function _volume_extraction(solution, grid, labels, domain, lower, upper)
+# Solution-independent data of the volume far-field integral, on the fluid cells between the levels where the cutoff chi rises from 0 to 1.
+function _volume_extraction_setup(grid, labels, domain, lower, upper)
     cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
     chi(x) = _smoothstep((_domain_level(domain, x) - lower) / (upper - lower))
-    points, weights, laplacians, gradients = Vector{Float64}[], ComplexF64[], Float64[],
+    reference = _volume_reference_values()
+    nq = size(reference, 1)
+    cells = Int[]
+    points, dVs, laplacians, gradients = Vector{Float64}[], Float64[], Float64[],
     Vector{Float64}[]
     for (cell_id, cell) in enumerate(grid.cells)
         labels[cell_id] == _REGION_FLUID || continue
@@ -550,18 +715,33 @@ function _volume_extraction(solution, grid, labels, domain, lower, upper)
         levels = [_domain_level(domain, collect(x)) for x in coords]
         (minimum(levels) < upper && maximum(levels) > lower) || continue
         Ferrite.reinit!(cv, cell, coords)
-        for q in 1:Ferrite.getnquadpoints(cv)
+        push!(cells, cell_id)
+        for q in 1:nq
             x = collect(Ferrite.spatial_coordinate(cv, q, coords))
-            pressure = sum(solution[_pressure_dof(cell.nodes[i])] *
-                           Ferrite.shape_value(cv, q, i) for i in eachindex(cell.nodes))
             push!(points, x)
-            push!(weights, pressure * Ferrite.getdetJdV(cv, q))
+            push!(dVs, Ferrite.getdetJdV(cv, q))
             push!(laplacians, sum(diag(ForwardDiff.hessian(chi, x))))
             push!(gradients, ForwardDiff.gradient(chi, x))
         end
     end
-    return (; points = reduce(hcat, points), weights, laplacians,
+    nodes = reduce(hcat, [collect(grid.cells[c].nodes) for c in cells])
+    return (; nodes, reference, dVs, points = reduce(hcat, points), laplacians,
         gradients = reduce(hcat, gradients))
+end
+
+# The extraction data with the quadrature weights p * dV of one pressure solution.
+function _volume_extraction(setup, solution)
+    nq = size(setup.reference, 1)
+    weights = zeros(ComplexF64, length(setup.dVs))
+    for c in axes(setup.nodes, 2), q in 1:nq
+
+        pressure = zero(ComplexF64)
+        for i in axes(setup.nodes, 1)
+            pressure += setup.reference[q, i] * solution[_pressure_dof(setup.nodes[i, c])]
+        end
+        weights[(c - 1) * nq + q] = pressure * setup.dVs[(c - 1) * nq + q]
+    end
+    return (; weights, setup.points, setup.laplacians, setup.gradients)
 end
 
 # Far-field amplitude in the unit direction `direction` of the solution frame from the volume extraction data.
@@ -587,81 +767,158 @@ end
 # Number of active dofs above which `solver = :auto` iterates.
 const _VOLUME_ITERATIVE_DOFS = 60_000
 
-# GMRES on `matrix` preconditioned by an incomplete LU factorization of the complex-shifted matrix `shifted`.
-function _shifted_gmres(matrix, shifted, rhs, ilu_tolerance, tolerance)
-    factor = IncompleteLU.ilu(shifted; τ = ilu_tolerance)
-    solution, history = IterativeSolvers.gmres(matrix, rhs; Pr = factor, restart = 100,
-        maxiter = 500, reltol = tolerance, log = true)
-    return solution, history.isconverged, history.iters
+# An incomplete LU factorization kept in single precision, applied to double precision vectors.
+struct _SinglePrecisionILU{F}
+    factor::F
+    input::Vector{ComplexF32}
+    output::Vector{ComplexF32}
 end
 
-# Solve on the active dofs with prescribed values on `fixed`, a dictionary from dof to value. The iterative solver preconditions with
-# the shifted matrix returned by `shifted()` and falls back to the direct solver if it does not converge.
-function _volume_solve(K, load, grid, labels, n_nodes, fixed; solver = :direct,
-        shifted = nothing, ilu_tolerance = 1e-3, tolerance = 1e-8)
-    active = falses(4n_nodes)
-    for (cell_id, cell) in enumerate(grid.cells)
-        labels[cell_id] == 0 && continue
-        for node in cell.nodes
-            if labels[cell_id] == _REGION_SOLID
-                for c in 1:3
-                    active[_displacement_dof(n_nodes, node, c)] = true
-                end
-            else
-                active[_pressure_dof(node)] = true
-            end
-        end
+function LinearAlgebra.ldiv!(y, P::_SinglePrecisionILU, x)
+    P.input .= x
+    LinearAlgebra.ldiv!(P.output, P.factor, P.input)
+    y .= P.output
+    return y
+end
+
+LinearAlgebra.ldiv!(P::_SinglePrecisionILU, x) = LinearAlgebra.ldiv!(x, P, x)
+
+# Linear solver of the active dofs whose factorizations are built on first use and reused for every right-hand side.
+mutable struct _VolumeLinearSolver
+    matrix::SparseMatrixCSC{ComplexF64, <:Integer}
+    shifted::Union{Nothing, SparseMatrixCSC{ComplexF64, <:Integer}}
+    ilu_tolerance::Float64
+    tolerance::Float64
+    direct::Any
+    incomplete::Any
+    mode::Symbol
+    dtn::Any
+    operator::Any
+end
+
+# Product of the system operator with `x`, which adds the Dirichlet-to-Neumann term when it is applied without its dense matrix.
+function _apply(solver::_VolumeLinearSolver, x)
+    y = solver.matrix * x
+    if solver.dtn !== nothing
+        positions = solver.dtn.positions
+        y[positions] .-= _dtn_apply(solver.dtn, x[positions])
     end
-    fixed_dofs = collect(keys(fixed))
-    fixed_values = ComplexF64[fixed[d] for d in fixed_dofs]
-    is_fixed = falses(4n_nodes)
-    is_fixed[fixed_dofs] .= true
-    free = findall(active .& .!is_fixed)
-    rhs = load[free]
-    isempty(fixed_dofs) || (rhs -= K[free, fixed_dofs] * fixed_values)
-    solution = zeros(ComplexF64, 4n_nodes)
-    solution[fixed_dofs] = fixed_values
-    matrix = K[free, free]
-    iterate = solver === :iterative ||
-              (solver === :auto && shifted !== nothing &&
-               length(free) >= _VOLUME_ITERATIVE_DOFS)
-    used, iterations = :direct, 0
-    if iterate
-        shifted_matrix = shifted()[free, free]
+    return y
+end
+
+function _volume_operator(matrix, dtn, solver_ref)
+    dtn === nothing && return matrix
+    n = size(matrix, 1)
+    return LinearMap{ComplexF64}(n; ismutating = true) do y, x
+        y .= _apply(solver_ref[], x)
+    end
+end
+
+function _direct_factor!(solver::_VolumeLinearSolver)
+    if solver.direct === nothing
+        A = SparseMatrixCSC{ComplexF64, Int}(solver.matrix)
+        if solver.dtn !== nothing
+            f, n = solver.dtn, size(A, 1)
+            T = f.Cr' * (f.weights .* f.Cr) + f.Ci' * (f.weights .* f.Ci)
+            A = A - sparse(repeat(f.positions, outer = length(f.positions)),
+                repeat(f.positions, inner = length(f.positions)), vec(T), n, n)
+        end
+        solver.direct = lu(A)
+    end
+    return solver.direct
+end
+
+function _incomplete_factor!(solver::_VolumeLinearSolver, scale)
+    factor = IncompleteLU.ilu(
+        SparseMatrixCSC{ComplexF32, eltype(solver.shifted.colptr)}(solver.shifted);
+        τ = scale * solver.ilu_tolerance)
+    n = size(solver.matrix, 1)
+    solver.incomplete = _SinglePrecisionILU(factor, zeros(ComplexF32, n), zeros(ComplexF32, n))
+    return solver.incomplete
+end
+
+# Solution of `matrix * x = rhs` and the solver used and its iteration count.
+function _solve!(solver::_VolumeLinearSolver, rhs)
+    if solver.mode === :iterative
         for scale in (1.0, 0.2)
-            x, converged, iterations = _shifted_gmres(
-                matrix, shifted_matrix, rhs, scale * ilu_tolerance, tolerance)
-            if converged
-                solution[free] = x
-                used = :iterative
-                break
+            preconditioner = scale == 1.0 && solver.incomplete !== nothing ?
+                             solver.incomplete : _incomplete_factor!(solver, scale)
+            x, history = IterativeSolvers.gmres(solver.operator, rhs; Pr = preconditioner,
+                restart = 50, maxiter = 500, reltol = solver.tolerance, log = true)
+            iterations = history.iters
+            converged = history.isconverged
+            # The single-precision preconditioner limits the accuracy of the recurrence, so the true residual is refined.
+            for _ in 1:2
+                converged || break
+                residual = rhs - _apply(solver, x)
+                norm(residual) <= solver.tolerance * norm(rhs) && break
+                correction, refinement = IterativeSolvers.gmres(solver.operator, residual;
+                    Pr = preconditioner, restart = 50, maxiter = 200,
+                    reltol = min(0.5, 0.5solver.tolerance * norm(rhs) / norm(residual)),
+                    log = true)
+                x += correction
+                iterations += refinement.iters
+                converged = refinement.isconverged
             end
+            converged && return x, (; solver = :iterative, iterations)
+            solver.incomplete = nothing
         end
-        used === :iterative ||
-            @warn "the iterative volume solve did not converge, using the direct solver"
+        @warn "the iterative volume solve did not converge, using the direct solver"
+        solver.mode = :direct
+        solver.shifted = nothing
     end
-    used === :direct && (solution[free] = matrix \ rhs)
-    residual = norm(matrix * solution[free] - rhs) / max(norm(rhs), eps())
-    return solution, length(free), residual, (; solver = used, iterations)
+    return _direct_factor!(solver) \ rhs, (; solver = :direct, iterations = 0)
 end
 
-# Result of `fem(...; method = :volume)`. Either spherical-harmonic coefficients of the scattered pressure on the sphere of radius `R`,
-# or the quadrature data `shell` of the volume far-field integral.
-struct _VolumeFEMData
-    positive::Vector{ComplexF64}
-    negative::Vector{ComplexF64}
-    R::Float64
+# Everything of a volume problem that does not depend on the incident direction.
+struct _VolumeSystem
+    grid::Any
+    labels::Vector{Int}
+    ids::Vector{Int}
+    facets::Any
+    n_nodes::Int
+    k::Float64
+    model::Any
+    closure::Symbol
     L::Int
-    shell::Union{Nothing, NamedTuple}
+    R::Float64
     rotation::Matrix{Float64}
-    incidence_angle::Float64
-    incidence_azimuth::Float64
+    free::Vector{Int}
+    fixed::Vector{Int}
+    soft::BitVector
+    fixed_matrix::SparseMatrixCSC{ComplexF64, <:Integer}
+    matrix::SparseMatrixCSC{ComplexF64, <:Integer}
+    solver::_VolumeLinearSolver
+    extraction::Any
     diagnostics::NamedTuple
 end
 
-function _volume_amplitude(d::_VolumeFEMData, k::Real; angle::Real, azimuth::Real)
-    direction = d.rotation *
-                [sin(angle) * cos(azimuth), sin(angle) * sin(azimuth), cos(angle)]
-    d.shell === nothing || return _volume_extraction_amplitude(d.shell, k, direction)
-    return _volume_far_field(d.positive, d.negative, k, d.R, d.L, direction)
+# Scattered-pressure solution for a plane wave incident from the polar and azimuthal angles, in the frame of the bodies.
+function _volume_solution(system::_VolumeSystem, incidence_angle::Real, incidence_azimuth::Real)
+    direction = _volume_direction(incidence_angle, incidence_azimuth)
+    k, n_nodes = system.k, system.n_nodes
+    load = _volume_load(system.grid, system.labels, system.ids, system.facets, k,
+        system.model, n_nodes, direction)
+    values = zeros(ComplexF64, length(system.fixed))
+    for (i, dof) in enumerate(system.fixed)
+        system.soft[i] &&
+            (values[i] = -_volume_incident(system.grid.nodes[dof].x, k, direction))
+    end
+    rhs = load[system.free]
+    isempty(values) || (rhs -= system.fixed_matrix * values)
+    x, info = _solve!(system.solver, rhs)
+    solution = zeros(ComplexF64, 4n_nodes)
+    solution[system.fixed] = values
+    solution[system.free] = x
+    residual = norm(_apply(system.solver, x) - rhs) / max(norm(rhs), eps())
+    positive, negative, shell = if system.closure === :dtn || system.extraction === nothing
+        list = system.closure === :dtn ? system.facets[:outer] :
+               system.facets[:pml_interface]
+        (_volume_coefficients(solution, system.grid, list, n_nodes, system.L)..., nothing)
+    else
+        (ComplexF64[], ComplexF64[], _volume_extraction(system.extraction, solution))
+    end
+    diagnostics = merge(system.diagnostics, (; residual, info.solver, info.iterations))
+    return _VolumeFEMData(positive, negative, system.R, system.L, shell, system.rotation,
+        Float64(incidence_angle), Float64(incidence_azimuth), diagnostics, system, solution)
 end
