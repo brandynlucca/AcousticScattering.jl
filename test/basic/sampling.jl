@@ -106,5 +106,7 @@ end
         k -> fem(Cylinder(0.05, 0.1), Rigid(), k; incidence_angle = 0.0,
             n_r = 6, n_theta = 12, m_max = 0),
         [1000.0, 2000.0], 1477.4)
-    @test scalar.amplitudes === nothing && all(isfinite, scalar.target_strength)
+    @test scalar.amplitudes isa Vector{ComplexF64} && all(isfinite, scalar.amplitudes) &&
+          all(isfinite, scalar.target_strength)
+    @test scalar.target_strength ≈ target_strength.(scalar.amplitudes)
 end
