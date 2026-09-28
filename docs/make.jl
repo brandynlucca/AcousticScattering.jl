@@ -66,6 +66,7 @@ makedocs(
             "Choosing a solver" => "models/selection.md",
             "Geometry and materials" => "models/materials.md",
             "Modal series" => "models/modal.md",
+            "Transition matrix" => "models/tmatrix.md",
             "Kirchhoff physical optics" => "models/kirchhoff.md",
             "BEM and MFS" => "models/boundary_methods.md",
             "FEM and shell coupling" => "models/fem.md",

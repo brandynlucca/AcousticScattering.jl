@@ -21,6 +21,14 @@ A_\ell^{\mathrm{soft}}=-\frac{j_\ell(ka)}{h_\ell^{(1)}(ka)}.
 
 Fluid coefficients match pressure and density-weighted normal derivatives ([Anderson, 1950](https://doi.org/10.1121/1.1906621)). Solid-elastic coefficients also match displacement and stress ([Hickling, 1962](https://doi.org/10.1121/1.1909055)).
 
+`Impedance(zeta)` is a locally reacting (Robin) boundary, `∂p/∂n=-ik\,p/\mathrm{zeta}` at `r=a`:
+
+```math
+A_\ell^{\mathrm{imp}}=-\frac{j_\ell'(ka)+ij_\ell(ka)/\mathrm{zeta}}{{h_\ell^{(1)}}'(ka)+i h_\ell^{(1)}(ka)/\mathrm{zeta}}.
+```
+
+`zeta → ∞` and `zeta → 0` recover `A_ℓ^{rigid}` and `A_ℓ^{soft}` above.
+
 ```julia
 modal(Sphere(a), Rigid(), k; m_max = 40)
 modal(Sphere(a), FluidFilled(g, h), k)
@@ -29,6 +37,36 @@ modal(Sphere(a), SolidElastic(g, hl, ht), k)
 
 Increase `m_max` to test truncation. The keyword uses “m” although the sum here uses spherical degree. Highly resonant or extreme-contrast cases can be ill-conditioned. The [convergence tutorial](@ref convergence-tutorial) compares numerical methods with this sphere reference. Check convergence over the frequencies and material contrasts of interest.
 
+### Non-plane-wave incidence
+
+`incident::IncidentField` generalizes the sum above, replacing the plane wave's degree-independent phase with the field's own spherical-harmonic weight `Qₗ/(2ℓ+1)`:
+
+```math
+f(\theta)=\frac{1}{k}\sum_{\ell=0}^{\ell_{\max}}Q_\ell(-i)^{\ell+1}P_\ell(\cos\theta)A_\ell,
+\qquad
+Q_\ell^{\mathrm{plane}}=(2\ell+1)i^\ell.
+```
+
+`SphericalWave(range)` is a point source on the observation axis, `range` from the sphere center ([Sapozhnikov and Bailey, 2013](https://doi.org/10.1121/1.4773924), Eq. 10):
+
+```math
+Q_\ell^{\mathrm{spherical}}=ik(-1)^\ell(2\ell+1)h_\ell^{(1)}(k\cdot\mathrm{range}).
+```
+
+```julia
+modal(Sphere(a), Rigid(), k; incident = SphericalWave(range))
+```
+
+The boundary coefficients `Aₗ` are unchanged from the plane-wave case. `pressure` is not yet available for this incident field.
+
+`BesselBeam(angle)` is a zeroth-order non-diffracting beam whose plane-wave components make `angle` (its half-conical angle `β`) with the observation axis:
+
+```math
+Q_\ell^{\mathrm{Bessel}}=(2\ell+1)i^\ell P_\ell(\cos\beta).
+```
+
+`angle = 0` reduces exactly to the plane wave. `Q_ℓ` at nonzero azimuthal beam order is not implemented, so only the axisymmetric zeroth order is available.
+
 ## Spheroid
 
 Separation in prolate/oblate spheroidal coordinates yields angular and radial spheroidal wave functions. Rigid/soft boundaries decouple appropriate modes. A penetrable spheroid generally couples angular degrees because interior and exterior wavenumbers differ.
@@ -36,14 +74,6 @@ Separation in prolate/oblate spheroidal coordinates yields angular and radial sp
 `FluidFilled(...; coupling = :full)` solves the off-diagonal coupling system. `:diagonal` neglects that coupling and changes the model approximation. Spheroidal wave functions are evaluated with SpheroidalWaves. Increase both `m_max` and `n_max`.
 
 Higher orders can become unreliable when radial functions are poorly conditioned. [Furusawa (1988)](https://www.jstage.jst.go.jp/article/ast1980/9/1/9_1_13/_article) develops the prolate spheroidal fish-target models behind this treatment.
-
-## [Elastic spheroid transition matrix](@id tmatrix-theory)
-
-An elastic spheroid or shell couples all spheroidal degrees, so it is solved as a dense transition matrix rather than a diagonal or banded series. The matrix comes from Betti surface integrals evaluated numerically on each interface. It is selected through `modal` and appears as its own column in [Choosing a solver](@ref solver-selection).
-
-`SolidElastic` on a `Spheroid` uses the transition matrix in spheroidal coordinates (Hackman, J. Acoust. Soc. Am. 75, 35-45, 1984). It reduces to the elastic sphere as the aspect ratio approaches one and to the rigid spheroid as the solid becomes stiff and dense.
-
-`Shelled(ElasticLayer(...), FluidInterior(...) or VacuumInterior(), radius_ratio)` on a `Spheroid` is an elastic shell with a confocal inner surface, whose equatorial semi-axis is `radius_ratio` times the outer one. An oblate shell needs a `radius_ratio` above the focal ratio so that this surface exists. Elongated and thin shells converge slowly in `n_max`. Each shell solve is repeated with `m_max` and `n_max` reduced by 2 and warns when the amplitude changes by more than 1%. Use `n_max` near 30 for a 3:1 shell with `radius_ratio = 0.8`, and check against `bem` beyond that.
 
 ## Finite and bent cylinders
 
@@ -56,7 +86,7 @@ f_{\mathrm{bs}}\propto L\,
 \sum_m B_m(k a\sin\beta).
 ```
 
-This describes the lateral finite-length approximation and omits end-cap scattering ([Stanton, 1988](https://doi.org/10.1121/1.396184)). It is not an exact solution for a closed finite cylinder, particularly near end-on incidence.
+This describes the lateral finite-length approximation and omits end-cap scattering ([Stanton, 1988](https://doi.org/10.1121/1.396184)). It is not an exact solution for a closed finite cylinder, particularly near end-on incidence. Against converged full 3D `bem`, it agrees to within `1` dB at broadside incidence, with error growing monotonically toward end-on and exceeding `20` dB within about `10°` of end-on. [Jech et al. (2015)](https://doi.org/10.1121/1.4937607) report the same reduction is a valid benchmark only within about `15` to `20°` of broadside for rigid, pressure-release and fluid/gas-filled cylinders. For a rigid cylinder at broadside, agreement is essentially independent of aspect ratio (`0.01` to `0.6` dB from length/radius `6` to `40`) and of `ka` (under `0.1` dB from `0.3` to `5`); incidence angle, not frequency or slenderness, is the limiting factor there. Pressure-release degrades faster at short aspect ratios: against full 3D `bem`, a length/radius of `2` gives `50%` error, `5` gives `10%`, `8` gives `2%`, all at broadside.
 
 For curvature radius `rho_c`, the bent-cylinder model ([Stanton, 1989](https://doi.org/10.1121/1.398193)) multiplies the straight amplitude by `L_effective / L`, with
 

@@ -42,6 +42,6 @@ For a quick look at the package's capabilities, open the [Visualization Gallery]
 
 ## Scope and maturity
 
-Implemented methods include sphere/spheroid series, finite-cylinder approximations, curved-cylinder models, physical-optics surface integrals, axisymmetric and full surface BEM, radial and meridian FEM, MFS, and coupled structural shells. Supported materials differ by solver and geometry. Creating a material does not guarantee support in every solver.
+Implemented methods include sphere/spheroid series, finite-cylinder approximations, curved-cylinder models, physical-optics surface integrals, axisymmetric and full surface BEM, radial, meridian and full 3D volume FEM, MFS, and coupled structural shells. Supported materials differ by solver and geometry. Creating a material does not guarantee support in every solver.
 
-Full 3D volume FEM is unavailable. See [BEM and MFS](@ref boundary-theory) for boundary-element formulations and irregular-frequency treatment.
+Full 3D volume FEM covers spheres and spheroids with elastic and shelled boundaries, and nested or disjoint fluid regions. See [BEM and MFS](@ref boundary-theory) for boundary-element formulations and irregular-frequency treatment.

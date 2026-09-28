@@ -17,14 +17,25 @@ Shell
 Irregular
 ```
 
+## Incident fields
+
+```@docs
+IncidentField
+PlaneWave
+SphericalWave
+BesselBeam
+```
+
 ## Boundary conditions and materials
 
 ```@docs
 Rigid
 PressureRelease
+Impedance
 FluidFilled
 GasFilled
 SolidElastic
+ViscoelasticSolid
 Shelled
 FluidLayer
 ElasticLayer
@@ -38,11 +49,13 @@ FluidInterior
 
 ```@docs
 modal
+tmatrix
 kirchhoff
 fem
 bem
 mfs
 fourier
+free_surface
 ```
 
 ## Solutions and post-processing
@@ -50,11 +63,13 @@ fourier
 ```@docs
 AbstractSolution
 ModalSolution
+TMatrixSolution
 KirchhoffSolution
 FEMSolution
 BEMSolution
 MFSSolution
 FMSolution
+FreeSurfaceSolution
 target_strength
 scattering_amplitude
 ```

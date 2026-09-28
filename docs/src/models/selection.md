@@ -1,6 +1,6 @@
 # [Choosing a solver](@id solver-selection)
 
-Start with the least costly method that supports both your physics and your desired output. The table lists supported combinations. All six solver families return solution objects. Hover a column header for what that solver is. Hover the ℹ️ icon next to a geometry for its caveats, or follow a linked geometry name to the page covering it.
+Start with the least costly method that supports both your physics and your desired output. The table lists supported combinations. All seven solver families return solution objects. Hover a column header for what that solver is. Hover the ℹ️ icon next to a geometry for its caveats, or follow a linked geometry name to the page covering it.
 
 ```@raw html
 <table class="solver-table">
@@ -8,7 +8,7 @@ Start with the least costly method that supports both your physics and your desi
     <tr>
       <th>Boundary condition</th>
       <th tabindex="0" data-tooltip="Analytical series solution. Exact for the sphere and spheroid, an approximation for finite cylinders.">Modal</th>
-      <th tabindex="0" data-tooltip="Transition-matrix solution in spheroidal coordinates for elastic spheroids and shells. Called through modal.">T-matrix</th>
+      <th tabindex="0" data-tooltip="Transition-matrix solution in spheroidal coordinates for elastic spheroids and shells. Called through tmatrix.">T-matrix</th>
       <th tabindex="0" data-tooltip="High-frequency physical-optics approximation. Not established as valid at low frequency.">Kirchhoff</th>
       <th tabindex="0" data-tooltip="Radial, meridian and shell reductions, and full 3D volume FEM for spheres and spheroids.">FEM</th>
       <th tabindex="0" data-tooltip="Boundary element method. Discretizes boundary integral equations over an axisymmetric or supplied mesh.">BEM</th>
@@ -26,7 +26,8 @@ Start with the least costly method that supports both your physics and your desi
       <td></td>
       <td>
         Sphere, Spheroid,
-        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>
+        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>,
+        <a href="../kirchhoff/#kirchhoff-theory">Arbitrary</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Arbitrary means a user-supplied surface mesh of any shape. Illumination follows the local outward normal only, not a hidden-surface check.">ℹ️</span>
       </td>
       <td>
         <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
@@ -50,6 +51,20 @@ Start with the least costly method that supports both your physics and your desi
       </td>
     </tr>
     <tr>
+      <td>Locally reacting (impedance)</td>
+      <td>
+        <a href="../modal/#modal-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Robin condition ∂p/∂n=-ik*p/zeta, generalizing Rigid (zeta→∞) and Pressure-release (zeta→0).">ℹ️</span>
+      </td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td>
+        <a href="../boundary_methods/#boundary-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Axisymmetric, axial incidence only. The direct solve is ill-conditioned near zeta→0; use Pressure-release there.">ℹ️</span>
+      </td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
       <td>Pressure-release</td>
       <td>
         Sphere, Spheroid,
@@ -58,7 +73,8 @@ Start with the least costly method that supports both your physics and your desi
       <td></td>
       <td>
         Sphere, Spheroid,
-        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>
+        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface integral.">ℹ️</span>,
+        <a href="../kirchhoff/#kirchhoff-theory">Arbitrary</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Arbitrary means a user-supplied surface mesh of any shape. Illumination follows the local outward normal only, not a hidden-surface check.">ℹ️</span>
       </td>
       <td>
         <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
@@ -90,7 +106,8 @@ Start with the least costly method that supports both your physics and your desi
       <td></td>
       <td>
         Sphere, Spheroid,
-        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface approximation.">ℹ️</span>
+        <a href="../../tutorials/bent_cylinder/#bent-cylinder-tutorial">Cylinder</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use the lateral surface and caps. Bent cylinders use a curved-surface approximation.">ℹ️</span>,
+        <a href="../kirchhoff/#kirchhoff-theory">Arbitrary</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Arbitrary means a user-supplied surface mesh of any shape. Illumination follows the local outward normal only, not a hidden-surface check.">ℹ️</span>
       </td>
       <td>
         <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial or axial-meridian reduction, or full 3D volume FEM.">ℹ️</span>,
@@ -120,7 +137,7 @@ Start with the least costly method that supports both your physics and your desi
         Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders only, using a finite-length approximation. Not an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
       <td>
-        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix in spheroidal coordinates, prolate or oblate.">ℹ️</span>
+        <a href="../tmatrix/#tmatrix-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix in spheroidal coordinates, prolate or oblate.">ℹ️</span>
       </td>
       <td></td>
       <td>
@@ -139,7 +156,7 @@ Start with the least costly method that supports both your physics and your desi
         Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders only, using a finite-length approximation. Not an exact closed-finite-cylinder solution.">ℹ️</span>
       </td>
       <td>
-        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
+        <a href="../tmatrix/#tmatrix-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
       </td>
       <td></td>
       <td>
@@ -155,7 +172,7 @@ Start with the least costly method that supports both your physics and your desi
       <td>Elastic shell, empty interior</td>
       <td></td>
       <td>
-        Spheroid&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
+        <a href="../tmatrix/#tmatrix-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Transition matrix with a confocal inner surface, prolate or oblate. Slow convergence for elongated thin shells.">ℹ️</span>
       </td>
       <td></td>
       <td>
@@ -208,6 +225,19 @@ Start with the least costly method that supports both your physics and your desi
       <td>
         <a href="../boundary_methods/#coupled-fluid-regions">Arbitrary</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Arbitrary means a user-supplied surface mesh of any shape. Every interface is a supplied mesh, each forming one connected boundary. Contrasts are relative to the unbounded exterior.">ℹ️</span>
       </td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Planar free surface or seafloor</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td>
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="A body and its mirror image, solved as one unbounded-fluid volume FEM. Exact for a homogeneous half-space. Called through free_surface.">ℹ️</span>,
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="A body and its mirror image, solved as one unbounded-fluid volume FEM. Exact for a homogeneous half-space. Called through free_surface.">ℹ️</span>
+      </td>
+      <td></td>
       <td></td>
       <td></td>
     </tr>

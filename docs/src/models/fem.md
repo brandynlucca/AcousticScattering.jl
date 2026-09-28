@@ -56,6 +56,8 @@ Adaptive refinement uses successive target-strength changes in dB. Check complex
 
 For supported radial spheres, `pressure(solution, points)` samples complex acoustic pressure normalized to the incident amplitude. It accepts one Cartesian point or an array of points, including fluid shells and fluid cavities. See [Pressure at Cartesian points](@ref pressure-evaluation) for field selection, coordinates and interface limits. `field=:shell` samples a fluid wall while `field=:interior` samples its fluid cavity. Elastic material has no acoustic pressure field. Elastic stress/displacement evaluation and radial sphere surface-field plotting are unavailable.
 
+Volume FEM solutions also support `pressure`, at any point inside the meshed domain that is not part of a solid region. `field=:total`/`:scattered` apply outside the outermost body and `field=:total`/`:interior` inside an enclosed fluid region, both using the region's own scattered-relative-to-background unknown internally.
+
 ## Meridian acoustic FEM
 
 Meridian FEM discretizes radial/axial dependence and uses azimuthal Fourier modes. For mode `m`, cylindrical-coordinate operators contain the term `-m^2 / rho^2`. Regularity on the axis and the transformed volume weighting are essential. Meridian FEM supports spheres, straight cylinders, and spheroids.
@@ -186,7 +188,7 @@ Compare complex amplitude, including phase, under refinement. Near elastic or ca
 
 `method = :volume` meshes the body and the surrounding fluid with curved order-2 tetrahedra. Fluid regions carry pressure and solid regions carry displacement, with continuity of normal displacement and traction across interfaces. It supports `Sphere` and `Spheroid` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries, with a fluid or empty interior.
 
-The default `closure = :pml` truncates the exterior with a perfectly matched layer of thickness `pml_thickness`, one wavelength by default. It is a sphere of radius `domain_radius`, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that domain is under 60% of the spherical volume. `closure = :pml_spherical` and `:pml_spheroidal` force a shape, and `closure = :dtn` uses the exact Dirichlet-to-Neumann map on a sphere instead. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
+The default `closure = :auto` uses the exact Dirichlet-to-Neumann map on a sphere of radius `domain_radius`, by default 1.2 times the body's largest semi-axis, or a perfectly matched layer when that domain is smaller. The map is applied without forming its dense matrix, so it works with the iterative solver. `closure = :pml` truncates the exterior with a layer of thickness `pml_thickness`, one wavelength by default and shorter layers lose accuracy. Its domain is a sphere, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that is under 60% of the spherical volume. `:pml_spherical`, `:pml_spheroidal` and `:dtn` force a closure. For compact bodies the layer holds 87 to 97% of the mesh at moderate `ka`, so the Dirichlet-to-Neumann closure needs about 10 times fewer unknowns. A rigid sphere at `ka = 12` agrees with the modal series to `0.2%`. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
 
 ```julia
 solution = fem(Spheroid(0.75, 0.25), SolidElastic(2.7, 4.2, 2.1), 1.0;
@@ -194,7 +196,9 @@ solution = fem(Spheroid(0.75, 0.25), SolidElastic(2.7, 4.2, 2.1), 1.0;
 scattering_amplitude(solution; angle = pi, azimuth = 0.0)
 ```
 
-Set `points_per_wavelength` for the fluid and the shortest solid wave, or `h` and `h_body` directly. `solver = :auto` uses a direct sparse solve below 60,000 unknowns and GMRES above, preconditioned by an incomplete LU factorization of the matrix with its wave terms shifted by `1 + i`. It falls back to the direct solve if GMRES does not converge, and `diagnostics(solution)` reports the solver and its iteration count. Use `solver = :direct` or `:iterative` to force one, and `ilu_tolerance` and `solver_tolerance` to tune the iteration. An aluminium sphere at `ka = 6` with 210,000 unknowns solves in about 3 minutes and agrees with the modal series to `0.4%`. Cost grows with the domain volume in wavelengths, so use the meridian, transition-matrix or BEM solvers where they apply and reserve volume FEM for bodies they do not cover.
+Set `points_per_wavelength` for the fluid and the shortest solid wave, or `h` and `h_body` directly. `solver = :auto` uses a direct sparse solve below 60,000 unknowns and GMRES above, preconditioned by an incomplete LU factorization of the matrix with its wave terms shifted by `1 + i`. It falls back to the direct solve if GMRES does not converge, and `diagnostics(solution)` reports the solver and its iteration count. Use `solver = :direct` or `:iterative` to force one, and `ilu_tolerance` and `solver_tolerance` to tune the iteration. An aluminium sphere at `ka = 6` agrees with the modal series to `0.4%`. Element assembly runs over Julia threads, so start Julia with `-t auto`.
+
+`incidence_angle_sweep(body, boundary, k, angles; method = :volume)` samples backscatter over incidence angle. The mesh, matrix and factorization do not depend on the incident direction, so a sweep builds them once and each angle needs only a new load and solve. Five angles for a 3:1 aluminium prolate cost about one and a half single solves and agree with the transition-matrix sweep to 0.05 dB.
 
 ### Coupled fluid and elastic regions
 
@@ -210,6 +214,16 @@ target_strength(solution)
 ```
 
 The mesh size inside each region follows its own wavelength, so a gas region is refined much more than the flesh around it. A tilted, displaced bladder at 2250 Hz agrees with the coupled-region `bem` to `0.4%` in complex amplitude. An elastic shell built from a solid region around a fluid region agrees with the modal series for a sphere and the transition matrix for a spheroid to a few percent, and the elements in a thin layer are sized from its thickness.
+
+### Planar free surface
+
+`free_surface(body, boundary, k, depth; condition = :pressure_release)` scatters from a `Sphere` or `Spheroid` submerged `depth` below an infinite planar interface, an air-water free surface (`:pressure_release`) or an idealized rigid seafloor (`:rigid`). It builds a coupled two-body volume FEM of `body` and its mirror image, solved once for the incident wave and once for its specular reflection, and superposes the two with the interface's reflection coefficient. This is exact for a homogeneous half-space. Post-process with `target_strength`, `scattering_amplitude` or `pressure`.
+
+```julia
+solution = free_surface(Sphere(0.25), FluidFilled(1.05, 1.05), 2.0, 1.4;
+    condition = :pressure_release, incidence_angle = 0.3)
+target_strength(solution)
+```
 
 ## Solve diagnostics
 

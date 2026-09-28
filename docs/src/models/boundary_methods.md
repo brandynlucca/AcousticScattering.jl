@@ -14,6 +14,14 @@ Single- and double-layer potentials integrate ``G`` and its normal derivative ag
 
 Axisymmetric BEM expands azimuthal dependence into Fourier modes over a meridian mesh. Panel count, Fourier cutoff and quadrature tolerance each control a separate error source ([Helsing and Karlsson, 2014](https://doi.org/10.1016/j.jcp.2014.04.053)). Fluid shells use paired inner and outer surfaces.
 
+At axial incidence, the direct CBIE ``\tfrac12 p_{\rm scat}-K[p_{\rm scat}]=-G[\partial p_{\rm scat}/\partial n]`` holds for any boundary. `Rigid`/`PressureRelease` prescribe one trace and solve for the other. [`Impedance`](@ref)`(zeta)`'s Robin condition, `∂p_scat/∂n = -ik/zeta*(p_scat+p_inc) - ∂p_inc/∂n`, substitutes directly into it, giving a single equation in `p_scat`:
+
+```math
+\left(\tfrac12 I-K-\frac{ik}{\zeta}G\right)p_{\rm scat}=\frac{ik}{\zeta}G[p_{\rm inc}]+G\!\left[\frac{\partial p_{\rm inc}}{\partial n}\right],
+```
+
+which reduces exactly to `Rigid`'s own equation as `zeta → ∞`. The direct solve becomes ill-conditioned as `zeta → 0`; use `PressureRelease` there instead.
+
 Full BEM accepts any closed triangular surface, including non-axisymmetric and nonconvex geometry, with outward normals and one connected interface per homogeneous region. Curved quadratic and cubic triangles preserve the supplied geometry. The mesh validator bounds each triangle's Jacobian and its separation from neighbors with outward-rounded Bernstein coefficients, raising an error on an inconclusive or self-intersecting mesh ([Johnen et al., 2013](https://doi.org/10.1016/j.jcp.2012.08.051)).
 
 ### Irregular frequencies and Burton–Miller coupling
