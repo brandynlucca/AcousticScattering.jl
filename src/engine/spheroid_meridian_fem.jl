@@ -140,16 +140,16 @@ function _spherical_hankel_cache(l_max::Integer, kR::Real)
 end
 
 """
-    spheroid_meridian_fem_target_strength(boundary, k, a, b, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
+    _spheroid_meridian_fem_modes(boundary, k, a, b, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
 
-Target strength [dB re 1 m²] of a rigid/pressure-release prolate/oblate
+Complex exterior surface traces of a rigid/pressure-release prolate/oblate
 spheroid (semi-axes `a` along the symmetry axis, `b` equatorial, matching
 [`Spheroid`](@ref)) at `incidence_angle` [rad] from the x-axis (`0` =
 axial/end-on, `π/2` = broadside), via the 2D `(ρ,z)` meridian FEM described
 in the module comment above, decomposed into azimuthal Fourier modes
 `m = 0, …, m_max`.
 """
-function spheroid_meridian_fem_target_strength(
+function _spheroid_meridian_fem_modes(
         boundary::Union{Rigid, PressureRelease}, k::Real,
         a::Real, b::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
@@ -184,7 +184,7 @@ function spheroid_meridian_fem_target_strength(
     dpdn_panel_modes = [ComplexF64[0.5 * (dm[j] + dm[j + 1]) for j in 1:(nt1 - 1)]
                         for dm in dpdn_modes]
 
-    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - β, π)
+    return ps_R, p_panel_modes, dpdn_panel_modes
 end
 
 # Mode `m`'s r=R trace for a FluidFilled spheroid, structurally identical to the cylinder version.
@@ -302,13 +302,13 @@ function _spheroid_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
 end
 
 """
-    spheroid_meridian_fem_target_strength(boundary::FluidFilled, k, a, b, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
+    _spheroid_meridian_fem_modes(boundary::FluidFilled, k, a, b, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
 
-Target strength [dB re 1 m²] of a fluid/gas-filled prolate/oblate spheroid
+Complex exterior surface traces of a fluid/gas-filled prolate/oblate spheroid
 at `incidence_angle` [rad] from the x-axis, via the coupled interior/
 exterior 2D meridian FEM described in the module comment above.
 """
-function spheroid_meridian_fem_target_strength(boundary::FluidFilled, k::Real,
+function _spheroid_meridian_fem_modes(boundary::FluidFilled, k::Real,
         a::Real, b::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
         l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
@@ -343,5 +343,5 @@ function spheroid_meridian_fem_target_strength(boundary::FluidFilled, k::Real,
     dpdn_panel_modes = [ComplexF64[0.5 * (dm[j] + dm[j + 1]) for j in 1:(nt1 - 1)]
                         for dm in dpdn_modes]
 
-    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - β, π)
+    return ps_R, p_panel_modes, dpdn_panel_modes
 end

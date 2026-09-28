@@ -31,4 +31,32 @@ let
         @test isfinite(AS.target_strength(numerical))
         @test abs(AS.target_strength(numerical) - AS.target_strength(reference)) < 3
     end
+
+    @time "Spheroid meridian FEM complex amplitudes" @testset "Spheroid meridian FEM complex amplitudes" begin
+        k = 20.0
+        incidence = pi / 3
+        body = AS.Spheroid(0.01001, 0.01)
+        for boundary in (AS.Rigid(), AS.PressureRelease(), AS.FluidFilled(1.2, 1.1))
+            numerical = AS.fem(body, boundary, k; method = :meridian,
+                R = 0.03, incidence_angle = incidence, n_r = 32, n_theta = 64, m_max = 3)
+            reference = AS.modal(body, boundary, k;
+                incidence_angle = incidence, m_max = 3, n_max = 5)
+            @test AS.scattering_amplitude(numerical) ≈
+                  AS.scattering_amplitude(reference) rtol = 0.003
+            @test AS.target_strength(numerical) ≈ AS.target_strength(reference) atol = 0.03
+            @test AS.scattering_amplitude(numerical; angle = pi - incidence, azimuth = pi) ≈
+                  AS.scattering_amplitude(numerical) rtol = 1e-12
+        end
+
+        oblate = AS.Spheroid(0.01, 0.02)
+        numerical = AS.fem(oblate, AS.Rigid(), k; method = :meridian,
+            R = 0.03, incidence_angle = pi / 2, n_r = 32, n_theta = 64, m_max = 3)
+        reference = AS.modal(oblate, AS.Rigid(), k;
+            incidence_angle = pi / 2, m_max = 3, n_max = 5)
+        @test AS.scattering_amplitude(numerical) ≈
+              AS.scattering_amplitude(reference) rtol = 0.003
+        sweep = AS.bistatic_sweep(numerical, [pi / 3, pi / 2]; azimuth = pi / 4)
+        @test length(sweep.amplitudes) == 2
+        @test all(isfinite, real.(sweep.amplitudes))
+    end
 end
