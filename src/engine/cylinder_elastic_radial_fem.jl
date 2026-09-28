@@ -208,22 +208,29 @@ finite-length target strength the same way
 no end-cap scattering). `n_elements` controls the 1D radial mesh
 resolution (shared by every mode).
 """
-function elastic_cylinder_radial_fem_target_strength(
-        boundary::Union{SolidElastic, Shelled{ElasticLayer, FluidInterior}}, k::Real, radius::Real, length::Real;
+function _elastic_cylinder_radial_fem_modes(
+        boundary::Union{SolidElastic, Shelled{ElasticLayer, FluidInterior}}, k::Real, radius::Real;
         aspect_angle::Real = π / 2,
         n_elements::Integer = 320,
         m_max::Integer = _default_mode_count(k * sin(aspect_angle) * radius), solve_reports = nothing)
     k1a = k * sin(aspect_angle) * radius
-    k1L = k * length
-    x = k1L * cos(aspect_angle)
+    return ComplexF64[_raw_bn_radial_fem(boundary, m, k1a, n_elements; solve_reports)
+                      for m in 0:m_max]
+end
+
+# Backscatter amplitude [m] from `_elastic_cylinder_radial_fem_modes`' raw per-mode coefficients:
+# exact per-mode cross-section solution times the Fraunhofer axial envelope, no end-cap scattering.
+function _elastic_cylinder_radial_fem_amplitude(
+        raws, k::Real, length::Real, aspect_angle::Real)
+    x = k * length * cos(aspect_angle)
     length_term = iszero(x) ? one(x) : sin(x) / x
+    total = sum(-neumann_factor(m) * (-1)^m * raws[m + 1] for m in eachindex(raws) .- 1)
+    return im * (length / π) * length_term * total
+end
 
-    total = zero(ComplexF64)
-    for m in 0:m_max
-        raw = _raw_bn_radial_fem(boundary, m, k1a, n_elements; solve_reports)
-        total += -neumann_factor(m) * (-1)^m * raw
-    end
-
-    f_bs = im * (length / π) * length_term * total
-    return target_strength(f_bs)
+function elastic_cylinder_radial_fem_target_strength(
+        boundary::Union{SolidElastic, Shelled{ElasticLayer, FluidInterior}}, k::Real, radius::Real, length::Real;
+        aspect_angle::Real = π / 2, kwargs...)
+    raws = _elastic_cylinder_radial_fem_modes(boundary, k, radius; aspect_angle, kwargs...)
+    return target_strength(_elastic_cylinder_radial_fem_amplitude(raws, k, length, aspect_angle))
 end

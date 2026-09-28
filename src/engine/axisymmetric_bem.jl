@@ -493,6 +493,26 @@ function _pair_G_rigid_rhs(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, 
     return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
 end
 
+# Impedance's extra single-layer-of-p_inc term: G(x,y)·p_inc(y), p_inc(y) = e^{ikz(y)}.
+function _pair_G_pinc(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real)
+    far = !self && _azimuthal_is_far(xρ, xz, pj)
+    if far
+        total = zero(ComplexF64)
+        for (s, w) in zip(_meridian_rule(xρ, xz, pj, k)...)
+            ρ2, z2 = _panel_point(pj, s)
+            total += cis(k * z2) *
+                     _azimuthal_G(k, xρ, xz, ρ2, z2; rtol = rtol, far = true) * ρ2 * pj.L *
+                     w
+        end
+        return total
+    end
+    integrand = s -> begin
+        ρ2, z2 = _panel_point(pj, s)
+        cis(k * z2) * _azimuthal_G(k, xρ, xz, ρ2, z2; rtol = rtol, far = far) * ρ2 * pj.L
+    end
+    return _meridian_quadrature(integrand, xρ, xz, pj, self, rtol)
+end
+
 # PressureRelease's double-layer-applied-to-known-p_scat integrand: -p_scat(y)·∂G/∂n_y(x,y).
 function _pair_K_pressrel(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real)
     projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
@@ -863,8 +883,9 @@ end
 
 Solve the axisymmetric (m = 0) direct CBIE for scattering of an axial
 (end-on) unit-amplitude plane wave `p_inc = e^{ikz}` off a body of
-revolution described by `mesh`, with `boundary` either [`Rigid`](@ref) or
-[`PressureRelease`](@ref) (see the module docstring for both CBIEs).
+revolution described by `mesh`, with `boundary` [`Rigid`](@ref),
+[`PressureRelease`](@ref) or [`Impedance`](@ref) (axial incidence only for
+the last; see the module docstring for the Rigid/PressureRelease CBIEs).
 Returns `(p_scat, dpdn_scat, ps)`: the piecewise-constant surface pressure
 and its normal derivative on each panel, and the panel geometry, both
 are needed by [`far_field`](@ref).
@@ -914,6 +935,39 @@ function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh;
     p_scat = ComplexF64[-cis(k * p.zm) for p in ps]
     b = Kp_known .- p_scat ./ 2
     dpdn_scat = _solve_reported(G, b, solve_reports; mode = 0, rtol)
+    return p_scat, dpdn_scat, ps
+end
+
+# Robin condition ∂p_total/∂n=-ik*p_total/zeta folded into the direct CBIE identity
+# 0.5*p_scat-K[p_scat]=-G[∂p_scat/∂n]: substituting ∂p_scat/∂n=-beta*(p_scat+p_inc)-∂p_inc/∂n
+# (beta=ik/zeta) gives (0.5I-K-beta*G)*p_scat = beta*G[p_inc]+G[∂p_inc/∂n], which reduces to
+# Rigid's own equation at beta=0 (zeta→∞) and forces p_scat→-p_inc as beta→∞ (zeta→0).
+function solve_axial(bc::Impedance, k::Real, mesh::MeridianMesh;
+        rtol::Real = 1e-6, solve_reports = nothing)
+    ps = panels(mesh)
+    n = length(ps)
+    K = zeros(ComplexF64, n, n)
+    G = zeros(ComplexF64, n, n)
+    rigid_rhs = zeros(ComplexF64, n)
+    pinc_rhs = zeros(ComplexF64, n)
+    _foreach_row(n) do i
+        xρ, xz = ps[i].rhom, ps[i].zm
+        for j in 1:n
+            pj = ps[j]
+            self = (i == j)
+            K[i, j] = _pair_K(k, xρ, xz, pj, self, rtol)
+            G[i, j] = _pair_V(k, xρ, xz, pj, self, rtol)
+            rigid_rhs[i] += _pair_G_rigid_rhs(k, xρ, xz, pj, self, rtol)
+            pinc_rhs[i] += _pair_G_pinc(k, xρ, xz, pj, self, rtol)
+        end
+    end
+
+    beta = im * k / bc.zeta
+    A = 0.5I - K - beta * G
+    b = beta .* pinc_rhs .+ rigid_rhs
+    p_scat = _solve_reported(A, b, solve_reports; mode = 0, rtol)
+    dpdn_scat = ComplexF64[-beta * (p_scat[i] + cis(k * ps[i].zm)) -
+                           im * k * ps[i].nz * cis(k * ps[i].zm) for i in eachindex(ps)]
     return p_scat, dpdn_scat, ps
 end
 

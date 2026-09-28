@@ -471,18 +471,16 @@ function _cylinder_fem_mode_trace(
 end
 
 """
-    cylinder_meridian_fem_target_strength(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
+    _cylinder_meridian_fem_modes(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default, solve_reports=nothing)
 
-Target strength [dB re 1 m²] of a finite rigid/pressure-release cylinder
-at `incidence_angle` [rad] from the x-axis (`0` = axial, matching the
-4-positional-argument method above; `π/2` = broadside), computed via the same
-2D `(ρ,z)` meridian FEM decomposed into
-azimuthal Fourier modes `m = 0, …, m_max` (see the module comment above).
-Backscatter is observed at the [`solve_oblique`](@ref)-established
-convention `target_strength(ps, p_modes, dpdn_modes, k, π - incidence_angle, π)`.
+Panels and per-Fourier-mode complex surface pressure/normal-derivative traces
+(`ps, p_modes, dpdn_modes`) of a finite cylinder's oblique 2D `(ρ,z)` meridian FEM solve, shared by
+every boundary type here. [`cylinder_meridian_fem_target_strength`](@ref) reduces this to a
+single backscatter number; [`far_field`](@ref) reconstructs the complex amplitude at any
+observation direction from the same traces.
 """
-function cylinder_meridian_fem_target_strength(
-        boundary::Union{Rigid, PressureRelease}, k::Real,
+function _cylinder_meridian_fem_modes(
+        boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real,
         radius::Real, length::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
         l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
@@ -506,8 +504,26 @@ function cylinder_meridian_fem_target_strength(
                      for pm in p_modes]
     dpdn_panel_modes = [ComplexF64[0.5 * (dm[j] + dm[j + 1]) for j in 1:(nt1 - 1)]
                         for dm in dpdn_modes]
+    return ps_R, p_panel_modes, dpdn_panel_modes
+end
 
-    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - β, π)
+"""
+    cylinder_meridian_fem_target_strength(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default)
+
+Target strength [dB re 1 m²] of a finite rigid/pressure-release cylinder
+at `incidence_angle` [rad] from the x-axis (`0` = axial, matching the
+4-positional-argument method above; `π/2` = broadside), computed via the same
+2D `(ρ,z)` meridian FEM decomposed into
+azimuthal Fourier modes `m = 0, …, m_max` (see the module comment above).
+Backscatter is observed at the [`solve_oblique`](@ref)-established
+convention `target_strength(ps, p_modes, dpdn_modes, k, π - incidence_angle, π)`.
+"""
+function cylinder_meridian_fem_target_strength(
+        boundary::Union{Rigid, PressureRelease}, k::Real,
+        radius::Real, length::Real, R::Real, incidence_angle::Real; kwargs...)
+    ps_R, p_panel_modes, dpdn_panel_modes = _cylinder_meridian_fem_modes(
+        boundary, k, radius, length, R, incidence_angle; kwargs...)
+    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - incidence_angle, π)
 end
 
 # Fluid-filled (and gas-filled) cylinder: interior fluid domain coupled at r_inner(θ), pole handled
@@ -669,29 +685,8 @@ cylinder at `incidence_angle` [rad] from the x-axis, via the coupled
 interior/exterior 2D meridian FEM described above.
 """
 function cylinder_meridian_fem_target_strength(boundary::FluidFilled, k::Real,
-        radius::Real, length::Real, R::Real, incidence_angle::Real;
-        m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
-        l_max::Integer = max(_default_mode_count(k * R), m_max), solve_reports = nothing)
-    β = incidence_angle
-    θ = Float64[]
-    p_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
-    dpdn_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
-    hs_cache, hsd_cache = _spherical_hankel_cache(l_max, k * R)
-    for m in 0:m_max
-        θ, pR, dpdnR = _cylinder_fem_mode_trace(
-            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache;
-            solve_reports)
-        p_modes[m + 1] = pR
-        dpdn_modes[m + 1] = dpdnR
-    end
-
-    mesh_R = MeridianMesh(R .* sin.(θ), R .* cos.(θ))
-    ps_R = panels(mesh_R)
-    nt1 = size(θ, 1)
-    p_panel_modes = [ComplexF64[0.5 * (pm[j] + pm[j + 1]) for j in 1:(nt1 - 1)]
-                     for pm in p_modes]
-    dpdn_panel_modes = [ComplexF64[0.5 * (dm[j] + dm[j + 1]) for j in 1:(nt1 - 1)]
-                        for dm in dpdn_modes]
-
-    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - β, π)
+        radius::Real, length::Real, R::Real, incidence_angle::Real; kwargs...)
+    ps_R, p_panel_modes, dpdn_panel_modes = _cylinder_meridian_fem_modes(
+        boundary, k, radius, length, R, incidence_angle; kwargs...)
+    return target_strength(ps_R, p_panel_modes, dpdn_panel_modes, k, π - incidence_angle, π)
 end
