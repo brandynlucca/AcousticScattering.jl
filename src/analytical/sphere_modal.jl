@@ -24,6 +24,27 @@ Soft boundary with zero total acoustic pressure, for supported geometries and so
 struct PressureRelease <: AbstractBoundaryCondition end
 
 """
+    Impedance(zeta)
+
+Locally reacting boundary with specific acoustic impedance ratio `zeta = Z/(ρc)`, dimensionless
+and relative to the exterior fluid, under the `exp(-iωt)` convention `∂p/∂n = -ik p/zeta` at the
+surface. `zeta` must have a nonnegative real part (a passive, non-generating boundary) and be
+nonzero. [`Rigid`](@ref) and [`PressureRelease`](@ref) are its `zeta → ∞` and `zeta → 0` limits.
+Supported by `modal(Sphere, ...)` and by `bem(...; method = :axisymmetric)` at axial incidence.
+The direct BEM solve becomes ill-conditioned as `zeta → 0`; use [`PressureRelease`](@ref) there.
+"""
+struct Impedance <: AbstractBoundaryCondition
+    zeta::ComplexF64
+    function Impedance(zeta::Number)
+        isfinite(zeta) && !iszero(zeta) ||
+            throw(ArgumentError("zeta must be finite and nonzero"))
+        real(zeta) >= 0 ||
+            throw(ArgumentError("zeta must have a nonnegative real part"))
+        return new(ComplexF64(zeta))
+    end
+end
+
+"""
     FluidFilled(density_contrast, soundspeed_contrast; coupling=:full)
 
 Homogeneous fluid transmission boundary condition (Anderson, 1950). Gas-filled bodies use the
@@ -316,6 +337,41 @@ struct SolidElastic <: AbstractBoundaryCondition
     end
 end
 
+"""
+    ViscoelasticSolid(density_contrast, speed_longitudinal_contrast, speed_transversal_contrast;
+        loss_longitudinal=0.0, loss_transversal=0.0)
+
+Solid with hysteretic damping, for example bone, with the contrasts of [`SolidElastic`](@ref).
+`loss_longitudinal` and `loss_transversal` are the loss factors `tan δ` of the longitudinal and
+shear moduli, which become `M(1 - i loss_longitudinal)` and `μ(1 - i loss_transversal)` for the
+package's `exp(-iωt)` convention. Supported as a region material of the volume
+[`fem`](@ref)`(bodies, materials, k)`.
+"""
+struct ViscoelasticSolid <: AbstractBoundaryCondition
+    density_contrast::Float64
+    speed_longitudinal_contrast::Float64
+    speed_transversal_contrast::Float64
+    loss_longitudinal::Float64
+    loss_transversal::Float64
+
+    function ViscoelasticSolid(density_contrast::Real, speed_longitudinal_contrast::Real,
+            speed_transversal_contrast::Real; loss_longitudinal::Real = 0.0,
+            loss_transversal::Real = 0.0)
+        density_contrast > 0 || throw(ArgumentError("density_contrast must be positive"))
+        speed_longitudinal_contrast > 0 ||
+            throw(ArgumentError("speed_longitudinal_contrast must be positive"))
+        speed_transversal_contrast > 0 ||
+            throw(ArgumentError("speed_transversal_contrast must be positive"))
+        loss_longitudinal >= 0 ||
+            throw(ArgumentError("loss_longitudinal must be nonnegative"))
+        loss_transversal >= 0 ||
+            throw(ArgumentError("loss_transversal must be nonnegative"))
+        return new(Float64(density_contrast), Float64(speed_longitudinal_contrast),
+            Float64(speed_transversal_contrast), Float64(loss_longitudinal),
+            Float64(loss_transversal))
+    end
+end
+
 function _default_mode_count(ka::Real)
     return max(20, ceil(Int, 2.5 * ka + 4 * cbrt(ka + 1) + 10))
 end
@@ -328,6 +384,12 @@ end
 function _modal_coefficient(::PressureRelease, m::Integer, k::Real, a::Real)
     ka = k * a
     return -js(m, ka) / hs(m, ka)
+end
+
+function _modal_coefficient(bc::Impedance, m::Integer, k::Real, a::Real)
+    ka = k * a
+    return -(jsd(m, ka) + im * js(m, ka) / bc.zeta) /
+           (hsd(m, ka) + im * hs(m, ka) / bc.zeta)
 end
 
 function _modal_coefficient(bc::FluidFilled, m::Integer, k::Real, a::Real)
