@@ -51,8 +51,9 @@ end
     bistatic_map(solution, thetas, phis)
 
 Sample target strength on a polar/azimuthal observation grid in radians without
-re-solving. Supported for axisymmetric and full-3D BEM/MFS, coupled-region BEM,
-and shell FEM solutions with retained surface data.
+re-solving. Supported for axisymmetric and full-3D BEM/MFS, coupled-region BEM, shell FEM, volume
+FEM and [`free_surface`](@ref) solutions. See [`bistatic_sweep`](@ref) for the angle convention,
+which differs between the axisymmetric/full-BEM and volume FEM/free-surface families.
 """
 function bistatic_map(sol, thetas::AbstractVector{<:Real}, phis::AbstractVector{<:Real})
     ts = [target_strength(_bistatic_amplitudes(sol, t, p)) for t in thetas, p in phis]
@@ -284,12 +285,19 @@ end
 
 Sample the elastic prolate spheroid or shell backscatter at fixed exterior wavenumber `k`. The
 transition matrices do not depend on direction, so each azimuthal order is computed once and
-reused for every angle. Accepts `m_max`, `n_max` and `check` as in `form_function`.
+reused for every angle. Accepts `m_max`, `n_max` and `check` as in [`tmatrix`](@ref), and
+`method = :volume` samples the volume FEM instead. Returns an `IncidenceAngleSweep`.
 """
 function incidence_angle_sweep(body::Spheroid, boundary::_ElasticSpheroidBoundary,
         k::Real, angles::AbstractVector{<:Real};
         m_max::Integer = _default_elastic_orders(boundary, k, body),
-        n_max::Integer = _default_elastic_orders(boundary, k, body), check::Bool = true)
+        n_max::Integer = _default_elastic_orders(boundary, k, body), check::Bool = true,
+        method::Symbol = :tmatrix, kwargs...)
+    method === :volume && return _volume_angle_sweep(body, boundary, k, angles; kwargs...)
+    isempty(kwargs) || throw(ArgumentError(
+        "unsupported keywords $(join(keys(kwargs), ", ")) for the transition-matrix sweep"))
+    method === :tmatrix ||
+        throw(ArgumentError("method must be :tmatrix or :volume, got $method"))
     _validate_incidence_sweep(angles, 0.0)
     transition = _elastic_transition_function(boundary, k, body, n_max)
     guarded = check && boundary isa Shelled && n_max > 2 && m_max > 2
@@ -303,17 +311,81 @@ function incidence_angle_sweep(body::Spheroid, boundary::_ElasticSpheroidBoundar
                 π - incidence_angle, π, m_max - 2, n_max - 2)
             change[] = max(change[], abs(amplitude - coarse) / abs(amplitude))
         end
-        ModalSolution(body, boundary, k, amplitude)
+        TMatrixSolution(body, boundary, k, amplitude)
     end
     guarded && _warn_elastic_truncation(change[])
     return sweep
 end
 
+function _volume_angle_sweep(
+        body, boundary, k, angles; incidence_azimuth::Real = 0.0, kwargs...)
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    system = _volume_system_single(body, boundary, k; kwargs...)
+    return incidence_angle_sweep(angles) do incidence_angle
+        FEMSolution(body, boundary, Float64(k), :volume,
+            _volume_solution(system, incidence_angle, incidence_azimuth))
+    end
+end
+
+"""
+    incidence_angle_sweep(body::Union{Sphere,Spheroid}, boundary, k, angles; method=:volume, incidence_azimuth=0, kwargs...)
+
+Sample full-3D volume FEM backscatter at fixed exterior wavenumber `k`. The mesh, matrix and its
+factorization do not depend on the incident direction, so they are built once and each angle only
+needs a new load and solve. Accepts the keywords of `fem(...; method = :volume)`, with `angles` the
+polar incidence angles in radians. Returns an `IncidenceAngleSweep`.
+"""
+function incidence_angle_sweep(body::Union{Sphere, Spheroid},
+        boundary::AbstractBoundaryCondition, k::Real, angles::AbstractVector{<:Real};
+        method::Symbol = :volume, kwargs...)
+    method === :volume || throw(ArgumentError(
+        "incidence_angle_sweep(::Union{Sphere,Spheroid}, ...) only supports method=:volume"))
+    return _volume_angle_sweep(body, boundary, k, angles; kwargs...)
+end
+
+"""
+    incidence_angle_sweep(bodies::AbstractVector{<:AbstractBody}, materials::AbstractVector, k, angles; kwargs...)
+
+Volume FEM backscatter of coupled fluid and elastic regions, as in
+`fem(bodies, materials, k; method = :volume)`, with one mesh and factorization for all `angles`.
+"""
+function incidence_angle_sweep(bodies::AbstractVector{<:AbstractBody},
+        materials::AbstractVector, k::Real,
+        angles::AbstractVector{<:Real}; parents::AbstractVector{<:Integer} = collect(
+            0:(length(bodies) - 1)),
+        centers = [zeros(3) for _ in bodies],
+        orientations = [[0.0, 0.0, 1.0] for _ in bodies], incidence_azimuth::Real = 0.0,
+        kwargs...)
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    all(b -> b isa Union{Sphere, Spheroid}, bodies) || throw(ArgumentError(
+        "region bodies must be Sphere or Spheroid"))
+    all(m -> m isa _VolumeRegionMaterial, materials) || throw(ArgumentError(
+        "region materials must be FluidFilled, SolidElastic, ViscoelasticSolid or ViscousLayer"))
+    system = _volume_system_regions(
+        bodies, materials, k; parents, centers, orientations, kwargs...)
+    geometry = _VolumeRegionGeometry(collect(AbstractBody, bodies),
+        [Float64.(c) for c in centers], [Float64.(o) for o in orientations],
+        collect(Int, parents))
+    boundary = _VolumeRegionMaterials(collect(Any, materials))
+    return incidence_angle_sweep(angles) do incidence_angle
+        FEMSolution(geometry, boundary, Float64(k), :volume,
+            _volume_solution(system, incidence_angle, incidence_azimuth))
+    end
+end
+
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
-    FEMSolution{_ShellFEMSurfaceData}}
+    FEMSolution{_ShellFEMSurfaceData}, FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
 const _BistaticDirectionSolution = Union{BEMSolution{_FullBEMSurfaceData},
     BEMSolution{_RegionBEMData}, MFSSolution{_FullMFSSurfaceData}}
+
+_bistatic_incidence(sol::ComponentComparison) = _bistatic_incidence(sol.coupled)
+_bistatic_incidence(sol::FreeSurfaceSolution) = (sol.incidence_angle, sol.incidence_azimuth)
+function _bistatic_incidence(sol)
+    data = sol.data
+    return (data.incidence_angle,
+        hasproperty(data, :incidence_azimuth) ? data.incidence_azimuth : 0.0)
+end
 
 """
     BistaticSweep
@@ -346,10 +418,13 @@ end
 """
     bistatic_sweep(solution, angles; azimuth=0)
 
-Sample an observation cut from retained BEM, MFS or shell FEM surface data, including
-full-3D and coupled-region solutions or [`components`](@ref) comparisons. No re-solves.
-Angles are radians from +x toward the azimuthal direction; at azimuth zero, π/2 points
-along +y and 3π/2 along -y. Retain both target strength and complex amplitude.
+Sample an observation cut from retained BEM, MFS, shell FEM or volume FEM surface/field data,
+including full-3D, coupled-region, [`free_surface`](@ref) solutions or [`components`](@ref)
+comparisons. No re-solves. For axisymmetric BEM/MFS, shell FEM and full/coupled-region BEM, angles
+are radians from +x toward the azimuthal direction, with π/2 along +y and 3π/2 along -y at azimuth
+zero. Volume FEM and `free_surface` results instead use their own `scattering_amplitude` convention,
+radians from +z with azimuth measured in the xy-plane from +x. Retain both target strength and
+complex amplitude.
 """
 function bistatic_sweep(
         sol::Union{_BistaticAngleAzimuthSolution, _BistaticDirectionSolution,
@@ -361,8 +436,7 @@ function bistatic_sweep(
     values = [_bistatic_amplitudes(sol, a, azimuth) for a in angles]
     amplitudes = first(values) isa Number ? ComplexF64.(values) :
                  permutedims(reduce(hcat, values))
-    data = sol isa ComponentComparison ? sol.coupled.data : sol.data
-    incidence_azimuth = hasproperty(data, :incidence_azimuth) ? data.incidence_azimuth : 0.0
+    incidence_angle, incidence_azimuth = _bistatic_incidence(sol)
     return BistaticSweep(Float64.(angles), Float64(azimuth), target_strength.(amplitudes),
-        data.incidence_angle, incidence_azimuth, amplitudes, _sample_labels(sol))
+        incidence_angle, incidence_azimuth, amplitudes, _sample_labels(sol))
 end

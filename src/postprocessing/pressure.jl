@@ -31,6 +31,13 @@ pressure(solution, (0.02, 0.0, 0.0); field=:scattered)
 pressure(solution, [(0.0, 0.0, 0.0), (0.02, 0.0, 0.0)])
 ```
 """
+function pressure(solution::FreeSurfaceSolution, points; field::Symbol = :total, region = nothing)
+    region === nothing ||
+        throw(ArgumentError("region selection is not supported for a FreeSurfaceSolution"))
+    return pressure(solution.direct, points; field) .+
+           solution.sign .* pressure(solution.reflected, points; field)
+end
+
 function pressure(solution::AbstractSolution, points; field::Symbol = :total, region = nothing)
     _check_pressure_solution(solution)
     field in (:total, :scattered, :incident, :interior, :shell) ||
@@ -57,11 +64,17 @@ function _check_pressure_solution(solution)
         BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_FullMFSSurfaceData}} ||
                     (solution isa MFSSolution{_AxisymmetricSurfaceData} &&
                      solution.data.source_modes !== nothing)
-    supported = spherical || solution isa BEMSolution{_RegionBEMData} ||
+    supported = spherical ||
+                solution isa
+                Union{BEMSolution{_RegionBEMData}, FEMSolution{_VolumeFEMData}} ||
                 (boundary_geometry && boundary_data &&
                  solution.boundary isa Union{Rigid, PressureRelease, FluidFilled})
     supported || throw(ArgumentError(
         "pressure requires a supported acoustic solution"))
+    solution isa ModalSolution && solution.data isa _SphereModalData &&
+        !(solution.data.incident isa PlaneWave) &&
+        throw(ArgumentError(
+            "pressure is not available for a non-plane-wave incident field"))
     isfinite(solution.k) && solution.k > 0 ||
         throw(ArgumentError("pressure requires a finite positive wavenumber"))
     return nothing
@@ -373,4 +386,47 @@ function _radial_pressure_value(domain, r, order)
     t = 2 * (r - radii[left]) / (radii[left + 2] - radii[left]) - 1
     return t * (t - 1) / 2 * values[left] + (1 - t^2) * values[left + 1] +
            t * (t + 1) / 2 * values[left + 2]
+end
+
+# Complex pressure of a volume FEM solution at arbitrary Cartesian points, via Ferrite point location.
+# The exterior fluid and PML regions carry the scattered pressure, an interior fluid region the total
+# pressure directly (a total-field source term is built into its assembly), and solid regions have no
+# scalar pressure field at all.
+function _pressure_values(solution::FEMSolution{_VolumeFEMData}, points, field)
+    all(p -> all(isfinite, p), points) ||
+        throw(ArgumentError("point coordinates must be finite"))
+    data = solution.data
+    system = data.system
+    grid = system.grid
+    direction = _volume_direction(data.incidence_angle, data.incidence_azimuth)
+    incident = ComplexF64[cis(solution.k * dot(direction, point)) for point in points]
+    field === :incident && return incident
+    coords = [Ferrite.Vec{3}(Float64.(point)) for point in points]
+    handler = Ferrite.PointEvalHandler(grid, coords)
+    pv = Ferrite.PointValues(_VOLUME_IP, _VOLUME_GIP)
+    values = Vector{ComplexF64}(undef, length(points))
+    for (i, location) in enumerate(Ferrite.PointIterator(handler))
+        location === nothing && throw(ArgumentError(
+            "point $(points[i]) lies outside the volume FEM's computational domain"))
+        cell_id = Ferrite.cellid(location)
+        label = system.labels[cell_id]
+        label in (_REGION_FLUID, _REGION_INTERIOR) || throw(ArgumentError(
+            "pressure is only defined in fluid regions of a volume FEM solution, " *
+            "point $(points[i]) is elsewhere"))
+        Ferrite.reinit!(pv, location)
+        cell = grid.cells[cell_id]
+        raw = sum(Ferrite.shape_value(pv, 1, j) *
+                  data.solution[_pressure_dof(cell.nodes[j])]
+        for j in eachindex(cell.nodes))
+        values[i] = if label == _REGION_FLUID
+            field === :scattered ? raw :
+            field === :total ? raw + incident[i] :
+            throw(ArgumentError("field=:$field is not defined outside the body"))
+        else
+            # The interior unknown is also scattered relative to the same background incident wave.
+            field in (:total, :interior) ? raw + incident[i] :
+            throw(ArgumentError("field=:$field is not defined inside a fluid region"))
+        end
+    end
+    return values
 end
