@@ -178,10 +178,35 @@ struct _ShellFEMSurfaceData
     diagnostics::NamedTuple
 end
 
+# Cylinder meridian FEM (rigid/pressure-release/fluid-filled): panels and per-Fourier-mode
+# complex surface traces at r=R, mirroring `_ShellFEMSurfaceData`'s exterior fields. Reduces to
+# `far_field`/`target_strength(ps, p_modes, dpdn_modes, k, angle, azimuth)` at any observation
+# direction, not only the backscatter this path's own `_ScalarFEMData` predecessor retained.
+struct _CylinderMeridianFEMData
+    ps::Vector{Panel}
+    p_modes::Vector{Vector{ComplexF64}}
+    dpdn_modes::Vector{Vector{ComplexF64}}
+    incidence_angle::Float64
+    diagnostics::NamedTuple
+end
+
+# Elastic cylinder radial FEM: raw per-azimuthal-mode coefficients from `_raw_bn_radial_fem`,
+# and the axial geometry (`length`, `aspect_angle`) needed to reconstruct the backscatter
+# amplitude via `_elastic_cylinder_radial_fem_amplitude`. Backscatter only, unlike the
+# meridian path above: the Fraunhofer axial envelope this reduction uses has no general
+# bistatic form.
+struct _CylinderRadialFEMData
+    modes::Vector{ComplexF64}
+    length::Float64
+    aspect_angle::Float64
+    diagnostics::NamedTuple
+end
+
 struct _SphereModalData
     coefficients::Vector{ComplexF64}
     interior_coefficients::Union{Nothing, Vector{ComplexF64}}
     shell_coefficients::Union{Nothing, Vector{NTuple{2, ComplexF64}}}
+    incident::IncidentField
 end
 
 """
@@ -190,8 +215,9 @@ end
 Result of [`modal`](@ref): the modal-series complex scattering amplitude `f` [m] at the
 angle(s) `modal` was called with. Post-process with [`target_strength`](@ref) or
 [`scattering_amplitude`](@ref). Supported spheres also retain coefficients for [`pressure`](@ref)
-evaluation with a unit plane wave traveling along +x. Finite-cylinder and bent-cylinder paths
-include approximations.
+evaluation with a unit plane wave traveling along +x; `pressure` is not available for a
+[`SphericalWave`](@ref) or [`BesselBeam`](@ref) incident field. Finite-cylinder and
+bent-cylinder paths include approximations.
 """
 struct ModalSolution <: AbstractSolution
     body::AbstractBody
@@ -202,6 +228,20 @@ struct ModalSolution <: AbstractSolution
 end
 
 ModalSolution(body, boundary, k, f) = ModalSolution(body, boundary, k, f, nothing)
+
+"""
+    TMatrixSolution
+
+Result of [`tmatrix`](@ref): the complex scattering amplitude `f` [m] of an elastic spheroid or
+shell at the incident and observation directions `tmatrix` was called with. Post-process with
+[`target_strength`](@ref) or [`scattering_amplitude`](@ref).
+"""
+struct TMatrixSolution <: AbstractSolution
+    body::Spheroid
+    boundary::AbstractBoundaryCondition
+    k::Float64
+    f::ComplexF64
+end
 
 """
     KirchhoffSolution
@@ -275,8 +315,10 @@ end
     modal(body::AbstractBody, boundary::AbstractBoundaryCondition, k; incidence_angle=π/2, kwargs...)
 
 Modal-series result, returns a [`ModalSolution`](@ref). Dispatches on `body`'s concrete type.
-`Sphere` backscatter is angle-independent, with no `incidence_angle` keyword. A bent `Cylinder`
-automatically applies the Fresnel bend-coherence correction (see [`Cylinder`](@ref)).
+`Sphere` backscatter is angle-independent, with no `incidence_angle` keyword, but accepts
+`incident::IncidentField=PlaneWave()` (see [`SphericalWave`](@ref) and [`BesselBeam`](@ref));
+`angle` is then measured from the incident field's own axis. A bent `Cylinder` automatically
+applies the Fresnel bend-coherence correction (see [`Cylinder`](@ref)).
 Post-process with [`target_strength`](@ref)`(sol)` in dB re 1 m² or [`scattering_amplitude`](@ref)`(sol)`,
 the complex scattering amplitude in m.
 """
@@ -286,11 +328,12 @@ function modal(body::Sphere, boundary::AbstractBoundaryCondition, k::Real; kwarg
 end
 
 function modal(body::Sphere,
-        boundary::Union{Rigid, PressureRelease, FluidFilled,
+        boundary::Union{Rigid, PressureRelease, Impedance, FluidFilled,
             SolidElastic, Shelled{ElasticLayer, FluidInterior},
             Shelled{FluidLayer, FluidInterior}, Shelled{FluidLayer, VacuumInterior}},
         k::Real;
-        angle::Real = π, m_max::Integer = _default_mode_count(k * body.radius))
+        angle::Real = π, m_max::Integer = _default_mode_count(k * body.radius),
+        incident::IncidentField = PlaneWave())
     isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
     m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
     coefficients = ComplexF64[]
@@ -300,7 +343,7 @@ function modal(body::Sphere,
     shell = boundary isa Shelled{FluidLayer} ? NTuple{2, ComplexF64}[] : nothing
     total = zero(ComplexF64)
     for l in 0:m_max
-        prefactor = (2l + 1) * im^l
+        prefactor = (2l + 1) * _incident_coefficient(incident, l, k)
         if boundary isa FluidFilled
             mode = _sphere_fluid_coefficients(boundary, l, k, body.radius)
             coefficient = mode.scattered
@@ -314,16 +357,43 @@ function modal(body::Sphere,
             coefficient = _modal_coefficient(boundary, l, k, body.radius)
         end
         push!(coefficients, prefactor * coefficient)
-        total += (2l + 1) * legendre_p(l, cos(angle)) * coefficient
+        total += prefactor * (-im)^(l + 1) * legendre_p(l, cos(angle)) * coefficient
     end
-    return ModalSolution(body, boundary, k, -im / k * total,
-        _SphereModalData(coefficients, interior, shell))
+    return ModalSolution(body, boundary, k, total / k,
+        _SphereModalData(coefficients, interior, shell, incident))
 end
 
 function modal(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
         incidence_angle::Real = π / 2, kwargs...)
     f = form_function(boundary, k, body; incidence_angle = incidence_angle, kwargs...)
     return ModalSolution(body, boundary, k, f)
+end
+
+function modal(::Spheroid, ::_ElasticSpheroidBoundary, ::Real; kwargs...)
+    throw(ArgumentError("elastic spheroids and shells are solved by `tmatrix`, not `modal`"))
+end
+
+# --- `tmatrix`: transition-matrix solution for elastic spheroids ------------
+
+"""
+    tmatrix(body::Spheroid, boundary, k; incidence_angle=π/2, incidence_azimuth=0,
+        scatter_angle=π-incidence_angle, scatter_azimuth=incidence_azimuth+π, m_max, n_max, check=true)
+
+Transition-matrix scattering by a prolate or oblate spheroid, returns a [`TMatrixSolution`](@ref).
+`boundary` is a `SolidElastic` solid or `Shelled(ElasticLayer(...), FluidInterior(...) or VacuumInterior(),
+radius_ratio)`, an elastic shell whose confocal inner surface has an equatorial semi-axis
+`radius_ratio` times the outer one. Angles are in radians from the axis of symmetry, and the defaults
+give backscatter. `m_max` and `n_max` truncate the azimuthal orders and degrees, and a shell solve
+is repeated with both reduced by 2 and warns when the amplitude changes by more than 1%. Pass
+`check = false` to skip the repeat. Post-process with [`target_strength`](@ref) or
+[`scattering_amplitude`](@ref).
+
+See [Transition-matrix solutions](@ref tmatrix-theory).
+"""
+function tmatrix(body::Spheroid, boundary::_ElasticSpheroidBoundary, k::Real;
+        incidence_angle::Real = π / 2, kwargs...)
+    f = form_function(boundary, k, body; incidence_angle, kwargs...)
+    return TMatrixSolution(body, boundary, k, f)
 end
 
 function modal(body::Cylinder,
@@ -414,9 +484,9 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
 
 - `:volume`: full-3D finite elements on curved order-2 tetrahedra. Covers `Sphere` and `Spheroid`
   with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries,
-  with a fluid or empty interior. A perfectly matched layer closes the exterior, spherical or
-  (`closure = :pml_spheroidal`) a confocal spheroid, and `closure = :pml` picks the smaller domain. An
-  exact Dirichlet-to-Neumann map is available with `closure = :dtn`. Accepts `incidence_angle`,
+  with a fluid or empty interior. The default `closure = :auto` uses the exact Dirichlet-to-Neumann map
+  on a sphere or a perfectly matched layer, whichever gives the smaller domain, and `:dtn`, `:pml`,
+  `:pml_spherical` and `:pml_spheroidal` force a closure. Accepts `incidence_angle`,
   `incidence_azimuth`, `points_per_wavelength`, `domain_radius`, `clearance`, `pml_thickness`,
   `pml_sigma`, and `solver` (`:auto`, `:direct` or `:iterative`), and supports `angle`/`azimuth` in
   [`scattering_amplitude`](@ref).
@@ -510,12 +580,13 @@ function fem(body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled
     method === :meridian ||
         throw(ArgumentError("fem(::Cylinder, ::Union{Rigid,PressureRelease,FluidFilled}, ...) only supports method=:meridian"))
     reports = _SolveReports()
-    ts = cylinder_meridian_fem_target_strength(
+    ps, p_modes, dpdn_modes = _cylinder_meridian_fem_modes(
         boundary, k, body.radius, body.length, R, incidence_angle;
         m_max, solve_reports = reports, kwargs...)
     report = _summarize_solves(reports; method, solver_options = (;
         R, incidence_angle, m_max, kwargs...))
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
+    data = _CylinderMeridianFEMData(ps, p_modes, dpdn_modes, incidence_angle, report)
+    return FEMSolution(body, boundary, k, method, data)
 end
 
 function fem(body::Cylinder,
@@ -526,12 +597,12 @@ function fem(body::Cylinder,
     method === :radial ||
         throw(ArgumentError("fem(::Cylinder, ::Union{SolidElastic,Shelled{ElasticLayer,FluidInterior}}, ...) only supports method=:radial"))
     reports = _SolveReports()
-    ts = elastic_cylinder_radial_fem_target_strength(
-        boundary, k, body.radius, body.length; aspect_angle = incidence_angle,
-        solve_reports = reports, kwargs...)
+    modes = _elastic_cylinder_radial_fem_modes(boundary, k, body.radius;
+        aspect_angle = incidence_angle, solve_reports = reports, kwargs...)
     report = _summarize_solves(reports; method, solver_options = (;
         incidence_angle, kwargs...))
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
+    data = _CylinderRadialFEMData(modes, body.length, incidence_angle, report)
+    return FEMSolution(body, boundary, k, method, data)
 end
 
 function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
@@ -557,12 +628,15 @@ struct _VolumeRegionGeometry <: AbstractBody
     parents::Vector{Int}
 end
 
+const _VolumeRegionMaterial = Union{
+    FluidFilled, SolidElastic, ViscoelasticSolid, ViscousLayer}
+
 struct _VolumeRegionMaterials <: AbstractBoundaryCondition
-    materials::Vector{AbstractBoundaryCondition}
+    materials::Vector{Any}
 end
 
 """
-    fem(bodies::AbstractVector{<:Union{Sphere,Spheroid}}, materials::AbstractVector{<:Union{FluidFilled,SolidElastic}}, k;
+    fem(bodies::AbstractVector{<:Union{Sphere,Spheroid}}, materials::AbstractVector, k;
         method=:volume, parents=collect(0:length(bodies)-1), centers, orientations,
         incidence_angle=π/2, incidence_azimuth=0, kwargs...)
 
@@ -578,8 +652,7 @@ Returns a [`FEMSolution`](@ref). Post-process with `scattering_amplitude(sol; an
 or `target_strength(sol; angle, azimuth)`.
 """
 function fem(bodies::AbstractVector{<:AbstractBody},
-        materials::AbstractVector{<:AbstractBoundaryCondition}, k::Real;
-        method::Symbol = :volume,
+        materials::AbstractVector, k::Real; method::Symbol = :volume,
         parents::AbstractVector{<:Integer} = collect(0:(length(bodies) - 1)),
         centers = [zeros(3) for _ in bodies],
         orientations = [[0.0, 0.0, 1.0] for _ in bodies], kwargs...)
@@ -587,16 +660,69 @@ function fem(bodies::AbstractVector{<:AbstractBody},
         "fem(::AbstractVector, ::AbstractVector, ...) only supports method=:volume"))
     all(b -> b isa Union{Sphere, Spheroid}, bodies) || throw(ArgumentError(
         "region bodies must be Sphere or Spheroid"))
-    all(m -> m isa Union{FluidFilled, SolidElastic}, materials) || throw(ArgumentError(
-        "region materials must be FluidFilled or SolidElastic"))
+    all(m -> m isa _VolumeRegionMaterial, materials) || throw(ArgumentError(
+        "region materials must be FluidFilled, SolidElastic, ViscoelasticSolid or ViscousLayer"))
     data = _fem_volume_regions(
         bodies, materials, k; parents, centers, orientations, kwargs...)
     geometry = _VolumeRegionGeometry(collect(AbstractBody, bodies),
         [Float64.(c) for c in centers], [Float64.(o) for o in orientations],
         collect(Int, parents))
     return FEMSolution(
-        geometry, _VolumeRegionMaterials(collect(AbstractBoundaryCondition, materials)), k,
+        geometry, _VolumeRegionMaterials(collect(Any, materials)), k,
         :volume, data)
+end
+
+"""
+    FreeSurfaceSolution
+
+Result of [`free_surface`](@ref): the volume FEM solutions of a body driven by the direct incident
+wave and by its interface-reflected image, held separately with the interface's reflection sign.
+Post-process with [`target_strength`](@ref), [`scattering_amplitude`](@ref) or [`pressure`](@ref).
+"""
+struct FreeSurfaceSolution <: AbstractSolution
+    direct::FEMSolution
+    reflected::FEMSolution
+    sign::Int
+    incidence_angle::Float64
+    incidence_azimuth::Float64
+end
+
+"""
+    free_surface(body::Union{Sphere,Spheroid}, boundary, k, depth; condition=:pressure_release,
+        incidence_angle=0, incidence_azimuth=0, orientation=[0,0,1], kwargs...)
+
+Volume FEM scattering by `body`, centered on the normal of an infinite planar interface and
+submerged a `depth` [m] below it. `condition = :pressure_release` (default) is an air-water free
+surface, `condition = :rigid` an idealized seafloor. `incidence_angle = 0` and `incidence_azimuth`
+give the direct wave's direction along the interface's outward normal, in the convention of
+`fem(...; method = :volume)`. `boundary` is a region material (`FluidFilled`, `SolidElastic`,
+`ViscoelasticSolid` or `ViscousLayer`).
+
+Solved exactly by the method of images: `body` and a mirror image across the interface form a
+coupled two-body volume FEM in an unbounded fluid, solved once for the direct wave and once for its
+specular reflection, and added with the interface's reflection coefficient (`-1` for
+`:pressure_release`, `+1` for `:rigid`). Accepts the keywords of `fem(...; method = :volume)` for
+coupled regions. Returns a [`FreeSurfaceSolution`](@ref).
+"""
+function free_surface(
+        body::Union{Sphere, Spheroid}, boundary::_VolumeRegionMaterial, k::Real,
+        depth::Real; condition::Symbol = :pressure_release, incidence_angle::Real = 0.0,
+        incidence_azimuth::Real = 0.0, orientation = [0.0, 0.0, 1.0], kwargs...)
+    condition in (:pressure_release, :rigid) || throw(ArgumentError(
+        "condition must be :pressure_release or :rigid, got $condition"))
+    isfinite(depth) && depth > 0 ||
+        throw(ArgumentError("depth must be finite and positive"))
+    sign = condition === :pressure_release ? -1 : 1
+    centers = [[0.0, 0.0, -depth], [0.0, 0.0, depth]]
+    orientations = [Float64.(orientation), [1.0, 1.0, -1.0] .* Float64.(orientation)]
+    system = _volume_system_regions([body, body], [boundary, boundary], k;
+        parents = [0, 0], centers, orientations, kwargs...)
+    geometry = _VolumeRegionGeometry([body, body], centers, orientations, [0, 0])
+    materials = _VolumeRegionMaterials([boundary, boundary])
+    solve(angle) = FEMSolution(geometry, materials, Float64(k), :volume,
+        _volume_solution(system, angle, incidence_azimuth))
+    return FreeSurfaceSolution(solve(incidence_angle), solve(π - incidence_angle), sign,
+        Float64(incidence_angle), Float64(incidence_azimuth))
 end
 
 function fem(body::Sphere, boundary::Shelled{ElasticLayer, VacuumInterior}, k::Real;
@@ -784,7 +910,7 @@ function bem(body::Sphere,
     return BEMSolution(body, boundary, k, :axisymmetric, data)
 end
 
-function _bem_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
+function _bem_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease, Impedance},
         k::Real, mesh::MeridianMesh; kwargs...)
     reports = _SolveReports()
     p_scat, dpdn_scat, _ = solve_axial(
@@ -1282,6 +1408,19 @@ function scattering_amplitude(sol::ModalSolution; kwargs...)
     return sol.f
 end
 
+function target_strength(sol::TMatrixSolution; kwargs...)
+    isempty(kwargs) || throw(ArgumentError(
+        "target_strength(::TMatrixSolution) takes no keywords: the directions were already " *
+        "fixed when tmatrix(...) was called. Call tmatrix(...) again with different angles."))
+    return target_strength(sol.f)
+end
+function scattering_amplitude(sol::TMatrixSolution; kwargs...)
+    isempty(kwargs) || throw(ArgumentError(
+        "scattering_amplitude(::TMatrixSolution) takes no keywords: the directions were already " *
+        "fixed when tmatrix(...) was called. Call tmatrix(...) again with different angles."))
+    return sol.f
+end
+
 function target_strength(sol::KirchhoffSolution; kwargs...)
     isempty(kwargs) || throw(ArgumentError(
         "target_strength(::KirchhoffSolution) takes no keywords: the observation angle was " *
@@ -1335,6 +1474,16 @@ function target_strength(sol::FEMSolution{_VolumeFEMData};
     return target_strength(scattering_amplitude(sol; angle, azimuth))
 end
 
+function scattering_amplitude(sol::FreeSurfaceSolution;
+        angle::Real = π - sol.incidence_angle, azimuth::Real = sol.incidence_azimuth + π)
+    return scattering_amplitude(sol.direct; angle, azimuth) +
+           sol.sign * scattering_amplitude(sol.reflected; angle, azimuth)
+end
+
+function target_strength(sol::FreeSurfaceSolution; kwargs...)
+    return target_strength(scattering_amplitude(sol; kwargs...))
+end
+
 function target_strength(sol::FEMSolution{_ShellFEMSurfaceData};
         angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
     return target_strength(scattering_amplitude(sol; angle = angle, azimuth = azimuth))
@@ -1346,6 +1495,28 @@ function scattering_amplitude(sol::FEMSolution{_ShellFEMSurfaceData};
     length(d.p_ext_modes) == 1 &&
         return far_field(d.ps_ext, d.p_ext_modes[1], d.dpdn_ext_modes[1], sol.k, angle)
     return far_field(d.ps_ext, d.p_ext_modes, d.dpdn_ext_modes, sol.k, angle, azimuth)
+end
+
+function target_strength(sol::FEMSolution{_CylinderMeridianFEMData};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
+    return target_strength(scattering_amplitude(sol; angle, azimuth))
+end
+
+function scattering_amplitude(sol::FEMSolution{_CylinderMeridianFEMData};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
+    d = sol.data
+    length(d.p_modes) == 1 &&
+        return far_field(d.ps, d.p_modes[1], d.dpdn_modes[1], sol.k, angle)
+    return far_field(d.ps, d.p_modes, d.dpdn_modes, sol.k, angle, azimuth)
+end
+
+function target_strength(sol::FEMSolution{_CylinderRadialFEMData})
+    return target_strength(scattering_amplitude(sol))
+end
+
+function scattering_amplitude(sol::FEMSolution{_CylinderRadialFEMData})
+    d = sol.data
+    return _elastic_cylinder_radial_fem_amplitude(d.modes, sol.k, d.length, d.aspect_angle)
 end
 
 function _axisymmetric_amplitude(k::Real, d::_AxisymmetricSurfaceData; angle::Real, azimuth::Real)

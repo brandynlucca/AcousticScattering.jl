@@ -2,6 +2,7 @@ module AcousticScattering
 
 using LinearAlgebra: I, dot, mul!, Diagonal, norm, cond, diag, diagind, pinv, det,
                      SingularException, svdvals, cross, lu, svd
+using LinearAlgebra: LinearAlgebra
 using SparseArrays: sparse, spzeros, SparseMatrixCSC
 using SpecialFunctions: besselj, bessely, besselh
 using SpheroidalWaves: SpheroidalWaves
@@ -29,6 +30,7 @@ and exterior wavenumber. Geometry dimensions are in meters.
 abstract type AbstractBody end
 
 include("special_functions.jl")
+include("analytical/incident_field.jl")
 include("engine/diagnostics.jl")
 
 include("postprocessing/target_strength.jl")
@@ -80,13 +82,16 @@ include("postprocessing/axisymmetric_pressure.jl")
 include("postprocessing/sweeps.jl")
 include("postprocessing/revolution.jl")
 
-export Rigid, PressureRelease, FluidFilled, GasFilled, SolidElastic
+export Rigid, PressureRelease, Impedance, FluidFilled, GasFilled, SolidElastic,
+       ViscoelasticSolid
 export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumInterior,
        FluidInterior
 export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
-export AbstractSolution, ModalSolution, KirchhoffSolution, FEMSolution, BEMSolution,
-       MFSSolution, FMSolution
-export modal, kirchhoff, fem, bem, mfs, fourier
+export IncidentField, PlaneWave, SphericalWave, BesselBeam
+export AbstractSolution, ModalSolution, TMatrixSolution, KirchhoffSolution, FEMSolution,
+       BEMSolution,
+       MFSSolution, FMSolution, FreeSurfaceSolution
+export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier, free_surface
 export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
