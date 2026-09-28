@@ -51,12 +51,15 @@ end
 
 let
     @time "Public exports and source docstrings" @testset "Public exports and source docstrings" begin
-        expected = Set((:Rigid, :PressureRelease, :FluidFilled, :GasFilled, :SolidElastic,
-            :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer, :LayeredMaterial,
-            :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder, :Spheroid,
-            :Shell, :Irregular, :AbstractSolution, :ModalSolution,
+        expected = Set((:Rigid, :PressureRelease, :Impedance, :FluidFilled, :GasFilled,
+            :SolidElastic,
+            :ViscoelasticSolid, :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer,
+            :LayeredMaterial, :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder,
+            :Spheroid, :Shell, :Irregular, :IncidentField, :PlaneWave, :SphericalWave,
+            :BesselBeam, :AbstractSolution, :ModalSolution, :TMatrixSolution,
             :KirchhoffSolution, :FEMSolution,
-            :BEMSolution, :MFSSolution, :FMSolution, :modal, :kirchhoff, :fem, :bem, :mfs, :fourier,
+            :BEMSolution, :MFSSolution, :FMSolution, :FreeSurfaceSolution, :modal, :tmatrix,
+            :kirchhoff, :fem, :bem, :mfs, :fourier, :free_surface,
             :target_strength, :scattering_amplitude, :pressure, :diagnostics, :Mesh, :mesh,
             :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
         @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))

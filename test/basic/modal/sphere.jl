@@ -22,6 +22,38 @@ using Test
         @test GasFilled === FluidFilled
     end
 
+    @testset "Impedance (locally reacting) boundary" begin
+        rigid = modal(sphere, Rigid(), k)
+        soft = modal(sphere, PressureRelease(), k)
+        hard = modal(sphere, Impedance(1e6), k)
+        plush = modal(sphere, Impedance(1e-6), k)
+        @test scattering_amplitude(hard) ≈ scattering_amplitude(rigid) rtol = 1e-5
+        @test scattering_amplitude(plush) ≈ scattering_amplitude(soft) rtol = 1e-5
+
+        zeta = 1.3 - 0.6im
+        solution = modal(sphere, Impedance(zeta), k)
+        # Independent transcription of the Robin condition ∂p/∂n=-ik*p/zeta at r=a, applied
+        # mode by mode to p=j_l(kr)+A_l*h_l^(1)(kr).
+        ka = k * sphere.radius
+        reference = -im / k *
+                    sum(0:AcousticScattering._default_mode_count(ka)) do l
+            A_l = -(AcousticScattering.jsd(l, ka) +
+                    im * AcousticScattering.js(l, ka) / zeta) /
+                  (AcousticScattering.hsd(l, ka) + im * AcousticScattering.hs(l, ka) / zeta)
+            (2l + 1) * AcousticScattering.legendre_p(l, cos(pi)) * A_l
+        end
+        @test scattering_amplitude(solution) ≈ reference rtol = 1e-10
+        @test pressure(solution, (0.02, 0.0, 0.0)) ≈
+              pressure(solution, (0.02, 0.0, 0.0);
+            field = :incident) + pressure(solution, (0.02, 0.0, 0.0); field = :scattered)
+
+        @test Impedance(1im) isa Impedance
+        @test_throws ArgumentError Impedance(-1.0)
+        @test_throws ArgumentError Impedance(0.0)
+        @test_throws ArgumentError Impedance(NaN)
+        @test_throws ArgumentError Impedance(Inf)
+    end
+
     @testset "Solid elastic and elastic shell" begin
         rho_ext = 1026.8
         rho_shell, shear, lambda = 2700.0, 2.6e10, 5.3e10
@@ -87,7 +119,7 @@ using Test
     end
 
     @testset "Invalid modal parameters" begin
-        for boundary in (Rigid(), PressureRelease(), FluidFilled(1.05, 1.02),
+        for boundary in (Rigid(), PressureRelease(), Impedance(1.0), FluidFilled(1.05, 1.02),
             SolidElastic(2.0, 2.0, 1.0),
             Shelled(FluidLayer(1.05, 1.02), FluidInterior(1.0, 1.0), 0.9),
             Shelled(FluidLayer(1.05, 1.02), VacuumInterior(), 0.9),
@@ -95,5 +127,49 @@ using Test
             @test_throws ArgumentError modal(sphere, boundary, -k; m_max = 0)
             @test_throws ArgumentError modal(sphere, boundary, k; m_max = -1)
         end
+    end
+
+    @testset "Spherical wave incident field" begin
+        r0 = 5.0
+        for boundary in (Rigid(), PressureRelease())
+            plane = modal(sphere, boundary, k)
+            spherical = modal(sphere, boundary, k; incident = SphericalWave(r0), angle = pi)
+            # Independent transcription of Sapozhnikov and Bailey (2013) Eqs. (10)-(12): the
+            # same boundary coefficients as the plane-wave series, driven by a point source.
+            reference = sum(0:AcousticScattering._default_mode_count(k * sphere.radius)) do l
+                c_l = AcousticScattering._modal_coefficient(boundary, l, k, sphere.radius)
+                q_l = im * k * (-1)^l * (2l + 1) * AcousticScattering.hs(l, k * r0)
+                q_l * (-im)^(l + 1) * AcousticScattering.legendre_p(l, cos(pi)) * c_l
+            end / k
+            @test scattering_amplitude(spherical) ≈ reference rtol = 1e-10
+            @test scattering_amplitude(spherical) != scattering_amplitude(plane)
+        end
+        @test_throws ArgumentError SphericalWave(0.0)
+        @test_throws ArgumentError SphericalWave(-1.0)
+        solution = modal(sphere, Rigid(), k; incident = SphericalWave(r0))
+        @test_throws ArgumentError pressure(solution, (0.02, 0.0, 0.0))
+    end
+
+    @testset "Bessel-beam incident field" begin
+        for boundary in (Rigid(), PressureRelease())
+            plane = modal(sphere, boundary, k)
+            axial = modal(sphere, boundary, k; incident = BesselBeam(0.0))
+            @test scattering_amplitude(axial) ≈ scattering_amplitude(plane) rtol = 1e-10
+            for beta in (deg2rad(30), deg2rad(60))
+                beam = modal(sphere, boundary, k; incident = BesselBeam(beta), angle = pi)
+                # Independent transcription of the zeroth-order Bessel beam's Q_l, Sapozhnikov
+                # and Bailey (2013) Eq. (62)-(63) at M=0: the plane-wave weight times P_l(cosβ).
+                reference = sum(0:AcousticScattering._default_mode_count(k * sphere.radius)) do l
+                    c_l = AcousticScattering._modal_coefficient(boundary, l, k, sphere.radius)
+                    q_l = im^l * AcousticScattering.legendre_p(l, cos(beta)) * (2l + 1)
+                    q_l * (-im)^(l + 1) * AcousticScattering.legendre_p(l, cos(pi)) * c_l
+                end / k
+                @test scattering_amplitude(beam) ≈ reference rtol = 1e-10
+            end
+        end
+        @test_throws ArgumentError BesselBeam(NaN)
+        @test_throws ArgumentError BesselBeam(Inf)
+        solution = modal(sphere, Rigid(), k; incident = BesselBeam(deg2rad(30)))
+        @test_throws ArgumentError pressure(solution, (0.02, 0.0, 0.0))
     end
 end

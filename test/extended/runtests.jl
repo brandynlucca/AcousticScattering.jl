@@ -22,10 +22,13 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "modal-")
         @time @safetestset "Modal sphere monopole" include("modal/sphere/monopole.jl")
     selected_file("modal/spheroid.jl") &&
         @time @safetestset "Modal spheroid" include("modal/spheroid.jl")
-    selected_file("modal/spheroid_elastic.jl") &&
-        @time @safetestset "Modal spheroid elastic" include("modal/spheroid_elastic.jl")
     selected_file("modal/cylinder.jl") &&
         @time @safetestset "Modal cylinder" include("modal/cylinder.jl")
+end
+
+if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "tmatrix-")
+    selected_file("tmatrix/spheroid.jl") &&
+        @time @safetestset "T-matrix spheroid" include("tmatrix/spheroid.jl")
 end
 
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "kirchhoff-")
@@ -48,10 +51,14 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "fem-")
         @time @safetestset "FEM sphere meridian" include("fem/sphere/meridian.jl")
     selected_file("fem/sphere/coupled.jl") &&
         @time @safetestset "FEM sphere coupled" include("fem/sphere/coupled.jl")
+    selected_file("fem/sphere/volume.jl") &&
+        @time @safetestset "FEM sphere volume" include("fem/sphere/volume.jl")
     selected_file("fem/spheroid/meridian.jl") &&
         @time @safetestset "FEM spheroid meridian" include("fem/spheroid/meridian.jl")
     selected_file("fem/spheroid/coupled.jl") &&
         @time @safetestset "FEM spheroid coupled" include("fem/spheroid/coupled.jl")
+    selected_file("fem/spheroid/volume.jl") &&
+        @time @safetestset "FEM spheroid volume" include("fem/spheroid/volume.jl")
     selected_file("fem/cylinder/radial.jl") &&
         @time @safetestset "FEM cylinder radial" include("fem/cylinder/radial.jl")
     selected_file("fem/cylinder/meridian.jl") &&

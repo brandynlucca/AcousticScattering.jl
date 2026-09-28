@@ -11,7 +11,7 @@ let
         for (ka, aspect, tolerance) in ((0.8, 1.005, 2e-3), (2.0, 1.005, 4e-3))
             radius = cbrt(aspect)
             k = ka / radius
-            solution = modal(Spheroid(aspect, 1.0), boundary, k; incidence_angle = pi / 3)
+            solution = tmatrix(Spheroid(aspect, 1.0), boundary, k; incidence_angle = pi / 3)
             reference = modal(Sphere(radius), boundary, k)
             difference = abs(scattering_amplitude(solution) -
                              scattering_amplitude(reference))
@@ -26,7 +26,7 @@ let
             k = 2.0 / aspect
             for incidence_angle in (pi / 3, pi / 2)
                 reference = modal(body, Rigid(), k; incidence_angle)
-                solution = modal(body, stiff, k; incidence_angle)
+                solution = tmatrix(body, stiff, k; incidence_angle)
                 @test abs(scattering_amplitude(solution) -
                           scattering_amplitude(reference)) /
                       abs(scattering_amplitude(reference)) < 1e-3
@@ -150,7 +150,7 @@ let
             body = Spheroid(1.0, aspect)
             for incidence_angle in (pi / 3, pi / 2)
                 reference = modal(body, Rigid(), 1.0; incidence_angle)
-                solution = modal(body, stiff, 1.0; incidence_angle)
+                solution = tmatrix(body, stiff, 1.0; incidence_angle)
                 @test abs(scattering_amplitude(solution) -
                           scattering_amplitude(reference)) /
                       abs(scattering_amplitude(reference)) < 1e-3
@@ -207,8 +207,9 @@ let
     @time "Modal spheroid: elastic truncation convergence at 5:1" @testset "Modal spheroid: elastic truncation convergence at 5:1" begin
         body = Spheroid(5.0, 1.0)
         k = 3.0 / 5.0
-        default = modal(body, boundary, k; incidence_angle = pi / 3)
-        refined = modal(body, boundary, k; incidence_angle = pi / 3, m_max = 18, n_max = 18)
+        default = tmatrix(body, boundary, k; incidence_angle = pi / 3)
+        refined = tmatrix(
+            body, boundary, k; incidence_angle = pi / 3, m_max = 18, n_max = 18)
         @test abs(target_strength(default) - target_strength(refined)) < 0.01
     end
 end

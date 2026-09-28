@@ -1,7 +1,8 @@
 using Test
 
 const TEST_BASIC_GROUP = get(ENV, "TEST_BASIC_GROUP", "All")
-const BASIC_GROUPS = ("Modal", "Kirchhoff", "FEM", "BEM", "MFS", "Fourier", "Plotting",
+const BASIC_GROUPS = (
+    "Modal", "TMatrix", "Kirchhoff", "FEM", "BEM", "MFS", "Fourier", "Plotting",
     "Utilities")
 TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
     throw(ArgumentError("Unknown TEST_BASIC_GROUP=$TEST_BASIC_GROUP"))
@@ -13,9 +14,14 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
         @testset "Modal" begin
             include("modal/sphere.jl")
             include("modal/cylinder.jl")
+            include("modal/cylinder_envelope.jl")
             include("modal/spheroid.jl")
-            include("modal/spheroid_elastic.jl")
             include("modal/vesm.jl")
+        end
+    end
+    if TEST_BASIC_GROUP in ("All", "TMatrix")
+        @testset "T-matrix" begin
+            include("tmatrix/spheroid.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "Kirchhoff")
@@ -24,6 +30,8 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("kirchhoff/spheroid.jl")
             include("kirchhoff/cylinder.jl")
             include("kirchhoff/high_frequency.jl")
+            include("kirchhoff/envelope.jl")
+            include("kirchhoff/mesh.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "FEM")
@@ -32,6 +40,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("fem/spheroid.jl")
             include("fem/cylinder.jl")
             include("fem/volume.jl")
+            include("fem/free_surface.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "BEM")
@@ -65,6 +74,7 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("plot/plot1d.jl")
             include("plot/plot2d.jl")
             include("plot/plot3d.jl")
+            include("plot/volume.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "Utilities")

@@ -28,6 +28,20 @@ using Test
         end
     end
 
+    @testset "Impedance (locally reacting) boundary" begin
+        rigid = bem(body, Rigid(), k; incidence_angle = 0.0, n = 40)
+        hard = bem(body, Impedance(1e6), k; incidence_angle = 0.0, n = 40)
+        @test scattering_amplitude(hard) ≈ scattering_amplitude(rigid) rtol = 1e-4
+
+        for zeta in (0.01, 1.3 - 0.6im)
+            reference = modal(body, Impedance(zeta), k)
+            solution = bem(body, Impedance(zeta), k; incidence_angle = 0.0, n = 40)
+            @test scattering_amplitude(solution) ≈
+                  scattering_amplitude(reference) rtol = 1e-2
+        end
+        @test_throws MethodError bem(body, Impedance(1.0), k; incidence_angle = 0.3, n = 8)
+    end
+
     @testset "Fluid shells" begin
         layer = FluidLayer(1.1, 1.05)
         for interior in (VacuumInterior(), FluidInterior(1.2, 1.1))
