@@ -310,13 +310,15 @@ end
 
 Plot a view of an already-solved `sol`. `kind=:bistatic_polar`/`:bistatic_cartesian` need
 `angles` [rad] (and optional `azimuth`, default `0.0`); `kind=:bistatic_map` needs `thetas`/`phis`
-[rad] — only solutions with reusable per-mode surface data support these (axisymmetric
-[`bem`](@ref)/[`mfs`](@ref), shell [`fem`](@ref), and, for `kind=:bistatic_map` only, full 3D
-[`bem`](@ref)). `kind=:mesh` shows the solved body's geometry (falling back to `mesh(sol.body;
+[rad] — supported for axisymmetric [`bem`](@ref)/[`mfs`](@ref), shell [`fem`](@ref), full 3D and
+coupled-region [`bem`](@ref) (`kind=:bistatic_map` only for the last two), and volume
+[`fem`](@ref)/[`free_surface`](@ref) (see [`bistatic_sweep`](@ref) for its differing angle
+convention). `kind=:mesh` shows the solved body's geometry (falling back to `mesh(sol.body;
 k=sol.k)` when the solution itself carries no reusable surface mesh); `kind=:surface_field` colors
 that geometry by `field` (`:pressure_magnitude`, `:pressure_phase`, `:pressure_real`, or
 `:pressure_imag`, default `:pressure_magnitude`) where the solution has real surface field data,
-and errors otherwise. Radial/meridian `fem(...)` results do not support surface-field plotting.
+and errors otherwise. Radial/meridian and volume `fem(...)` results do not support surface-field
+plotting.
 
 `incident_arrow=true` adds a gold arrow along the incident propagation direction, and
 `colorbar=true` adds a labeled colorbar to `kind=:surface_field`.

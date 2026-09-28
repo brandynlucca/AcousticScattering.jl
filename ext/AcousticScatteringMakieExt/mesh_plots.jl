@@ -244,7 +244,52 @@ function _mesh_render(m::AcousticScattering.Mesh{<:Inti.Quadrature})
     return (:trimesh, points, faces, nothing, _inti_mesh_qnormals(m.data))
 end
 
+# One region's own triangulated surface, posed at `center`/`orientation` in the far field's frame.
+function _volume_region_render(
+        body::Union{AcousticScattering.Sphere, AcousticScattering.Spheroid},
+        k, center, orientation)
+    points, faces = _inti_mesh_points_faces(
+        AcousticScattering.mesh(body; k, method = :full).data)
+    rotation = AcousticScattering._axis_rotation(orientation)
+    posed = [Point3f(center + rotation * Float64[p...]) for p in points]
+    return posed, faces
+end
+
+function _solution_render(
+        sol::AcousticScattering.FEMSolution{AcousticScattering._VolumeFEMData},
+        field::Union{Nothing, Symbol})
+    field === nothing || throw(ArgumentError(
+        "plot(::FEMSolution; kind=:surface_field) is not available for method=:volume: volume " *
+        "FEM keeps no surface trace. Use kind=:field_slices, or pressure(sol, points) directly."))
+    body = sol.body
+    body isa AcousticScattering._VolumeRegionGeometry || return (
+        :trimesh, _volume_region_render(body, sol.k, zeros(3), [0.0, 0.0, 1.0])...,
+        nothing, nothing)
+    points, faces = Point3f[], TriangleFace{Int}[]
+    for i in eachindex(body.bodies)
+        local_points, local_faces = _volume_region_render(
+            body.bodies[i], sol.k, body.centers[i], body.orientations[i])
+        offset = length(points)
+        append!(points, local_points)
+        append!(faces, [TriangleFace((Tuple(f) .+ offset)...) for f in local_faces])
+    end
+    return (:trimesh, points, faces, nothing, nothing)
+end
+
+function _solution_render(sol::AcousticScattering.FreeSurfaceSolution, field::Union{
+        Nothing, Symbol})
+    _solution_render(sol.direct, field)
+end
+
 # Unit propagation direction of the incident wave of a solution that stores an incidence angle.
+function _incident_direction(
+        sol::Union{AcousticScattering.FEMSolution{AcousticScattering._VolumeFEMData},
+        AcousticScattering.FreeSurfaceSolution})
+    angle, azimuth = sol isa AcousticScattering.FreeSurfaceSolution ?
+                     (sol.incidence_angle, sol.incidence_azimuth) :
+                     (sol.data.incidence_angle, sol.data.incidence_azimuth)
+    return Vec3f(AcousticScattering._volume_direction(angle, azimuth)...)
+end
 function _incident_direction(sol)
     data = sol.data
     hasproperty(data, :incidence_angle) || throw(ArgumentError(

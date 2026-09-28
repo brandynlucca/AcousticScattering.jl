@@ -83,6 +83,12 @@ function _slice_intersection!(ax, body::AcousticScattering.Sphere, spec, scale, 
     return true
 end
 
+_solution_body(sol) = sol.body
+_solution_body(sol::AcousticScattering.FreeSurfaceSolution) = sol.direct.body
+
+function _slice_incident_direction(sol::AcousticScattering.FreeSurfaceSolution)
+    _incident_direction(sol)
+end
 function _slice_incident_direction(sol)
     hasproperty(sol.data, :incidence_angle) && return _incident_direction(sol)
     return Vec3f(1, 0, 0)
@@ -128,10 +134,11 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
 
     show_body && _slice_body_wireframe!(ax, sol, scale)
     marked = false
-    if mark_slices && sol.body isa AcousticScattering.Sphere
+    body = _solution_body(sol)
+    if mark_slices && body isa AcousticScattering.Sphere
         colors = (:black, :goldenrod, :dodgerblue, :seagreen)
         for (i, spec) in enumerate(specs)
-            marked |= _slice_intersection!(ax, sol.body, spec, scale,
+            marked |= _slice_intersection!(ax, body, spec, scale,
                 colors[mod1(i, length(colors))], unit_label)
         end
     end
