@@ -3,6 +3,12 @@
   cursor: help;
 }
 
+/* Documenter's default article column is capped at 52rem regardless of window width,
+   which is too narrow for the solver-selection table's eight columns. */
+#documenter .docs-main {
+  max-width: min(100rem, calc(100vw - 22rem));
+}
+
 [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -52,24 +58,37 @@
   display: inline-block;
   margin-left: 0.1rem;
   font-style: normal;
+  font-size: 0.85em;
   color: #64748b;
 }
 
-.solver-table {
+/* Overrides Documenter's own `.content table{display:block;width:initial;max-width:100%;
+   overflow-x:auto}`, which otherwise wins over `.solver-table` alone (higher specificity)
+   and is the actual cause of the squeezed columns and forced horizontal scrollbar. */
+.content .solver-table {
+  display: table;
   border-collapse: collapse;
   width: 100%;
+  max-width: none;
+  overflow-x: visible;
+  font-size: 0.82rem;
+  table-layout: auto;
 }
 
 .solver-table th {
   border: none !important;
   border-bottom: 2px solid rgba(120, 130, 140, 0.6) !important;
-  padding: 0.5rem 0.65rem;
+  padding: 0.4rem 0.55rem;
   text-align: left;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
 }
 
 .solver-table tbody td {
   border: 1px solid rgba(120, 130, 140, 0.35) !important;
-  padding: 0.5rem 0.65rem;
+  padding: 0.4rem 0.55rem;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
   vertical-align: top;
 }
 
