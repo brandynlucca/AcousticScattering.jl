@@ -223,9 +223,12 @@ let
         for (points, fields) in ((exterior_points, (:total, :scattered)),
             (interior_points, (:total, :interior)))
             for point in points, field in fields
-
+                # `scattered` subtracts off a comparable-magnitude incident field for this
+                # weak (1.05, 1.05) contrast, so the same absolute mesh-dependent error is
+                # amplified by roughly total/scattered in relative terms; `total` is not.
+                tol = field === :scattered ? 1e-2 : 1e-3
                 @test AS.pressure(solution, point; field) ≈
-                      AS.pressure(modal_solution, point; field) rtol=1e-3
+                      AS.pressure(modal_solution, point; field) rtol=tol
             end
         end
         @test AS.pressure(solution, (0.55, 0.0, 0.0); field = :incident) ≈ cis(k * 0.55) rtol=1e-12
