@@ -323,23 +323,28 @@ quadrature are selected when constructing `surface`. Returns a [`BEMSolution`](@
 """
 function bem(surface::Mesh{<:Inti.Quadrature},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
-        incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0, kwargs...)
+        incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing, kwargs...)
+    incident = _resolve_incident(
+        k, incidence_angle, incidence_azimuth; incident, transducer)
     density = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
     capture = boundary isa Rigid ? (; _density = density) : (;)
     p, q, quad, report = solve_full_bem(boundary, k, surface.data;
-        incidence_angle, incidence_azimuth, return_diagnostics = true, capture..., kwargs...)
+        incidence_angle, incidence_azimuth, incident, return_diagnostics = true, capture..., kwargs...)
     return _full_bem_solution(surface, boundary, k, p, q, quad, report,
-        incidence_angle, incidence_azimuth; density = density[])
+        incidence_angle, incidence_azimuth; density = density[], incident)
 end
 
 function _full_bem_solution(surface, boundary, k, p, q, quad, report,
-        incidence_angle, incidence_azimuth; density = nothing)
-    report = merge(report, (; meshsize = surface.resolution))
+        incidence_angle, incidence_azimuth; density = nothing, incident = nothing)
+    report = merge(report,
+        (; meshsize = surface.resolution,
+            illumination = incident === nothing ? :plane_wave : :prescribed))
     if surface.body isa _SurfaceGeometry
         report = merge(report, (; geometry = surface.body.validation,
             provenance = surface.body.provenance))
     end
     data = _FullBEMSurfaceData(
-        quad, p, q, incidence_angle, incidence_azimuth, report, density)
+        quad, p, q, incidence_angle, incidence_azimuth, report, density, incident)
     return BEMSolution(surface.body, boundary, Float64(k), :full, data)
 end

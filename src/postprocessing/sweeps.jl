@@ -140,6 +140,168 @@ function _validate_incidence_sweep(angles, incidence_azimuth)
 end
 
 """
+    incidence_angle_sweep(mfs, body, boundary, k, angles; n=default, m_max=default,
+        offset=0.3*characteristic_radius, oversampling=1, rtol=1e-6,
+        condition_limit=512, return_diagnostics=false)
+
+Sample axisymmetric MFS backscatter at fixed exterior wavenumber `k` (inverse meters)
+for a `Sphere`, `Spheroid`, or straight `Cylinder`. Polar `angles` are radians from
+body-frame +x. Supports `Rigid`, `PressureRelease`, `Impedance`, and `FluidFilled`.
+Source placement, oversampling and quadrature follow [`mfs`](@ref); fluid boundaries
+also accept `offset_ext` and `offset_int`, each defaulting to `offset` in meters.
+
+Assemble and factor each Fourier mode once for all angles, including independent
+boundary-check operators and condition/rank diagnostics. Only one mode's matrices
+are retained at a time; coefficients and surface fields are discarded after sampling.
+Nonzero angles use modes `0:m_max`; exactly zero uses only mode zero, as in `mfs`.
+No setup is cached across calls. Bent cylinders and full-surface MFS are not supported.
+
+Returns an [`IncidenceAngleSweep`](@ref). With `return_diagnostics=true`, returns
+`(; sweep, diagnostics)`, where `diagnostics[i]` contains the solve and independent
+boundary residuals for `angles[i]`, in the same form as `diagnostics(mfs(...))`.
+Checks are computed in either case; `condition_limit=0` skips the condition/rank SVD.
+"""
+function incidence_angle_sweep(::typeof(mfs), body::Union{Sphere, Spheroid, Cylinder},
+        boundary::Union{Rigid, PressureRelease, Impedance, FluidFilled}, k::Real,
+        angles::AbstractVector{<:Real};
+        n::Integer = _axisymmetric_default_panels(body, k),
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        offset::Real = 0.3_characteristic_radius(body),
+        offset_ext::Real = offset, offset_int::Real = offset,
+        oversampling::Integer = 1, rtol::Real = 1e-6,
+        condition_limit::Integer = 512, return_diagnostics::Bool = false)
+    _validate_incidence_sweep(angles, 0.0)
+    body isa Cylinder && _isbent(body) &&
+        throw(ArgumentError("reusable MFS sweeps require a straight Cylinder"))
+    oversampling >= 1 || throw(ArgumentError("mfs: oversampling must be at least 1"))
+    condition_limit >= 0 || throw(ArgumentError("mfs: condition_limit must be nonnegative"))
+    m_max >= 0 || throw(ArgumentError("mfs: m_max must be nonnegative"))
+    if !(boundary isa FluidFilled) && (offset_ext != offset || offset_int != offset)
+        throw(ArgumentError("offset_ext and offset_int require FluidFilled; use offset"))
+    end
+    mesh, source_mesh = _mfs_meridian_meshes(body, n, oversampling)
+    check_mesh = _mfs_check_mesh(mesh)
+    rho, z = mfs_source_points(source_mesh, offset_ext)
+    exterior = (; rho, z)
+    interior = if boundary isa FluidFilled
+        rho, z = mfs_source_points(source_mesh, -offset_int)
+        (; rho, z)
+    else
+        nothing
+    end
+    samples = Float64.(angles)
+    amplitudes = zeros(ComplexF64, length(samples))
+    reports = [_SolveReports() for _ in samples]
+    last_mode = all(iszero, samples) ? 0 : m_max
+    for m in 0:last_mode
+        _mfs_sweep_mode!(amplitudes, reports, boundary, k, mesh, check_mesh,
+            exterior, interior, samples, m; rtol, condition_limit, offset_ext, offset_int)
+    end
+    sweep = IncidenceAngleSweep(samples, target_strength.(amplitudes), amplitudes,
+        ["Scattered field"])
+    return_diagnostics || return sweep
+    diagnostics = map(eachindex(samples)) do i
+        incidence_angle = samples[i]
+        offsets = boundary isa FluidFilled ? (; offset_ext, offset_int) : (; offset)
+        modes = iszero(incidence_angle) ? (;) : (; m_max)
+        _summarize_solves(reports[i]; method = :axisymmetric,
+            solver_options = (; n = npanels(source_mesh), oversampling, offsets...,
+                incidence_angle, modes..., rtol, condition_limit))
+    end
+    return (; sweep, diagnostics)
+end
+
+# Shared by the Cylinder and Sphere/Spheroid axisymmetric-BEM sweep entry points below.
+function _axisymmetric_angle_sweep(
+        body, boundary::Union{Rigid, PressureRelease, Impedance}, k::Real,
+        angles::AbstractVector{<:Real};
+        n::Integer = _axisymmetric_default_panels(body, k),
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        rtol::Real = 1e-5)
+    _validate_incidence_sweep(angles, 0.0)
+    body isa Cylinder && _isbent(body) &&
+        throw(ArgumentError("a bent Cylinder requires bem(...; method=:full)"))
+    m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
+    mesh = _axisymmetric_mesh(body, n)
+    samples = Float64.(angles)
+    amplitudes = zeros(ComplexF64, length(samples))
+    errors = zeros(Float64, length(samples))
+    for first_mode in 0:_MODE_CHUNK:m_max
+        modes = first_mode:min(first_mode + _MODE_CHUNK - 1, m_max)
+        _axisymmetric_sweep_batch!(amplitudes, errors, boundary, k, mesh, samples, modes;
+            rtol, axial_only = m_max == 0)
+    end
+    _axisymmetric_sweep_check!(amplitudes, errors, boundary, k, mesh, samples; m_max, rtol)
+    return IncidenceAngleSweep(samples, target_strength.(amplitudes), amplitudes,
+        ["Scattered field"])
+end
+
+function _axisymmetric_sweep_check!(amplitudes, errors, boundary, k, mesh, samples;
+        m_max, rtol)
+    # Cancellation between batches can make separate relative error targets too
+    # loose. Rebuild only that angle's traces, still with bounded matrix storage,
+    # and use the original combined-mode integral and its per-panel tolerance.
+    for i in eachindex(samples)
+        if errors[i] > 1e-6 * abs(amplitudes[i])
+            p, dp, ps = _oblique_solve_streamed(boundary, k, mesh, samples[i]; m_max, rtol)
+            amplitudes[i] = far_field(ps, p, dp, k, pi - samples[i], pi)
+        end
+    end
+    return nothing
+end
+
+# Complete all angles before releasing the batch's factors. Only one angle's
+# traces and reports are live, independently of the total sample count.
+function _axisymmetric_sweep_batch!(amplitudes, errors, boundary, k, mesh, angles, modes;
+        rtol, axial_only)
+    ps, factors = _oblique_mode_factors(boundary, k, mesh; m_max = last(modes), rtol, modes)
+    for (i, incidence_angle) in enumerate(angles)
+        reports = _SolveReports()
+        p_scat_modes, dpdn_scat_modes = _oblique_solve_factored(
+            boundary, k, ps, factors, incidence_angle; rtol, solve_reports = reports,
+            first_mode = first(modes))
+        if axial_only
+            amplitudes[i] += far_field(
+                ps, only(p_scat_modes), only(dpdn_scat_modes), k, pi - incidence_angle)
+        else
+            amplitude, error = _far_field_modes(ps, p_scat_modes, dpdn_scat_modes, k,
+                pi - incidence_angle, pi, first(modes); return_error = true)
+            amplitudes[i] += amplitude
+            errors[i] += error
+        end
+    end
+    return nothing
+end
+
+"""
+    incidence_angle_sweep(body::Cylinder, boundary::Union{Rigid,PressureRelease,Impedance}, k, angles;
+        n=default, m_max=default, rtol=1e-5)
+
+Sample axisymmetric BEM backscatter at fixed exterior wavenumber `k` in inverse meters, for a
+straight (unbent) `Cylinder`. Each Fourier mode's boundary operator depends only on the mesh,
+`k` and the mode, not the incidence angle, so it is assembled and factorized once and reused
+for every angle; only the incident-field right-hand side is rebuilt per angle. `m_max` is
+therefore fixed for the whole sweep rather than resolved per angle as a single [`bem`](@ref)
+call would. A bent `Cylinder` needs `bem(...; method=:full)` instead. Returns an
+`IncidenceAngleSweep`.
+
+Process all angles in batches of at most eight Fourier modes, releasing completed
+matrices and factors before assembling the next batch. Accumulate backscatter
+amplitudes without retaining all modes' factors or all angles' surface traces.
+If the summed far-field quadrature estimates indicate cancellation between batches,
+rebuild that angle's traces in bounded batches and use the combined-mode integral.
+This safeguard can require additional assembly for the affected angle.
+"""
+function incidence_angle_sweep(
+        body::Cylinder, boundary::Union{Rigid, PressureRelease, Impedance},
+        k::Real, angles::AbstractVector{<:Real};
+        n::Integer = _axisymmetric_default_panels(body, k),
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        rtol::Real = 1e-5)
+    return _axisymmetric_angle_sweep(body, boundary, k, angles; n, m_max, rtol)
+end
+
+"""
     incidence_angle_sweep(surface::Mesh, boundary::Union{Rigid,PressureRelease}, k, angles; kwargs...)
 
 Sample full-3D BEM backscatter at fixed exterior wavenumber `k` in inverse meters.
@@ -179,6 +341,15 @@ Geometry validation, operators and factorization are reused within this call. A 
 call assembles from its supplied meshes, materials, frequency and solver options.
 
 Accepts `formulation`, `correction`, `equilibrate` and `condition_limit` as in [`bem`](@ref).
+Both fluid overloads also accept `compression` and `gmres_kwargs`, reusing the
+compressed operators and block preconditioner across incidence angles.
+For compressed solves, `recycle_dimension=8` also retains a bounded solution subspace
+to initialize later angles. Set it to zero for independent GMRES starts. Retained
+solution/image pairs are capped at 64 MiB; dense solves do not use this storage.
+Every recycled solve checks the true scaled residual against the original right-hand
+side tolerance and retries from zero if necessary. Recycling is local to this call.
+Residual corrections share an attempt's `maxiter` budget; a fallback gets a fresh
+budget. Iteration diagnostics include all correction and fallback work.
 The multiple-interface overload also accepts `parents` and `validation`. With
 `components=true`, include each interface isolated in the exterior medium and their
 coherent complex sum, using the same solver options. `labels` supplies one name per
@@ -196,11 +367,16 @@ aspect = incidence_angle_sweep(surfaces, materials, k, deg2rad.([60, 90, 120]);
 function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature}, material::FluidFilled,
         k::Real, angles::AbstractVector{<:Real}; incidence_azimuth::Real = 0.0,
         formulation::Symbol = :muller, correction::NamedTuple = (method = :dim,),
-        equilibrate::Bool = true, condition_limit::Integer = 512)
+        equilibrate::Bool = true, condition_limit::Integer = 512,
+        compression::NamedTuple = (method = :none,), gmres_kwargs::NamedTuple = (;),
+        recycle_dimension::Integer = 8)
     _validate_incidence_sweep(angles, incidence_azimuth)
+    recycle_dimension >= 0 || throw(ArgumentError("recycle_dimension must be nonnegative"))
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
-    system = _assemble_full_fluid(material, k, surface.data; formulation, correction)
-    factor = _factor_fluid_system(system.A; equilibrate, condition_limit)
+    system = _assemble_full_fluid(
+        material, k, surface.data; formulation, correction, compression)
+    factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs)
+    factor = _fluid_sweep_factor(factor, recycle_dimension, length(angles))
     return incidence_angle_sweep(angles) do incidence_angle
         p, q, quad, report = _solve_full_fluid(system, factor;
             incidence_angle, incidence_azimuth)
@@ -210,10 +386,12 @@ function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature}, material::Fluid
 end
 
 function _region_angle_sweep(surfaces, materials, k, angles;
-        incidence_azimuth, equilibrate, condition_limit, kwargs...)
+        incidence_azimuth, equilibrate, condition_limit, gmres_kwargs = (;),
+        recycle_dimension = 8, kwargs...)
     system = _assemble_region_bem(surfaces, materials, k; kwargs...)
-    factor = _factor_fluid_system(system.A; equilibrate, condition_limit,
+    factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs,
         norm_floor = eps(Float64))
+    factor = _fluid_sweep_factor(factor, recycle_dimension, length(angles))
     return incidence_angle_sweep(angles) do incidence_angle
         _solve_region_bem(system, factor; incidence_angle, incidence_azimuth)
     end
@@ -225,13 +403,17 @@ function incidence_angle_sweep(surfaces::AbstractVector{<:Mesh},
         parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
         incidence_azimuth::Real = 0.0, formulation::Symbol = :muller,
         correction::NamedTuple = (method = :dim,), equilibrate::Bool = true,
-        condition_limit::Integer = 512, validation::NamedTuple = (;))
+        condition_limit::Integer = 512, validation::NamedTuple = (;),
+        compression::NamedTuple = (method = :none,), gmres_kwargs::NamedTuple = (;),
+        recycle_dimension::Integer = 8)
     _validate_incidence_sweep(angles, incidence_azimuth)
+    recycle_dimension >= 0 || throw(ArgumentError("recycle_dimension must be nonnegative"))
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     components || labels === nothing ||
         throw(ArgumentError("labels require components=true"))
     response_labels = components ? _component_labels(length(surfaces), labels) : nothing
-    options = (; incidence_azimuth, formulation, correction, equilibrate, condition_limit)
+    options = (; incidence_azimuth, formulation, correction, equilibrate, condition_limit,
+        compression, gmres_kwargs, recycle_dimension)
     coupled = _region_angle_sweep(
         surfaces, materials, k, angles; parents, validation, options...)
     components || return coupled
@@ -334,12 +516,22 @@ Sample full-3D volume FEM backscatter at fixed exterior wavenumber `k`. The mesh
 factorization do not depend on the incident direction, so they are built once and each angle only
 needs a new load and solve. Accepts the keywords of `fem(...; method = :volume)`, with `angles` the
 polar incidence angles in radians. Returns an `IncidenceAngleSweep`.
+
+`method=:axisymmetric` instead samples axisymmetric BEM for a `Rigid`/`PressureRelease`/
+`Impedance` `boundary`, reusing each Fourier mode's factorized operator across angles; see
+`incidence_angle_sweep(::Cylinder, ::Union{Rigid,PressureRelease,Impedance}, ...)`. It accepts
+`n`, `m_max` and `rtol` instead of the volume-FEM keywords.
 """
 function incidence_angle_sweep(body::Union{Sphere, Spheroid},
         boundary::AbstractBoundaryCondition, k::Real, angles::AbstractVector{<:Real};
         method::Symbol = :volume, kwargs...)
+    if method === :axisymmetric
+        boundary isa Union{Rigid, PressureRelease, Impedance} || throw(ArgumentError(
+            "incidence_angle_sweep(..., method=:axisymmetric) only supports Rigid, PressureRelease or Impedance"))
+        return _axisymmetric_angle_sweep(body, boundary, k, angles; kwargs...)
+    end
     method === :volume || throw(ArgumentError(
-        "incidence_angle_sweep(::Union{Sphere,Spheroid}, ...) only supports method=:volume"))
+        "incidence_angle_sweep(::Union{Sphere,Spheroid}, ...) only supports method=:volume or :axisymmetric"))
     return _volume_angle_sweep(body, boundary, k, angles; kwargs...)
 end
 
@@ -375,7 +567,8 @@ end
 
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
-    FEMSolution{_ShellFEMSurfaceData}, FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
+    FEMSolution{_ShellFEMSurfaceData}, FEMSolution{_CylinderMeridianFEMData},
+    FEMSolution{_SpheroidMeridianFEMData}, FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
 const _BistaticDirectionSolution = Union{BEMSolution{_FullBEMSurfaceData},
     BEMSolution{_RegionBEMData}, MFSSolution{_FullMFSSurfaceData}}
 
@@ -418,9 +611,9 @@ end
 """
     bistatic_sweep(solution, angles; azimuth=0)
 
-Sample an observation cut from retained BEM, MFS, shell FEM or volume FEM surface/field data,
+Sample an observation cut from retained BEM, MFS, meridian/shell FEM or volume FEM surface/field data,
 including full-3D, coupled-region, [`free_surface`](@ref) solutions or [`components`](@ref)
-comparisons. No re-solves. For axisymmetric BEM/MFS, shell FEM and full/coupled-region BEM, angles
+comparisons. No re-solves. For axisymmetric BEM/MFS, meridian/shell FEM and full/coupled-region BEM, angles
 are radians from +x toward the azimuthal direction, with π/2 along +y and 3π/2 along -y at azimuth
 zero. Volume FEM and `free_surface` results instead use their own `scattering_amplitude` convention,
 radians from +z with azimuth measured in the xy-plane from +x. Retain both target strength and

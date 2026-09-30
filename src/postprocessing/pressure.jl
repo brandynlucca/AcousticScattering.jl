@@ -2,8 +2,9 @@
     pressure(solution, point; field=:total, region=nothing)
     pressure(solution, points; field=:total, region=nothing)
 
-Complex acoustic pressure divided by incident pressure amplitude, under the `exp(-iωt)`
-convention. Coordinates are in meters.
+Complex acoustic pressure under the `exp(-iωt)` convention. Plane-wave solutions use
+unit incident amplitude; prescribed fields retain their supplied normalization.
+Coordinates are in meters.
 
 `point` is a three-coordinate tuple or vector. A collection of points returns an array of the
 same shape. A real `3×N` matrix stores points in columns and returns a vector of length `N`.
@@ -12,7 +13,7 @@ same shape. A real `3×N` matrix stores points in columns and returns a vector o
 - `:total`: incident plus scattered pressure outside the body, or total transmitted pressure
   inside a fluid interior or shell.
 - `:scattered`: defined on and outside the body only.
-- `:incident`: the unperturbed plane wave at any point.
+- `:incident`: the retained unperturbed incident field (a plane wave by default).
 - `:interior`: total pressure inside a homogeneous fluid body, a shell's fluid cavity, or a
   bounded coupled fluid region.
 - `:shell`: total pressure in a fluid shell, including both surface traces.
@@ -59,7 +60,7 @@ function _check_pressure_solution(solution)
            Union{BEMSolution{_FullBEMSurfaceData}, MFSSolution{_FullMFSSurfaceData}}
     boundary_geometry = solution.body isa Sphere ||
                         (solution.body isa Cylinder && (full || !_isbent(solution.body))) ||
-                        (full && solution.body isa _SurfaceGeometry)
+                        (full && solution.body isa Union{Spheroid, _SurfaceGeometry})
     boundary_data = solution isa Union{BEMSolution{_FullBEMSurfaceData},
         BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_FullMFSSurfaceData}} ||
                     (solution isa MFSSolution{_AxisymmetricSurfaceData} &&
@@ -116,6 +117,13 @@ end
 
 _incident_pressure(solution, point) = cis(solution.k * point[1])
 
+function _incident_pressure(sol::BEMSolution{_FullBEMSurfaceData}, point)
+    _data_incident_pressure(sol.data, sol.k, point)
+end
+function _incident_pressure(sol::BEMSolution{_RegionBEMData}, point)
+    _data_incident_pressure(sol.data, sol.k, point)
+end
+
 function _incident_pressure(solution::Union{BEMSolution, MFSSolution}, point)
     data = solution.data
     azimuth = data isa _AxisymmetricSurfaceData ? 0.0 : data.incidence_azimuth
@@ -168,12 +176,27 @@ end
 function _pressure_values(solution::MFSSolution{_FullMFSSurfaceData}, points, field)
     all(p -> all(isfinite, p), points) ||
         throw(ArgumentError("point coordinates must be finite"))
-    incident = ComplexF64[_incident_pressure(solution, point) for point in points]
+    incident = field in (:total, :incident) ? _incident_pressure_values(solution, points) :
+               nothing
     field === :incident && return incident
     regions = _boundary_pressure_regions(solution, points, field)
     values = ComplexF64[_mfs_pressure(solution, point, region)
                         for (point, region) in zip(points, regions)]
     return field === :total ? values + incident : values
+end
+
+# Prescribed tank illumination may itself integrate a curved wall. Evaluate each
+# needed sample once, in parallel, and never evaluate it for a scattered-only map.
+# Incident-field callbacks already have the solver's concurrent-call contract.
+function _incident_pressure_values(solution, points)
+    if !(solution.data.incident isa _PointIncidentField) || length(points) < 64
+        return ComplexF64[_incident_pressure(solution, point) for point in points]
+    end
+    values = Vector{ComplexF64}(undef, length(points))
+    Threads.@threads for i in eachindex(points)
+        values[i] = _incident_pressure(solution, points[i])
+    end
+    values
 end
 
 function _mfs_pressure(solution::MFSSolution{_AxisymmetricSurfaceData}, point, region)
@@ -196,7 +219,8 @@ end
 function _pressure_values(solution::BEMSolution{_FullBEMSurfaceData}, points, field)
     all(p -> all(isfinite, p), points) ||
         throw(ArgumentError("point coordinates must be finite"))
-    incident = ComplexF64[_incident_pressure(solution, point) for point in points]
+    incident = field in (:total, :incident) ? _incident_pressure_values(solution, points) :
+               nothing
     field === :incident && return incident
     regions = _boundary_pressure_regions(solution, points, field)
     values = zeros(ComplexF64, length(points))
@@ -220,10 +244,8 @@ function _pressure_values(solution::BEMSolution{_FullBEMSurfaceData}, points, fi
         k = inside ? solution.k / solution.boundary.soundspeed_contrast : solution.k
         p, dp = data.p_scat, data.dpdn_scat
         if inside
-            direction = _bem3d_incidence_direction(data.incidence_angle, data.incidence_azimuth)
-            pinc = [_incident_pressure(solution, q.coords) for q in data.quad]
-            dpinc = [im * solution.k * dot(direction, q.normal) * pinc[i]
-                     for (i, q) in enumerate(data.quad)]
+            pinc, dpinc = _incident_traces(data.quad, solution.k, data.incidence_angle,
+                data.incidence_azimuth, data.incident)
             p = p + pinc
             dp = solution.boundary.density_contrast .* (dp + dpinc)
         end
@@ -265,10 +287,23 @@ end
 
 function _boundary_pressure_regions(solution, points, field)
     body = solution.body
-    if body isa _SurfaceGeometry || (body isa Cylinder && _isbent(body))
+    if body isa Union{Spheroid, _SurfaceGeometry} || (body isa Cylinder && _isbent(body))
         patches = _region_patches(solution.data.quad, 0)
+        # Bernstein control hulls enclose the full curved surface, including any
+        # excursion beyond mesh nodes. Reject distant points once per batch before
+        # allocating the detailed oriented-ray classifier's subdivision workspace.
+        bounds = ntuple(
+            d -> (
+                minimum(p[d].lo for patch in patches for p in patch.net),
+                maximum(p[d].hi for patch in patches for p in patch.net)),
+            3)
+        # Preserve the detailed classifier's near-surface tolerance in every
+        # rotated ray frame (sqrt(3) times that tolerance bounds each coordinate).
+        padding = 1024eps(maximum(max(abs(lo), abs(hi)) for (lo, hi) in bounds))
         return [_surface_pressure_region(solution.boundary,
-                    _surface_location(patches, point), field) for point in points]
+                    all(d -> bounds[d][1]-padding <= point[d] <= bounds[d][2]+padding, 1:3) ?
+                    _surface_location(patches, point) : :outside, field)
+                for point in points]
     end
     return [_boundary_pressure_region(solution, point, field) for point in points]
 end
@@ -398,8 +433,7 @@ function _pressure_values(solution::FEMSolution{_VolumeFEMData}, points, field)
     data = solution.data
     system = data.system
     grid = system.grid
-    direction = _volume_direction(data.incidence_angle, data.incidence_azimuth)
-    incident = ComplexF64[cis(solution.k * dot(direction, point)) for point in points]
+    incident = ComplexF64[data.pinc(point) for point in points]
     field === :incident && return incident
     coords = [Ferrite.Vec{3}(Float64.(point)) for point in points]
     handler = Ferrite.PointEvalHandler(grid, coords)

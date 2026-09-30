@@ -12,6 +12,11 @@ struct _RegionBEMData
     incidence_angle::Float64
     incidence_azimuth::Float64
     diagnostics::NamedTuple
+    incident::Union{Nothing, IncidentField}
+end
+
+function _RegionBEMData(interfaces, beta, alpha, report)
+    _RegionBEMData(interfaces, beta, alpha, report, nothing)
 end
 
 function _region_ancestors(parents, i)
@@ -90,7 +95,8 @@ end
     bem(surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k;
         parents=collect(0:length(surfaces)-1), incidence_angle=π/2,
         incidence_azimuth=0, equilibrate=true, condition_limit=512,
-        correction=(method=:dim,), formulation=:muller, validation=(;))
+        correction=(method=:dim,), formulation=:muller, validation=(;),
+        compression=(method=:none,), gmres_kwargs=(;))
 
 Coupled fluid transmission across closed, disjoint full-3D interface meshes. Surface `i`
 encloses region `i`. `parents[i]` is the region immediately outside it, with `0` denoting the
@@ -100,6 +106,17 @@ scalar fluids are supported.
 
 Meshes may have independent shapes, origins and orientations, but must not intersect or touch.
 `validation=(maxdepth=20, maxwork=200000)` controls the geometry checks.
+
+Dense LU is the default. For Müller with density interpolation,
+`compression=(method=:hmatrix, tol=1e-8)` compresses self and cross-interface operators.
+Close-surface corrections and the low-frequency reconstruction guards are preserved.
+Right-preconditioned GMRES uses local cluster blocks and independent degree-two harmonic
+coarse spaces on each interface, coupled through the full operator. `gmres_kwargs` controls
+iteration tolerances, restart and iteration limit as in single-interface fluid BEM.
+The coupled default restart is 600; the other iterative defaults are unchanged.
+Equilibration uses local-block maxima; dense SVD condition estimates are skipped.
+Interior and exterior representation residuals are evaluated from the compressed blocks,
+without storing a second global dense matrix. They do not estimate compression error.
 
 Returns a [`BEMSolution`](@ref). Post-process with `scattering_amplitude(sol; direction)` or
 `target_strength(sol; direction)`.
@@ -116,24 +133,27 @@ function bem(
         surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k::Real;
         parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         equilibrate::Bool = true, condition_limit::Integer = 512,
         correction::NamedTuple = (method = :dim,), formulation::Symbol = :muller,
-        validation::NamedTuple = (;))
+        validation::NamedTuple = (;), compression::NamedTuple = (method = :none,),
+        gmres_kwargs::NamedTuple = (;))
     all(isfinite, (incidence_angle, incidence_azimuth)) ||
         throw(ArgumentError("incidence angles must be finite"))
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     system = _assemble_region_bem(surfaces, materials, k; parents, correction,
-        formulation, validation)
-    factor = _factor_fluid_system(system.A; equilibrate, condition_limit,
+        formulation, validation, compression)
+    factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs,
         norm_floor = eps(Float64))
-    return _solve_region_bem(system, factor; incidence_angle, incidence_azimuth)
+    return _solve_region_bem(
+        system, factor; incidence_angle, incidence_azimuth, incident, transducer)
 end
 
 function _assemble_region_bem(
         surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k::Real;
         parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
         correction::NamedTuple = (method = :dim,), formulation::Symbol = :muller,
-        validation::NamedTuple = (;))
+        validation::NamedTuple = (;), compression::NamedTuple = (method = :none,))
     count = length(surfaces)
     count > 0 || throw(ArgumentError("at least one interface is required"))
     length(materials) == length(parents) == count ||
@@ -168,6 +188,12 @@ function _assemble_region_bem(
         region -> _fluid_regular_range(k / speeds[region], region_sizes[region]), eachindex(speeds))
     reconstruct = all(region -> k / speeds[region] * region_sizes[region].radius <= pi/2,
         eachindex(speeds))
+    if compression.method !== :none
+        metadata = (; surfaces, materials, parents, k, formulation, correction,
+            quads, ranges, n, densities, geometry)
+        return _assemble_compressed_regions(
+            metadata, speeds; regular, reconstruct, compression)
+    end
     A = formulation === :muller ? Matrix{ComplexF64}(I, 2n, 2n) : zeros(ComplexF64, 2n, 2n)
     inner = formulation === :muller ? 0.5 .* A : nothing
     derivative_evaluation = NamedTuple[]
@@ -212,34 +238,39 @@ function _assemble_region_bem(
         quads, ranges, n, densities, derivative_evaluation, geometry)
 end
 
-function _region_incident_rhs(system, incidence_angle, incidence_azimuth)
+function _region_incident_rhs(system, incidence_angle, incidence_azimuth; incident = nothing)
     (; parents, k, formulation, quads, ranges, n) = system
-    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
     b = zeros(ComplexF64, 2n)
     for i in eachindex(quads)
         parents[i] == 0 || continue
         rows = ranges[i]
-        b[rows] = [cis(k * dot(direction, q.coords)) for q in quads[i]]
+        p, dp = _incident_traces(quads[i], k, incidence_angle, incidence_azimuth, incident)
+        b[rows] = p
         if formulation === :muller
-            b[rows .+ n] = [im * k * dot(direction, q.normal) * b[rows[t]]
-                            for (t, q) in enumerate(quads[i])]
+            b[rows .+ n] = dp
         end
     end
     return b
 end
 
 function _solve_region_bem(system, factor;
-        incidence_angle::Real = pi / 2, incidence_azimuth::Real = 0.0)
-    b = _region_incident_rhs(system, incidence_angle, incidence_azimuth)
-    solved = _solve_fluid_system(factor, b)
+        incidence_angle::Real = pi / 2, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing)
+    incident = _resolve_incident(
+        system.k, incidence_angle, incidence_azimuth; incident, transducer)
+    b = _region_incident_rhs(system, incidence_angle, incidence_azimuth; incident)
+    solved = hasproperty(system, :compression) ? _solve_compressed_fluid_system(factor, b) :
+             _solve_fluid_system(factor, b)
     return _region_bem_solution(
-        system, factor, b, solved, incidence_angle, incidence_azimuth)
+        system, factor, b, solved, incidence_angle, incidence_azimuth; incident)
 end
 
-function _region_bem_solution(system, factor, b, solved, incidence_angle, incidence_azimuth)
+function _region_bem_solution(
+        system, factor, b, solved, incidence_angle, incidence_azimuth;
+        incident = nothing)
     (; A, inner, surfaces, materials, parents, k, formulation, correction,
         ranges, n, densities, derivative_evaluation, geometry) = system
-    (; x, scaled_x, scaled_b) = solved
+    (; x) = solved
     count = length(surfaces)
     residual = A * x - b
     interior_residual = formulation === :muller ? inner * x : nothing
@@ -268,16 +299,25 @@ function _region_bem_solution(system, factor, b, solved, incidence_angle, incide
         end
         push!(interface_residuals, representation)
     end
-    scaled_report = _linear_residual(factor.scaled_A, scaled_x, scaled_b)
-    report = merge(_linear_residual(A, x, b), factor.diagnostics,
-        (; method = :direct, formulation,
-            scaled_relative_residual = scaled_report.relative_residual,
-            scaled_absolute_residual = scaled_report.absolute_residual,
-            converged = nothing, iterations = nothing, residual_history = Float64[],
+    iterative = hasproperty(solved, :history)
+    if iterative && !solved.history.isconverged
+        @warn "Compressed coupled-fluid BEM GMRES did not converge" iterations=solved.history.iters residual=norm(residual)/max(
+            norm(b), eps(Float64))
+    end
+    report = merge(
+        _fluid_residual_report(residual, b, factor.row_norms), factor.diagnostics,
+        (; method = iterative ? :gmres : :direct, formulation,
+            illumination = incident === nothing ? :plane_wave : :prescribed,
+            converged = iterative ? solved.history.isconverged : nothing,
+            iterations = iterative ? solved.history.iters : nothing,
+            residual_history = iterative ? solved.history[:resnorm] : Float64[],
             unknown_count = 2n, quadrature_nodes = n, interface_count = count,
-            interface_residuals, derivative_evaluation, geometry, correction, compression = (method = :none,),
-            solver_options = (; incidence_angle, incidence_azimuth)))
-    data = _RegionBEMData(interfaces, Float64(incidence_angle), Float64(incidence_azimuth), report)
+            interface_residuals, derivative_evaluation, geometry, correction,
+            compression = get(system, :compression, (method = :none,)),
+            solver_options = merge(iterative ? factor.options : (;), (;
+                incidence_angle, incidence_azimuth))))
+    data = _RegionBEMData(
+        interfaces, Float64(incidence_angle), Float64(incidence_azimuth), report, incident)
     return BEMSolution(_RegionGeometry(collect(surfaces), collect(parents)),
         _FluidRegions(collect(materials)), Float64(k), :full, data)
 end
@@ -293,9 +333,8 @@ function scattering_amplitude(sol::BEMSolution{_RegionBEMData};
     for interface in sol.data.interfaces
         interface.exterior == 0 || continue
         quad = interface.surface.data
-        p_inc = [cis(sol.k * dot(incident, q.coords)) for q in quad]
-        q_inc = [im * sol.k * dot(incident, q.normal) * p_inc[i]
-                 for (i, q) in enumerate(quad)]
+        p_inc, q_inc = _incident_traces(quad, sol.k, sol.data.incidence_angle,
+            sol.data.incidence_azimuth, sol.data.incident)
         amplitude += far_field(quad, observation, sol.k, interface.pressure - p_inc,
             interface.normal_derivative_exterior - q_inc)
     end

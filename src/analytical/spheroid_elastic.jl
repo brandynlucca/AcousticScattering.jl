@@ -204,7 +204,8 @@ function _elastic_layered_transition(m::Integer, n_max::Integer, k::Real, f::Rea
     unknown_sets(surface) = shell ?
                             ((columns_b, surface.regular), (columns_d, surface.outgoing)) :
                             ((columns_b, surface.regular),)
-    for q in 1:n_quad
+    # One quadrature node's contribution, written into caller-supplied (possibly per-thread) accumulators.
+    function accumulate_node!(A_out, Rhat_out, q)
         eta = nodes[q]
         h_xi, element = _surface_metric(f, xi_outer, eta, spheroid)
         area_outer = weights[q] * element
@@ -215,31 +216,32 @@ function _elastic_layered_transition(m::Integer, n_max::Integer, k::Real, f::Rea
             row = (family - 1) * nb + r
             for (columns, unknown) in unknown_sets(outer), j in 1:nb
 
-                A[row, columns[j]] += area_outer * (phi_normal *
-                                       (unknown[4, j, q] * test[1, r, q] -
-                                        test[5, r, q] * unknown[2, j, q]) -
-                                       phi_tangent * test[6, r, q] * unknown[3, j, q])
+                A_out[row, columns[j]] += area_outer * (phi_normal *
+                                           (unknown[4, j, q] * test[1, r, q] -
+                                            test[5, r, q] * unknown[2, j, q]) -
+                                           phi_tangent * test[6, r, q] * unknown[3, j, q])
             end
             for (e, mode) in enumerate(exterior)
-                A[row, columns_c[e]] -= area_outer * phi_normal * test[4, r, q] *
-                                        mode.dj * mode.S[q] / (k * h_xi)
+                A_out[row, columns_c[e]] -= area_outer * phi_normal * test[4, r, q] *
+                                            mode.dj * mode.S[q] / (k * h_xi)
             end
         end
         # Exterior Huygens relation for the incident and scattered coefficients.
         for (e, mode) in enumerate(exterior)
             for (columns, unknown) in unknown_sets(outer), j in 1:nb
 
-                A[rows_ext[e], columns[j]] += area_outer * phi_normal * k *
-                                              (unknown[4, j, q] * mode.dh * mode.S[q] /
-                                               (k * h_xi) +
-                                               k * mode.h * mode.S[q] * unknown[1, j, q])
-                Rhat[e, columns[j]] += area_outer * phi_normal * k *
-                                       (unknown[4, j, q] * mode.dj * mode.S[q] /
-                                        (k * h_xi) +
-                                        k * mode.j * mode.S[q] * unknown[1, j, q])
+                A_out[rows_ext[e], columns[j]] += area_outer * phi_normal * k *
+                                                  (unknown[4, j, q] * mode.dh * mode.S[q] /
+                                                   (k * h_xi) +
+                                                   k * mode.h * mode.S[q] *
+                                                   unknown[1, j, q])
+                Rhat_out[e, columns[j]] += area_outer * phi_normal * k *
+                                           (unknown[4, j, q] * mode.dj * mode.S[q] /
+                                            (k * h_xi) +
+                                            k * mode.j * mode.S[q] * unknown[1, j, q])
             end
         end
-        shell || continue
+        shell || return nothing
         h_xi_i, element_inner = _surface_metric(f, xi_inner, eta, spheroid)
         area_inner = weights[q] * element_inner
         for (family, test) in enumerate((inner.regular, inner.outgoing)), r in 1:nb
@@ -248,22 +250,24 @@ function _elastic_layered_transition(m::Integer, n_max::Integer, k::Real, f::Rea
             if fluid_interior
                 for (columns, unknown) in unknown_sets(inner), j in 1:nb
 
-                    A[row, columns[j]] -= area_inner * (phi_normal *
-                                           (unknown[4, j, q] * test[1, r, q] -
-                                            test[5, r, q] * unknown[2, j, q]) -
-                                           phi_tangent * test[6, r, q] * unknown[3, j, q])
+                    A_out[row, columns[j]] -= area_inner * (phi_normal *
+                                               (unknown[4, j, q] * test[1, r, q] -
+                                                test[5, r, q] * unknown[2, j, q]) -
+                                               phi_tangent * test[6, r, q] *
+                                               unknown[3, j, q])
                 end
                 for (e, mode) in enumerate(interior_modes)
-                    A[row, columns_e[e]] += area_inner * phi_normal * test[4, r, q] *
-                                            mode.dj * mode.S[q] / (k_i * h_xi_i)
+                    A_out[row, columns_e[e]] += area_inner * phi_normal * test[4, r, q] *
+                                                mode.dj * mode.S[q] / (k_i * h_xi_i)
                 end
             else
                 for (columns, unknown) in unknown_sets(inner), j in 1:nb
 
-                    A[row, columns[j]] += area_inner * (phi_normal *
-                                           (test[4, r, q] * unknown[1, j, q] +
-                                            test[5, r, q] * unknown[2, j, q]) +
-                                           phi_tangent * test[6, r, q] * unknown[3, j, q])
+                    A_out[row, columns[j]] += area_inner * (phi_normal *
+                                               (test[4, r, q] * unknown[1, j, q] +
+                                                test[5, r, q] * unknown[2, j, q]) +
+                                               phi_tangent * test[6, r, q] *
+                                               unknown[3, j, q])
                 end
             end
         end
@@ -271,16 +275,37 @@ function _elastic_layered_transition(m::Integer, n_max::Integer, k::Real, f::Rea
             for (n, mode_n) in enumerate(interior_modes)
                 for (columns, unknown) in unknown_sets(inner), j in 1:nb
 
-                    A[rows_int[n], columns[j]] += area_inner * phi_normal *
-                                                  unknown[4, j, q] *
-                                                  mode_n.dj * mode_n.S[q] / (k_i * h_xi_i)
+                    A_out[rows_int[n], columns[j]] += area_inner * phi_normal *
+                                                      unknown[4, j, q] *
+                                                      mode_n.dj * mode_n.S[q] /
+                                                      (k_i * h_xi_i)
                 end
                 for (e, mode_e) in enumerate(interior_modes)
-                    A[rows_int[n], columns_e[e]] += area_inner * phi_normal * bulk * k_i *
-                                                    mode_n.j * mode_n.S[q] * mode_e.dj *
-                                                    mode_e.S[q] / (k_i * h_xi_i)
+                    A_out[rows_int[n], columns_e[e]] += area_inner * phi_normal * bulk *
+                                                        k_i *
+                                                        mode_n.j * mode_n.S[q] * mode_e.dj *
+                                                        mode_e.S[q] / (k_i * h_xi_i)
                 end
             end
+        end
+        return nothing
+    end
+    if Threads.nthreads() > 1 && n_quad > 1
+        nthreads = Threads.nthreads()
+        partials_A = [zeros(ComplexF64, n_rows, n_unknown) for _ in 1:nthreads]
+        partials_R = [zeros(ComplexF64, ne, n_unknown) for _ in 1:nthreads]
+        Threads.@threads :static for t in 1:nthreads
+            for q in t:nthreads:n_quad
+                accumulate_node!(partials_A[t], partials_R[t], q)
+            end
+        end
+        for t in 1:nthreads
+            A .+= partials_A[t]
+            Rhat .+= partials_R[t]
+        end
+    else
+        for q in 1:n_quad
+            accumulate_node!(A, Rhat, q)
         end
     end
     rhs = zeros(ComplexF64, n_rows, ne)

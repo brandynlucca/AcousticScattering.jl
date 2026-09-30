@@ -40,6 +40,8 @@ jobs:
   test-install-dependencies:
     name: Test install & dependencies (Julia ${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.flavor }})
     runs-on: ${{ matrix.os }}
+    # Nightly is experimental, including the Julia download in setup-julia.
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
       TEST_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
       JULIA_PROJECT: ${{ matrix.flavor == 'plots' && 'test' || 'test/core' }}
@@ -68,7 +70,6 @@ jobs:
           include-matrix: false
           delete-old-caches: false
       - name: Install dependencies
-        continue-on-error: ${{ matrix.version == 'nightly' }}
         shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
         run: |
           using Pkg
@@ -79,7 +80,6 @@ jobs:
           set_preferences!(Base.UUID("37bc0722-8b3f-41d8-b4ae-17decd3486a9"),
               "precompile_workload" => false; force = true)
       - name: Test dependency precompilation
-        continue-on-error: ${{ matrix.version == 'nightly' }}
         shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
         run: |
           using Pkg
@@ -102,7 +102,6 @@ jobs:
           (github.event_name == 'workflow_dispatch' ||
            matrix.os != 'ubuntu-latest' ||
            matrix.version != '1.10')
-        continue-on-error: ${{ matrix.version == 'nightly' }}
         env:
           TEST_SUITE: Basic
         run: julia --startup-file=no --check-bounds=yes --color=yes test/runtests.jl

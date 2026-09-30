@@ -120,6 +120,7 @@ convergence history, recomputed linear residuals and solver settings.
 """
 function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         formulation::Symbol = :burton_miller,
         compression = (method = :hmatrix, tol = 1e-5),
         correction = (method = :dim,),
@@ -130,7 +131,7 @@ function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
     system = _assemble_full_boundary(
         boundary, k, quad; formulation, compression, correction)
     return _solve_full_boundary(system; incidence_angle, incidence_azimuth,
-        gmres_kwargs, return_diagnostics, _density)
+        incident, transducer, gmres_kwargs, return_diagnostics, _density)
 end
 
 function _assemble_full_boundary(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
@@ -197,15 +198,16 @@ end
 
 function _solve_full_boundary(system;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         gmres_kwargs = (reltol = 1e-4, restart = 150, maxiter = 1200),
         return_diagnostics::Bool = true, _density = nothing)
     (; A, S, D, K, H, boundary, k, quad, coupling,
         formulation, compression, correction, Pl) = system
-    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
+    incident = _resolve_incident(
+        k, incidence_angle, incidence_azimuth; incident, transducer)
     n = length(quad)
-    p_inc = ComplexF64[cis(k * dot(direction, q.coords)) for q in quad]
-    dpdn_inc = ComplexF64[im * k * dot(direction, q.normal) * p_inc[i]
-                          for (i, q) in enumerate(quad)]
+    p_inc, dpdn_inc = _incident_traces(
+        quad, k, incidence_angle, incidence_azimuth, incident)
     if correction.method === :edge
         rhs = boundary isa Rigid ? dpdn_inc : p_inc
     elseif boundary isa Rigid
@@ -282,20 +284,29 @@ end
     solve_full_bem(boundary::FluidFilled, k, quad;
                    incidence_angle=0.0, incidence_azimuth=0.0,
                    formulation=:muller, equilibrate=true, condition_limit=512,
-                   correction=(method=:dim,), return_diagnostics=false)
+                   correction=(method=:dim,), compression=(method=:none,),
+                   gmres_kwargs=(;), return_diagnostics=false)
 
-Solve fluid transmission over the full 3D surface `quad` using a dense direct solve.
+Solve fluid transmission over the full 3D surface `quad`. The default is a dense direct solve.
+`compression=(method=:hmatrix, tol=1e-8)` selects compressed, block-preconditioned GMRES
+for single-interface Müller with density interpolation. Near-field corrections are retained;
+low-frequency Calderón products use hierarchical LU inverses at `tol/100`.
+`gmres_kwargs` overrides the defaults `(reltol=1e-10, abstol=0, restart=150, maxiter=500)`
+and DGKS reorthogonalization. The two-level preconditioner acts on the right.
+Compression and iteration tolerances do not bound the physical discretization error.
 `formulation=:muller` uses the pressure and exterior normal derivative as two
-unknown traces. `formulation=:cbie` uses four traces and explicit interface conditions.
-With `correction=(method=:edge,)`, CBIE eliminates the interior traces through those
-conditions and uses material-dependent corner powers for pressure and normal flux.
-The constant-density Laplace double-layer identity regularizes both pressure equations;
-this removes the constant background before integrating the singular part of the kernel.
+unknown traces. `formulation=:cbie` eliminates the two interior traces through pressure
+and normal-velocity continuity, solving for the two exterior scattered traces. Its
+right-hand side retains the discrete interior operators applied to the incident traces.
+With `correction=(method=:edge,)`, CBIE instead uses total traces and material-dependent
+corner powers for pressure and normal flux.
+For edge quadrature, the constant-density Laplace double-layer identity regularizes both
+pressure equations; this removes the constant background before integrating the singular kernel.
 Edge quadrature requires a closed conforming triangular surface and does not use
 hypersingular operators.
 Use `bem` with `pressure` and `scattering_amplitude` to retain the weighted corner
 interpolation when evaluating fields.
-`equilibrate=true` scales rows and columns by their maximum absolute entry before
+For dense solves, `equilibrate=true` scales rows and columns by their maximum absolute entry before
 factorization, then recovers the physical traces. This scaling does not change the equations.
 Both formulations require positive finite wavenumber and material contrasts.
 With density interpolation, regular-wave pressure quadrature requires
@@ -313,23 +324,29 @@ its normal derivative, in the same form [`far_field`](@ref)/
 With `return_diagnostics=true`, append original and scaled system residuals and settings.
 For at most `condition_limit` unknowns, also compute both matrix 2-norm condition numbers.
 Zero disables this SVD calculation. A direct solve has no iterative convergence flag or history.
+Compressed solves instead use maxima within the local preconditioner blocks for scaling,
+skip SVD condition estimates, and report GMRES convergence and scaled residual history.
+Their recomputed residuals describe the compressed system, including approximate Calderón inverses.
 `derivative_evaluation` records the exterior and interior operator evaluation methods.
 """
 function solve_full_bem(boundary::FluidFilled, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         formulation::Symbol = :muller, equilibrate::Bool = true,
         condition_limit::Integer = 512,
-        correction = (method = :dim,), return_diagnostics::Bool = false)
+        correction = (method = :dim,), return_diagnostics::Bool = false,
+        compression = (method = :none,), gmres_kwargs = (;))
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
-    system = _assemble_full_fluid(boundary, k, quad; formulation, correction)
-    factor = _factor_fluid_system(system.A; equilibrate,
+    system = _assemble_full_fluid(boundary, k, quad; formulation, correction, compression)
+    factor = _factor_full_fluid(system; equilibrate, gmres_kwargs,
         condition_limit = return_diagnostics ? condition_limit : 0)
     return _solve_full_fluid(system, factor; incidence_angle, incidence_azimuth,
-        return_diagnostics)
+        incident, transducer, return_diagnostics)
 end
 
 function _assemble_full_fluid(boundary::FluidFilled, k::Real, quad;
-        formulation::Symbol = :muller, correction = (method = :dim,))
+        formulation::Symbol = :muller, correction = (method = :dim,),
+        compression = (method = :none,))
     isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
     formulation in (:muller, :cbie) ||
         throw(ArgumentError("fluid formulation must be :muller or :cbie"))
@@ -338,6 +355,10 @@ function _assemble_full_fluid(boundary::FluidFilled, k::Real, quad;
     isfinite(g) && g > 0 && isfinite(h) && h > 0 ||
         throw(ArgumentError("fluid density and soundspeed contrasts must be finite and positive"))
     k_int = k / boundary.soundspeed_contrast
+    if compression.method !== :none
+        return _assemble_compressed_fluid(
+            boundary, k, quad; formulation, correction, compression)
+    end
     if correction.method === :edge
         formulation === :cbie ||
             throw(ArgumentError("fluid edge quadrature requires formulation=:cbie"))
@@ -367,9 +388,9 @@ function _assemble_full_fluid(boundary::FluidFilled, k::Real, quad;
         regular)
     n = length(quad)
 
-    Id = Matrix{ComplexF64}(I, n, n)
     derivative_evaluation = nothing
     if formulation == :muller
+        Id = Matrix{ComplexF64}(I, n, n)
         K_ext, H_ext, exterior = _fluid_derivative_operators(
             op_ext, quad, quad, S_ext, D_ext, correction; regular, reconstruct)
         K_int, H_int, interior = _fluid_derivative_operators(
@@ -377,20 +398,8 @@ function _assemble_full_fluid(boundary::FluidFilled, k::Real, quad;
         derivative_evaluation = (; exterior, interior)
         A = [Id-D_ext+D_int S_ext-g*S_int; -H_ext+H_int/g Id+K_ext-K_int]
     else
-        off_p, off_d, off_pi, off_di = 0, n, 2n, 3n
-        A = zeros(ComplexF64, 4n, 4n)
-        rows = 1:n
-        A[rows, (off_p + 1):(off_p + n)] = 0.5 .* Id .- D_ext
-        A[rows, (off_d + 1):(off_d + n)] = S_ext
-        rows = (n + 1):(2n)
-        A[rows, (off_pi + 1):(off_pi + n)] = 0.5 .* Id .+ D_int
-        A[rows, (off_di + 1):(off_di + n)] = -S_int
-        rows = (2n + 1):(3n)
-        A[rows, (off_p + 1):(off_p + n)] = Id
-        A[rows, (off_pi + 1):(off_pi + n)] = -Id
-        rows = (3n + 1):(4n)
-        A[rows, (off_d + 1):(off_d + n)] = Id
-        A[rows, (off_di + 1):(off_di + n)] = -Id ./ g
+        # p_int = p_scat + p_inc, d_int = g * (d_scat + d_inc).
+        A = [0.5I-D_ext S_ext; 0.5I+D_int -g*S_int]
     end
     return (; A, quad, k, formulation, derivative_evaluation, correction)
 end
@@ -406,18 +415,30 @@ function _factor_fluid_system(A; equilibrate::Bool = true,
         col_norms = ifelse.(iszero.(col_norms), 1.0, col_norms)
         scaled_A ./= transpose(col_norms)
     else
-        scaled_A = A
+        scaled_A = copy(A)
         row_norms = col_norms = nothing
     end
-    factorization = lu(scaled_A)
     compute_condition = size(A, 1) <= condition_limit
     condition_number = compute_condition ? cond(A) : nothing
     scaled_condition_number = compute_condition ?
                               (equilibrate ? cond(scaled_A) : condition_number) : nothing
+    # Keep A for true residuals; the scaled workspace becomes the LU storage.
+    factorization = LinearAlgebra.lu!(scaled_A)
     diagnostics = (;
         equilibrate, condition_limit, condition_number, scaled_condition_number,
         conditioning = compute_condition ? :svd : :not_computed)
-    return (; factorization, scaled_A, row_norms, col_norms, diagnostics)
+    return (; factorization, row_norms, col_norms, diagnostics)
+end
+
+function _fluid_residual_report(residual, b, row_norms)
+    report = _residual_report(residual, b)
+    # The residual in equilibrated equations is D_r^-1 * (A*x - b).
+    # Evaluate it from the original system, independently of the overwritten LU workspace.
+    scaled = row_norms === nothing ? report :
+             _residual_report(residual ./ row_norms, b ./ row_norms)
+    return merge(report,
+        (; scaled_relative_residual = scaled.relative_residual,
+            scaled_absolute_residual = scaled.absolute_residual))
 end
 
 function _solve_fluid_system(factor, b)
@@ -429,17 +450,30 @@ end
 
 function _solve_full_fluid(system, factor;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         return_diagnostics::Bool = true)
+    incident = _resolve_incident(
+        system.k, incidence_angle, incidence_azimuth; incident, transducer)
+    hasproperty(system, :compression) &&
+        return _solve_compressed_fluid(system, factor; incidence_angle, incidence_azimuth,
+            incident, return_diagnostics)
     (; A, quad, k, formulation, derivative_evaluation, correction) = system
-    direction = _bem3d_incidence_direction(incidence_angle, incidence_azimuth)
     n = length(quad)
-    p_inc = ComplexF64[cis(k * dot(direction, q.coords)) for q in quad]
-    dpdn_inc = ComplexF64[im * k * dot(direction, q.normal) * p_inc[i]
-                          for (i, q) in enumerate(quad)]
-    b = correction.method === :edge ? [p_inc; zeros(ComplexF64, n)] :
-        formulation === :muller ? [p_inc; dpdn_inc] :
-        [zeros(ComplexF64, 2n); -p_inc; -dpdn_inc]
-    (; x, scaled_x, scaled_b) = _solve_fluid_system(factor, b)
+    p_inc, dpdn_inc = _incident_traces(
+        quad, k, incidence_angle, incidence_azimuth, incident)
+    b = if correction.method === :edge
+        [p_inc; zeros(ComplexF64, n)]
+    elseif formulation === :muller
+        [p_inc; dpdn_inc]
+    else
+        rhs = zeros(ComplexF64, 2n)
+        # Keep the discrete incident forcing from the eliminated interior equation.
+        # Substituting a continuum identity here would change the discretized problem.
+        mul!(view(rhs, (n + 1):(2n)), view(A, (n + 1):(2n), :),
+            [p_inc; dpdn_inc], -1, 0)
+        rhs
+    end
+    (; x) = _solve_fluid_system(factor, b)
     p_scat = x[1:n]
     dpdn_scat = x[(n + 1):(2n)]
     if formulation == :muller || correction.method === :edge
@@ -448,13 +482,11 @@ function _solve_full_fluid(system, factor;
     end
 
     if return_diagnostics
-        scaled_report = _linear_residual(factor.scaled_A, scaled_x, scaled_b)
-        diagnostics = merge(_linear_residual(A, x, b), factor.diagnostics,
+        diagnostics = merge(
+            _fluid_residual_report(A * x - b, b, factor.row_norms), factor.diagnostics,
             (
                 method = :direct, converged = nothing, iterations = nothing,
                 formulation, derivative_evaluation,
-                scaled_relative_residual = scaled_report.relative_residual,
-                scaled_absolute_residual = scaled_report.absolute_residual,
                 residual_history = Float64[], unknown_count = size(A, 1), quadrature_nodes = n,
                 compression = (method = :none,), correction = correction, solver_options = (;)))
         return p_scat, dpdn_scat, quad, diagnostics

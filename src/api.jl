@@ -116,6 +116,11 @@ struct _FullBEMSurfaceData
     incidence_azimuth::Float64
     diagnostics::NamedTuple
     single_layer_density::Union{Nothing, Vector{ComplexF64}}
+    incident::Union{Nothing, IncidentField}
+end
+
+function _FullBEMSurfaceData(quad, p, dp, beta, alpha, report, density)
+    _FullBEMSurfaceData(quad, p, dp, beta, alpha, report, density, nothing)
 end
 
 function _FullBEMSurfaceData(quad, p, dp, beta, alpha, report)
@@ -183,6 +188,16 @@ end
 # `far_field`/`target_strength(ps, p_modes, dpdn_modes, k, angle, azimuth)` at any observation
 # direction, not only the backscatter this path's own `_ScalarFEMData` predecessor retained.
 struct _CylinderMeridianFEMData
+    ps::Vector{Panel}
+    p_modes::Vector{Vector{ComplexF64}}
+    dpdn_modes::Vector{Vector{ComplexF64}}
+    incidence_angle::Float64
+    diagnostics::NamedTuple
+end
+
+# Spheroid meridian FEM retains the same exterior traces on its enclosing
+# spherical DtN boundary. The traces support complex far-field observations.
+struct _SpheroidMeridianFEMData
     ps::Vector{Panel}
     p_modes::Vector{Vector{ComplexF64}}
     dpdn_modes::Vector{Vector{ComplexF64}}
@@ -491,6 +506,12 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
   `pml_sigma`, and `solver` (`:auto`, `:direct` or `:iterative`), and supports `angle`/`azimuth` in
   [`scattering_amplitude`](@ref).
 
+Volume FEM also accepts `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)`
+(including [`TankTransducer`](@ref)), for single and coupled bodies. Coordinates are in
+meters in the bodies' frame. With prescribed illumination the incidence angles retain
+only their default-observation meaning; pass explicit observation angles or evaluate
+[`pressure`](@ref). Modal/axisymmetric FEM paths do not accept these fields.
+
 `R` is the Dirichlet-to-Neumann truncation radius in m, default `1.2` times the body's
 characteristic radius. See `fem(shell::Shell, ...)` for the elastic-shell/fluid-coupling case.
 
@@ -614,11 +635,12 @@ function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled
     method === :meridian || throw(ArgumentError(
         "fem(::Spheroid, ...) supports method=:meridian or :volume, got $method"))
     reports = _SolveReports()
-    ts = spheroid_meridian_fem_target_strength(
+    ps, p_modes, dpdn_modes = _spheroid_meridian_fem_modes(
         boundary, k, body.a, body.b, R, incidence_angle; m_max, solve_reports = reports, kwargs...)
     report = _summarize_solves(reports; method, solver_options = (;
         R, incidence_angle, m_max, kwargs...))
-    return FEMSolution(body, boundary, k, method, _ScalarFEMData(ts, report))
+    data = _SpheroidMeridianFEMData(ps, p_modes, dpdn_modes, incidence_angle, report)
+    return FEMSolution(body, boundary, k, method, data)
 end
 
 struct _VolumeRegionGeometry <: AbstractBody
@@ -857,12 +879,22 @@ Boundary-element solve, returns a [`BEMSolution`](@ref). `method=:axisymmetric` 
 Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 [`target_strength`](@ref)`(sol; direction)` (full 3D).
 
+Full BEM accepts `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)`
+(including [`TankTransducer`](@ref)), also on supplied meshes and coupled fluid regions.
+The default remains a plane wave. With prescribed illumination, angles are retained
+as default-observation metadata; use an explicit `direction` or [`received_signal`](@ref)
+for a physical receiver measurement. Axisymmetric BEM remains plane-wave only.
+
 Full BEM accepts `meshsize` in m, geometry `mesh_order` (1, 2 or 3, default 2), quadrature
 `qorder` (default 4), `correction`, `compression` and `gmres_kwargs`. Rigid/soft full BEM
 defaults to `formulation=:burton_miller` (`:cbie` selects the conventional equation). Fluid
-full BEM defaults to `formulation=:muller` (`:cbie` selects the four-trace system).
+full BEM defaults to `formulation=:muller` (`:cbie` selects the pressure-only system
+with interior traces eliminated).
 `equilibrate=true` scales the matrix before factorization. `condition_limit=512` bounds the
 optional SVD condition-number calculation.
+Single-interface fluid Müller also accepts `compression=(method=:hmatrix, tol=1e-8)`
+with density interpolation, using block-preconditioned GMRES. It scales from local blocks,
+skips SVD condition estimates and accepts `gmres_kwargs`; dense LU remains the default.
 
 See [BEM and MFS](@ref boundary-theory) for the underlying formulations and
 [`diagnostics`](@ref) for convergence and residual checks.
@@ -935,7 +967,7 @@ function _bem_axial(
 end
 
 function _bem_oblique(
-        body::AbstractBody, boundary::Union{Rigid, PressureRelease, FluidFilled},
+        body::AbstractBody, boundary::Union{Rigid, PressureRelease, FluidFilled, Impedance},
         k::Real, mesh::MeridianMesh,
         incidence_angle::Real; m_max::Integer, kwargs...)
     reports = _SolveReports()
@@ -951,8 +983,11 @@ end
 function _bem_full(body::Union{Sphere, Spheroid},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
+        incident = nothing, transducer = nothing,
         meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
         mesh_order::Integer = 2, kwargs...)
+    incident = _resolve_incident(
+        k, incidence_angle, incidence_azimuth; incident, transducer)
     quad = body isa Sphere ?
            gmsh_sphere_mesh(body.radius; meshsize, qorder, mesh_order) :
            gmsh_spheroid_mesh(body.a, body.b; meshsize, qorder, mesh_order)
@@ -960,11 +995,13 @@ function _bem_full(body::Union{Sphere, Spheroid},
     capture = boundary isa Rigid ? (; _density = density) : (;)
     p_scat, dpdn_scat, _, diagnostics = solve_full_bem(
         boundary, k, quad; incidence_angle = incidence_angle,
-        incidence_azimuth = incidence_azimuth, return_diagnostics = true, capture..., kwargs...)
-    diagnostics = merge(diagnostics, (;
-        meshsize = Float64(meshsize), quadrature_order = qorder, mesh_order))
+        incidence_azimuth = incidence_azimuth, incident, return_diagnostics = true, capture..., kwargs...)
+    diagnostics = merge(diagnostics,
+        (;
+            meshsize = Float64(meshsize), quadrature_order = qorder, mesh_order,
+            illumination = incident === nothing ? :plane_wave : :prescribed))
     data = _FullBEMSurfaceData(quad, p_scat, dpdn_scat, incidence_angle, incidence_azimuth,
-        diagnostics, density[])
+        diagnostics, density[], incident)
     return BEMSolution(body, boundary, Float64(k), :full, data)
 end
 function _bem_full(
@@ -977,7 +1014,7 @@ function _bem_full(
     report = merge(d.diagnostics, (;
         meshsize = Float64(meshsize), mesh_order, quadrature_order = qorder))
     data = _FullBEMSurfaceData(d.quad, d.p_scat, d.dpdn_scat,
-        d.incidence_angle, d.incidence_azimuth, report, d.single_layer_density)
+        d.incidence_angle, d.incidence_azimuth, report, d.single_layer_density, d.incident)
     return BEMSolution(body, boundary, Float64(k), :full, data)
 end
 
@@ -1012,14 +1049,7 @@ function mfs(body::Union{Sphere, Spheroid, Cylinder},
         return _mfs_bent(body, boundary, k; incidence_angle = incidence_angle,
             offset = offset, oversampling = oversampling, condition_limit, kwargs...)
     end
-    source_mesh = (body isa Cylinder && _iscapped(body)) ?
-                  cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, n) :
-                  _axisymmetric_mesh(body, n)
-    mesh = oversampling == 1 ? source_mesh :
-           (body isa Cylinder && _iscapped(body)) ?
-           cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, oversampling *
-                                                                                        n) :
-           _axisymmetric_mesh(body, oversampling * n)
+    mesh, source_mesh = _mfs_meridian_meshes(body, n, oversampling)
     iszero(incidence_angle) &&
         return _mfs_axial(
             body, boundary, k, mesh; offset, source_mesh,
@@ -1029,7 +1059,19 @@ function mfs(body::Union{Sphere, Spheroid, Cylinder},
         m_max, source_mesh, oversampling, condition_limit, kwargs...)
 end
 
-function _mfs_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
+function _mfs_meridian_meshes(body, n, oversampling)
+    source_mesh = (body isa Cylinder && _iscapped(body)) ?
+                  cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, n) :
+                  _axisymmetric_mesh(body, n)
+    mesh = oversampling == 1 ? source_mesh :
+           (body isa Cylinder && _iscapped(body)) ?
+           cylinder_spheroidal_endcap_mesh(body.radius, body.length, body.endcap_depth, oversampling *
+                                                                                        n) :
+           _axisymmetric_mesh(body, oversampling * n)
+    return mesh, source_mesh
+end
+
+function _mfs_axial(body::AbstractBody, boundary::Union{Rigid, PressureRelease, Impedance},
         k::Real, mesh::MeridianMesh; offset::Real, source_mesh = mesh, oversampling = 1, kwargs...)
     reports = _SolveReports()
     source_modes = NamedTuple[]
@@ -1060,7 +1102,8 @@ function _mfs_axial(
     return MFSSolution(body, boundary, k, data)
 end
 
-function _mfs_oblique(body::AbstractBody, boundary::Union{Rigid, PressureRelease},
+function _mfs_oblique(
+        body::AbstractBody, boundary::Union{Rigid, PressureRelease, Impedance},
         k::Real, mesh::MeridianMesh, incidence_angle::Real;
         offset::Real, m_max::Integer, source_mesh = mesh, oversampling = 1, kwargs...)
     reports = _SolveReports()
@@ -1497,13 +1540,15 @@ function scattering_amplitude(sol::FEMSolution{_ShellFEMSurfaceData};
     return far_field(d.ps_ext, d.p_ext_modes, d.dpdn_ext_modes, sol.k, angle, azimuth)
 end
 
-function target_strength(sol::FEMSolution{_CylinderMeridianFEMData};
-        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
+function target_strength(sol::FEMSolution{T};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π) where {
+        T <: Union{_CylinderMeridianFEMData, _SpheroidMeridianFEMData}}
     return target_strength(scattering_amplitude(sol; angle, azimuth))
 end
 
-function scattering_amplitude(sol::FEMSolution{_CylinderMeridianFEMData};
-        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π)
+function scattering_amplitude(sol::FEMSolution{T};
+        angle::Real = π - sol.data.incidence_angle, azimuth::Real = π) where {
+        T <: Union{_CylinderMeridianFEMData, _SpheroidMeridianFEMData}}
     d = sol.data
     length(d.p_modes) == 1 &&
         return far_field(d.ps, d.p_modes[1], d.dpdn_modes[1], sol.k, angle)

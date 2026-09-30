@@ -17,8 +17,8 @@ end
 Compare a coupled fluid-region BEM `solution` with each interface solved in isolation
 in the exterior medium. Preserve each surface's position, orientation, material contrast,
 incident direction and phase origin. The coupled solution is reused; isolated solves
-inherit its formulation, quadrature correction and equilibration, with overrides in
-`solver_kwargs`.
+inherit its formulation, quadrature correction, equilibration, compression and iterative
+controls, with overrides in `solver_kwargs`.
 
 Returns a comparison retaining `coupled`, `isolated` solutions and `labels` for the
 coupled response, isolated responses and their coherent sum. The coherent sum adds
@@ -33,11 +33,16 @@ function components(sol::BEMSolution{_RegionBEMData}; labels = nothing,
         solver_kwargs::NamedTuple = (;))
     count = length(sol.body.surfaces)
     response_labels = _component_labels(count, labels)
+    report = diagnostics(sol)
+    compression = get(solver_kwargs, :compression, report.compression)
+    gmres_kwargs = report.method === :gmres && compression.method !== :none ?
+                   Base.structdiff(report.solver_options, NamedTuple{(
+        :incidence_angle, :incidence_azimuth)}) : (;)
     options = merge(
-        (; correction = diagnostics(sol).correction,
-            formulation = diagnostics(sol).formulation,
-            condition_limit = diagnostics(sol).condition_limit,
-            equilibrate = diagnostics(sol).equilibrate),
+        (; correction = report.correction, formulation = report.formulation,
+            incident = haskey(solver_kwargs, :transducer) ? nothing : sol.data.incident,
+            condition_limit = report.condition_limit,
+            equilibrate = report.equilibrate, compression, gmres_kwargs),
         solver_kwargs)
     isolated = BEMSolution[bem(surface, material, sol.k;
                                incidence_angle = sol.data.incidence_angle,

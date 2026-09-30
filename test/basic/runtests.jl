@@ -49,9 +49,17 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("bem/spheroid.jl")
             include("bem/cylinder.jl")
             include("bem/assembly.jl")
+            include("bem/quadrature_workspace.jl")
+            include("bem/quadrature_cycles.jl")
+            include("bem/kernel_reuse.jl")
+            include("bem/modal_kernel.jl")
+            include("bem/mode_storage.jl")
             include("bem/arbitrary.jl")
             include("bem/edge.jl")
             include("bem/formulations.jl")
+            include("bem/preconditioner.jl")
+            include("bem/setup.jl")
+            include("bem/regions_compressed.jl")
             include("bem/adaptive.jl")
         end
     end
@@ -60,6 +68,8 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
             include("mfs/sphere.jl")
             include("mfs/spheroid.jl")
             include("mfs/cylinder.jl")
+            include("mfs/sweeps.jl")
+            include("mfs/assembly.jl")
         end
     end
     if TEST_BASIC_GROUP in ("All", "Fourier")
@@ -81,6 +91,10 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
         @testset "Utilities" begin
             include("mesh.jl")
             include("sampling.jl")
+            include("tank.jl")
+            include("tank_scattering.jl")
+            include("tank_profiles.jl")
+            include("farfield.jl")
             include("output.jl")
             include("internals.jl")
             include("pressure.jl")

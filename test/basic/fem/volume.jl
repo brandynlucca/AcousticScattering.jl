@@ -311,4 +311,36 @@ let
                   superpose(angle, azimuth) rtol=1e-2
         end
     end
+
+    @time "Volume FEM (transducer incident field)" @testset "Volume FEM (transducer incident field)" begin
+        body, boundary = AS.Sphere(0.05), AS.Rigid()
+        # Omitting `transducer` (or passing `nothing`) must reproduce the plane-wave path exactly.
+        plane = AS.fem(body, boundary, k; method = :volume, incidence_angle = 0.6,
+            incidence_azimuth = 0.3, points_per_wavelength = 5, solver = :direct)
+        with_nothing = AS.fem(body, boundary, k; method = :volume, incidence_angle = 0.6,
+            incidence_azimuth = 0.3, points_per_wavelength = 5, solver = :direct,
+            transducer = nothing)
+        @test AS.scattering_amplitude(plane) == AS.scattering_amplitude(with_nothing)
+
+        # field=:incident must report the transducer's own field, not a stale plane-wave reconstruction.
+        t = AS.Transducer((0.0, 0.0, -1.0), (0.0, 0.0, 1.0), 0.02)
+        solution = AS.fem(body, boundary, k; method = :volume, points_per_wavelength = 5,
+            solver = :direct, transducer = t)
+        point = (0.06, 0.0, 0.0)
+        pinc, _ = AS._transducer_field(t, k)
+        @test AS.pressure(solution, point; field = :incident) ≈ pinc(point) rtol = 1e-10
+        @test isfinite(AS.target_strength(solution))
+
+        # A TankTransducer (source plus one wall image) must also drive a real solve, with
+        # field=:incident again reporting the combined field actually used.
+        wall = AS.Wall((0.0, 0.0, 0.3), (0.0, 0.0, -1.0), 1.0)
+        tank = AS.TankTransducer(t, wall)
+        tank_solution = AS.fem(
+            body, boundary, k; method = :volume, points_per_wavelength = 5,
+            solver = :direct, transducer = tank)
+        pinc_tank, _ = AS._transducer_field(tank, k)
+        @test AS.pressure(tank_solution, point; field = :incident) ≈ pinc_tank(point) rtol = 1e-10
+        @test isfinite(AS.target_strength(tank_solution))
+        @test AS.target_strength(tank_solution) != AS.target_strength(solution)
+    end
 end

@@ -342,8 +342,7 @@ function _uses_edge_quadrature(data)
 end
 
 function _edge_total_flux(data, k)
-    direction = _bem3d_incidence_direction(data.incidence_angle, data.incidence_azimuth)
-    return data.dpdn_scat + [im*k*dot(direction, q.normal)*cis(k*dot(direction, q.coords))
+    return data.dpdn_scat + [_data_incident_normal(data, k, q.coords, q.normal)
             for q in data.quad]
 end
 
@@ -497,8 +496,7 @@ function _edge_fluid_coordinates(patch)
 end
 
 function _edge_fluid_pressure(data, k, points, regions, boundary)
-    direction = _bem3d_incidence_direction(data.incidence_angle, data.incidence_azimuth)
-    p = data.p_scat + [cis(k*dot(direction, q.coords)) for q in data.quad]
+    p = data.p_scat + [_data_incident_pressure(data, k, q.coords) for q in data.quad]
     q = _edge_total_flux(data, k)
     pressure_patches, patches = _edge_fluid_patches(data.quad, boundary.density_contrast)
     patches = [merge(patch, (; correct_far = true)) for patch in patches]
@@ -601,8 +599,7 @@ function _edge_far_field(data, k, direction)
 end
 
 function _edge_fluid_far_field(data, k, direction, boundary)
-    incoming = _bem3d_incidence_direction(data.incidence_angle, data.incidence_azimuth)
-    p = data.p_scat + [cis(k*dot(incoming, q.coords)) for q in data.quad]
+    p = data.p_scat + [_data_incident_pressure(data, k, q.coords) for q in data.quad]
     q = _edge_total_flux(data, k)
     pressure, flux = _edge_fluid_patches(data.quad, boundary.density_contrast)
     return -im*k*_edge_far_integral(data.quad, k, direction, p, pressure; normal = true) -

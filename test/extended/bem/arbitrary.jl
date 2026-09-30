@@ -6,6 +6,37 @@ using SpecialFunctions
 const AS = AcousticScattering
 BLAS.set_num_threads(1)
 
+@testset "Compressed coupled gas resonance on cubic surfaces" begin
+    outer = mesh(Sphere(1.0); method = :full, resolution = 0.4, qorder = 5, mesh_order = 3)
+    center = AS.SVector(0.3, 0.1, 0.0)
+    inner = mesh(; qorder = 5) do g
+        g.model.add("compressed-coupled-resonance")
+        g.model.occ.addSphere(center..., 0.5)
+        g.model.occ.synchronize()
+        g.option.setNumber("Mesh.MeshSizeMin", 0.2)
+        g.option.setNumber("Mesh.MeshSizeMax", 0.2)
+        g.model.mesh.generate(2)
+        g.model.mesh.setOrder(3)
+    end
+    k, beta, alpha = 0.0276, pi/3, 0.4
+    gas = GasFilled(0.0012, 0.23)
+    solution = bem([outer, inner], [FluidFilled(1, 1), gas], k;
+        incidence_angle = beta, incidence_azimuth = alpha, condition_limit = 0,
+        compression = (method = :hmatrix, tol = 1e-9))
+    report = diagnostics(solution)
+    @test report.converged
+    @test report.local_preconditioner === :calderon
+    @test report.iterations <= 30
+    @test report.scaled_relative_residual < 1e-8
+    incident = AS._bem3d_incidence_direction(beta, alpha)
+    for direction in (-incident, incident, AS.SVector(0.0, 0.0, 1.0))
+        angle = acos(clamp(dot(incident, direction), -1, 1))
+        reference = scattering_amplitude(modal(Sphere(0.5), gas, k; angle)) *
+                    cis(k*dot(incident-direction, center))
+        @test isapprox(scattering_amplitude(solution; direction), reference; rtol = 0.01)
+    end
+end
+
 let
     @time "Nested ellipsoids across gas resonance" @testset "Nested ellipsoids across gas resonance" begin
         materials = [FluidFilled(1.04, 1.04), GasFilled(0.00129, 0.23)]

@@ -1,6 +1,85 @@
 # Axisymmetric method of fundamental solutions (MFS/ESM).
 # Point sources inside the body, boundary condition collocated on the true surface.
 
+using QuadGK: alloc_segbuf
+
+# Each assembly task owns these buffers; no buffer is indexed by thread ID or
+# shared with another task, so task migration and concurrent solves are safe.
+function _mfs_quadrature_workspace(m)
+    return (; breaks = zeros(max(m + 1, 2)),
+        scalar = alloc_segbuf(Float64, ComplexF64, Float64),
+        pair = alloc_segbuf(Float64, SVector{2, ComplexF64}, Float64))
+end
+
+function _mfs_ring_pair(k, rho, z, nrho, nz, rho2, z2, phi, length_scale)
+    r = _ring_distance(rho, z, rho2, z2, phi)
+    r < _RING_DISTANCE_FLOOR && return zero(SVector{2, ComplexF64})
+    G = cis(k * r) / (4pi * r)
+    projection = nrho * ((rho - rho2) + 2rho2 * sin(phi / 2)^2) + nz * (z - z2)
+    return SVector(G, length_scale * (im * k - 1 / r) * G * projection / r)
+end
+
+_mfs_kernel(::Val{:both}, args...) = _mfs_ring_pair(args...)
+function _mfs_kernel(::Val{:pressure}, k, rho, z, nrho, nz, rho2, z2, phi, length_scale)
+    _ring_G(k, rho, z, rho2, z2, phi)
+end
+function _mfs_kernel(::Val{:derivative}, k, rho, z, nrho, nz, rho2, z2, phi, length_scale)
+    _ring_dGdn_field(k, rho, z, nrho, nz, rho2, z2, phi)
+end
+
+_mfs_quadrature_norm(x::Number) = abs(x)
+_mfs_quadrature_norm(x::SVector) = maximum(abs, x)
+
+function _mfs_integrate_kernel(which, k, p, rho2, z2, m, rtol, atol,
+        scale, length_scale, workspace)
+    buffer = which isa Val{:both} ? workspace.pair : workspace.scalar
+    integrand = tau -> begin
+        phi = min(scale * sinh(tau), pi)
+        _mfs_kernel(which, k, p.rhom, p.zm, p.nrho, p.nz, rho2, z2, phi, length_scale) *
+        (cos(m * phi) * scale * cosh(tau))
+    end
+    return quadgk(integrand, workspace.breaks...; rtol, atol,
+        norm = _mfs_quadrature_norm, segbuf = buffer, maxevals = _AZIMUTHAL_MAXEVALS)
+end
+
+function _mfs_pair_integrals(which, k, p, rho2, z2, m, rtol, workspace;
+        atol = _QUAD_ATOL)
+    separation = hypot(p.rhom - rho2, p.zm - z2)
+    scale = clamp(separation / sqrt(p.rhom * rho2), _RING_PEAK_FLOOR, _RING_PEAK_CEILING)
+    upper = asinh(pi / scale)
+    breaks = workspace.breaks
+    for j in eachindex(breaks)
+        breaks[j] = asinh((j - 1) * pi / ((length(breaks) - 1) * scale))
+    end
+    breaks[end] = upper
+    # Put the two kernels on comparable scales, but check each error target below.
+    length_scale = max(separation, _RING_DISTANCE_FLOOR) /
+                   (1 + abs(k) * max(separation, _RING_DISTANCE_FLOOR))
+    value, error = _mfs_integrate_kernel(which, k, p, rho2, z2, m, rtol, atol / 2,
+        scale, length_scale, workspace)
+    if which isa Val{:both}
+        pressure, derivative = value[1], value[2] / length_scale
+        # The summed max-norm error bounds each scaled component. A small or
+        # cancelling component must satisfy its own tolerance, not the pair norm.
+        if error > max(atol / 2, rtol * abs(pressure))
+            pressure, ep = _mfs_integrate_kernel(Val(:pressure), k, p, rho2, z2, m,
+                rtol, atol / 2, scale, length_scale, workspace)
+            ep <= max(atol / 2, rtol * abs(pressure)) ||
+                throw(ArgumentError("MFS pressure quadrature did not converge"))
+        end
+        if error / length_scale > max(atol / 2, rtol * abs(derivative))
+            derivative, ev = _mfs_integrate_kernel(Val(:derivative), k, p, rho2, z2, m,
+                rtol, atol / 2, scale, length_scale, workspace)
+            ev <= max(atol / 2, rtol * abs(derivative)) ||
+                throw(ArgumentError("MFS normal-derivative quadrature did not converge"))
+        end
+        return 2pressure, 2derivative
+    end
+    error <= max(atol / 2, rtol * abs(value)) ||
+        throw(ArgumentError("MFS quadrature did not converge"))
+    return which isa Val{:pressure} ? (2value, nothing) : (nothing, 2value)
+end
+
 # ∂G/∂n_x at field point x, the field-point-normal counterpart of `_ring_dGdn`'s source-point-normal derivative.
 function _ring_dGdn_field(
         k::Real, ρ::Real, z::Real, nρ::Real, nz::Real, ρ2::Real, z2::Real, Δφ::Real)
@@ -73,30 +152,45 @@ folded into the boundary-condition right-hand side instead, see
 function assemble_mfs_operators(mesh::MeridianMesh, k::Real, ρ_s::AbstractVector{<:Real},
         z_s::AbstractVector{<:Real};
         m::Integer = 0, rtol::Real = 1e-6, threaded::Bool = Threads.nthreads() > 1)
+    return _assemble_mfs_operators(Val(:both), mesh, k, ρ_s, z_s; m, rtol, threaded)
+end
+
+function _assemble_mfs_operators(which, mesh, k, ρ_s, z_s;
+        m = 0, rtol = 1e-6, threaded = Threads.nthreads() > 1)
     ps = panels(mesh)
     n, ns = length(ps), length(ρ_s)
-    P = zeros(ComplexF64, n, ns)
-    V = zeros(ComplexF64, n, ns)
-    if threaded
-        Threads.@threads for i in 1:n
+    P = which isa Val{:derivative} ? nothing : zeros(ComplexF64, n, ns)
+    V = which isa Val{:pressure} ? nothing : zeros(ComplexF64, n, ns)
+    next = Threads.Atomic{Int}(0)
+    function worker()
+        workspace = _mfs_quadrature_workspace(m)
+        while true
+            i = Threads.atomic_add!(next, 1) + 1
+            i > n && break
             pi = ps[i]
             for j in 1:ns
-                P[i, j] = _azimuthal_G(
-                    k, pi.rhom, pi.zm, ρ_s[j], z_s[j]; m = m, rtol = rtol)
-                V[i, j] = _azimuthal_dGdn_field(
-                    k, pi.rhom, pi.zm, pi.nrho, pi.nz, ρ_s[j], z_s[j]; m = m, rtol = rtol)
+                if k isa Float64 && eltype(ρ_s) === Float64 && eltype(z_s) === Float64
+                    p, v = _mfs_pair_integrals(
+                        which, k, pi, ρ_s[j], z_s[j], m, rtol, workspace)
+                    P === nothing || (P[i, j] = p)
+                    V === nothing || (V[i, j] = v)
+                else
+                    # Preserve generic-Real evaluation before conversion to matrix storage.
+                    P === nothing || (P[i, j] = _azimuthal_G(
+                        k, pi.rhom, pi.zm, ρ_s[j], z_s[j]; m, rtol))
+                    V === nothing || (V[i, j] = _azimuthal_dGdn_field(
+                        k, pi.rhom, pi.zm, pi.nrho, pi.nz, ρ_s[j], z_s[j]; m, rtol))
+                end
             end
+        end
+        return nothing
+    end
+    if threaded && Threads.nthreads() > 1
+        Threads.@sync for _ in 1:min(Threads.nthreads(), n)
+            Threads.@spawn worker()
         end
     else
-        for i in 1:n
-            pi = ps[i]
-            for j in 1:ns
-                P[i, j] = _azimuthal_G(
-                    k, pi.rhom, pi.zm, ρ_s[j], z_s[j]; m = m, rtol = rtol)
-                V[i, j] = _azimuthal_dGdn_field(
-                    k, pi.rhom, pi.zm, pi.nrho, pi.nz, ρ_s[j], z_s[j]; m = m, rtol = rtol)
-            end
-        end
+        worker()
     end
     return P, V, ps
 end
@@ -113,13 +207,46 @@ function _mfs_check_mesh(mesh::MeridianMesh)
     return MeridianMesh(rho, z)
 end
 
-function _mfs_system(boundary, P, V, P_int, V_int, k, ps, beta, m)
+function _mfs_matrix(boundary, P, V, P_int, V_int, k)
+    boundary isa PressureRelease && return P
+    boundary isa Rigid && return V
+    boundary isa Impedance && return V + (im * k / boundary.zeta) * P
+    return [P -P_int; V -V_int ./ boundary.density_contrast]
+end
+
+function _mfs_rhs(boundary, k, ps, beta, m)
     p_inc = ComplexF64[_p_inc_mode(m, k, beta, p.rhom, p.zm) for p in ps]
     dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, beta, p.rhom, p.zm, p.nrho, p.nz)
                           for p in ps]
-    boundary isa PressureRelease && return P, -p_inc
-    boundary isa Rigid && return V, -dpdn_inc
-    return [P -P_int; V -V_int ./ boundary.density_contrast], [-p_inc; -dpdn_inc]
+    boundary isa PressureRelease && return -p_inc
+    boundary isa Rigid && return -dpdn_inc
+    if boundary isa Impedance
+        robin = im * k / boundary.zeta
+        return -robin .* p_inc .- dpdn_inc
+    end
+    return [-p_inc; -dpdn_inc]
+end
+
+function _mfs_system(boundary, P, V, P_int, V_int, k, ps, beta, m)
+    return _mfs_matrix(boundary, P, V, P_int, V_int, k),
+    _mfs_rhs(boundary, k, ps, beta, m)
+end
+
+function _mfs_record_mode!(reports, boundary, A, x, b, Ac, bc, ps, checks, metadata;
+        m, rtol, offset_ext, offset_int)
+    boundary_residual = _linear_residual(Ac, x, bc)
+    pressure_residual = velocity_residual = nothing
+    if boundary isa FluidFilled
+        ncheck = length(checks)
+        pressure_residual = _linear_residual(view(Ac, 1:ncheck, :), x, view(bc, 1:ncheck))
+        velocity_residual = _linear_residual(
+            view(Ac, (ncheck + 1):size(Ac, 1), :), x, view(bc, (ncheck + 1):length(bc)))
+    end
+    _record_solve!(reports, A, x, b; mode = m, rtol, source_count = size(A, 2),
+        collocation_count = length(ps), check_count = length(checks), offset_ext,
+        offset_int = boundary isa FluidFilled ? offset_int : nothing,
+        boundary_residual, pressure_residual, velocity_residual, metadata...)
+    return nothing
 end
 
 function _solve_mfs_mode(boundary, k, mesh, beta, m;
@@ -146,32 +273,20 @@ function _solve_mfs_mode(boundary, k, mesh, beta, m;
     end
     if solve_reports !== nothing
         check_mesh = _mfs_check_mesh(mesh)
-        Pc, Vc, checks = assemble_mfs_operators(check_mesh, k, rho_ext, z_ext; m, rtol)
-        Pi = Vi = nothing
-        if boundary isa FluidFilled
-            Pi, Vi, _ = assemble_mfs_operators(
-                check_mesh, k / boundary.soundspeed_contrast, rho_int, z_int; m, rtol)
-        end
-        Ac, bc = _mfs_system(boundary, Pc, Vc, Pi, Vi, k, checks, beta, m)
-        boundary_residual = _linear_residual(Ac, x, bc)
-        pressure_residual = velocity_residual = nothing
-        if boundary isa FluidFilled
-            ncheck = length(checks)
-            pressure_residual = _linear_residual(Ac[1:ncheck, :], x, bc[1:ncheck])
-            velocity_residual = _linear_residual(Ac[(ncheck + 1):end, :], x, bc[(ncheck + 1):end])
-        end
-        _record_solve!(solve_reports, A, x, b; mode = m, rtol, source_count = size(A, 2),
-            collocation_count = length(ps), check_count = length(checks), offset_ext,
-            offset_int = boundary isa FluidFilled ? offset_int : nothing,
-            boundary_residual, pressure_residual, velocity_residual,
-            _mfs_matrix_diagnostics(A; condition_limit)...)
+        exterior = (; rho = rho_ext, z = z_ext)
+        interior = boundary isa FluidFilled ? (; rho = rho_int, z = z_int) : nothing
+        Ac, checks = _mfs_boundary_matrix(
+            boundary, check_mesh, k, exterior, interior; m, rtol)
+        bc = _mfs_rhs(boundary, k, checks, beta, m)
+        _mfs_record_mode!(solve_reports, boundary, A, x, b, Ac, bc, ps, checks,
+            _mfs_matrix_diagnostics(A; condition_limit); m, rtol, offset_ext, offset_int)
     end
     return P * ext, V * ext, ps,
     int === nothing ? nothing : P_int * int, int === nothing ? nothing : V_int * int
 end
 
 """
-    solve_axial_mfs(boundary::Union{Rigid,PressureRelease}, k, mesh; offset, rtol=1e-6)
+    solve_axial_mfs(boundary::Union{Rigid,PressureRelease,Impedance}, k, mesh; offset, rtol=1e-6)
 
 Axisymmetric MFS solution for a unit-amplitude axial plane wave `e^{ikz}`
 scattering off `boundary`, using one source per panel offset `offset` [m]
@@ -179,13 +294,15 @@ inward along that panel's own normal (see [`mfs_source_points`](@ref)).
 Sources use `source_mesh` (default `mesh`); a coarser source mesh gives a
 least-squares system on the collocation mesh `mesh`.
 `PressureRelease` collocates `p_scat = -p_inc` directly; `Rigid` collocates
-`∂p_scat/∂n = -∂p_inc/∂n`. Returns `(p_scat, dpdn_scat, ps)`, surface
+`∂p_scat/∂n = -∂p_inc/∂n`; `Impedance` collocates the Robin condition
+`∂p_scat/∂n + beta*p_scat = -beta*p_inc - ∂p_inc/∂n` with `beta=ik/zeta`.
+Returns `(p_scat, dpdn_scat, ps)`, surface
 values at the true boundary's panel midpoints, in the same shape
 [`far_field`](@ref)/[`target_strength`](@ref) already accept for the
 axisymmetric BEM, so the exact same postprocessing applies unchanged.
 """
 function solve_axial_mfs(
-        boundary::Union{Rigid, PressureRelease}, k::Real, mesh::MeridianMesh;
+        boundary::Union{Rigid, PressureRelease, Impedance}, k::Real, mesh::MeridianMesh;
         offset::Real, rtol::Real = 1e-6, source_mesh = mesh,
         condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
     p_scat, dpdn_scat, ps, _, _ = _solve_mfs_mode(boundary, k, mesh, 0.0, 0;
@@ -226,7 +343,7 @@ function solve_axial_mfs(boundary::FluidFilled, k::Real, mesh::MeridianMesh;
 end
 
 """
-    solve_oblique_mfs(boundary::Union{Rigid,PressureRelease}, k, mesh, incidence_angle; m_max, offset, rtol=1e-6)
+    solve_oblique_mfs(boundary::Union{Rigid,PressureRelease,Impedance}, k, mesh, incidence_angle; m_max, offset, rtol=1e-6)
 
 Axisymmetric MFS solution for a unit-amplitude plane wave arriving at
 `incidence_angle` [rad] from the x-axis (`0` = axial/end-on, matching
@@ -242,7 +359,7 @@ Returns `(p_scat_modes, dpdn_scat_modes, ps)` in the same shape
 `solve_oblique` already returns, so [`far_field`](@ref)'s bistatic method
 applies unchanged.
 """
-function solve_oblique_mfs(boundary::Union{Rigid, PressureRelease}, k::Real,
+function solve_oblique_mfs(boundary::Union{Rigid, PressureRelease, Impedance}, k::Real,
         mesh::MeridianMesh, incidence_angle::Real;
         m_max::Integer, offset::Real, rtol::Real = 1e-6,
         source_mesh = mesh, condition_limit::Integer = 512, solve_reports = nothing, source_modes = nothing)
@@ -300,16 +417,57 @@ function solve_oblique_mfs(
     return p_scat_modes, dpdn_scat_modes, ps
 end
 
+# Assemble only the operators required by the boundary condition.
+function _mfs_boundary_matrix(boundary, mesh, k, exterior, interior; m, rtol)
+    which = boundary isa Rigid ? Val(:derivative) :
+            boundary isa PressureRelease ? Val(:pressure) : Val(:both)
+    P, V, ps = _assemble_mfs_operators(which, mesh, k, exterior.rho, exterior.z; m, rtol)
+    Pi = Vi = nothing
+    if boundary isa FluidFilled
+        Pi, Vi, _ = assemble_mfs_operators(mesh, k / boundary.soundspeed_contrast,
+            interior.rho, interior.z; m, rtol)
+    end
+    return _mfs_matrix(boundary, P, V, Pi, Vi, k), ps
+end
+
+# A separate call per mode bounds live matrix storage independently of mode count.
+function _mfs_sweep_mode!(amplitudes, reports, boundary, k, mesh, check_mesh,
+        exterior, interior, angles, m; rtol, condition_limit, offset_ext, offset_int)
+    A, ps = _mfs_boundary_matrix(boundary, mesh, k, exterior, interior; m, rtol)
+    Ac, checks = _mfs_boundary_matrix(boundary, check_mesh, k, exterior, interior; m, rtol)
+    metadata = _mfs_matrix_diagnostics(A; condition_limit)
+    # Match dense A\b: pivoted LU for square systems, rank-revealing QR otherwise.
+    factor = size(A, 1) == size(A, 2) ? lu(A) :
+             LinearAlgebra.qr(A, LinearAlgebra.ColumnNorm())
+    ns = length(exterior.rho)
+    for (i, beta) in enumerate(angles)
+        # The ordinary axial mfs call solves only mode zero.
+        m > 0 && iszero(beta) && continue
+        b = _mfs_rhs(boundary, k, ps, beta, m)
+        x = factor \ b
+        bc = _mfs_rhs(boundary, k, checks, beta, m)
+        _mfs_record_mode!(reports[i], boundary, A, x, b, Ac, bc, ps, checks, metadata;
+            m, rtol, offset_ext, offset_int)
+        sources = (; exterior..., coefficients = view(x, 1:ns))
+        amplitudes[i] = _mfs_source_mode_amplitude(
+            amplitudes[i], k, m, sources, pi - beta, pi)
+    end
+    return nothing
+end
+
+function _mfs_source_mode_amplitude(value, k, m, sources, theta, phi)
+    for j in eachindex(sources.coefficients)
+        value += sources.coefficients[j] * (-im)^m / 2 * cos(m * phi) *
+                 besselj(m, k * sources.rho[j] * sin(theta)) *
+                 cis(-k * sources.z[j] * cos(theta))
+    end
+    return value
+end
+
 function _mfs_source_amplitude(k, modes, theta, phi)
     value = zero(ComplexF64)
     for (i, mode) in enumerate(modes)
-        m = i - 1
-        sources = mode.exterior
-        for j in eachindex(sources.coefficients)
-            value += sources.coefficients[j] * (-im)^m / 2 * cos(m * phi) *
-                     besselj(m, k * sources.rho[j] * sin(theta)) *
-                     cis(-k * sources.z[j] * cos(theta))
-        end
+        value = _mfs_source_mode_amplitude(value, k, i - 1, mode.exterior, theta, phi)
     end
     return value
 end

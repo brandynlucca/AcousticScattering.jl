@@ -40,8 +40,7 @@ function target_strength(ps::Vector{Panel}, p_scat::AbstractVector{<:Number},
     return target_strength(far_field(ps, p_scat, dpdn_scat, k, theta))
 end
 
-# --- Bistatic far field from an oblique (multi-Fourier-mode) solution, closed form doesn't apply ---
-# Integrates the exact representation formula numerically over meridional and azimuthal directions.
+# Bistatic far field from cosine Fourier modes, with the azimuth integrated exactly.
 
 """
     far_field(ps::Vector{Panel}, p_scat_modes, dpdn_scat_modes, k, theta, phi)
@@ -57,26 +56,49 @@ function far_field(
         ps::Vector{Panel}, p_scat_modes::AbstractVector{<:AbstractVector{<:Number}},
         dpdn_scat_modes::AbstractVector{<:AbstractVector{<:Number}}, k::Real, theta::Real, phi::Real;
         rtol::Real = 1e-6)
-    m_max = length(p_scat_modes) - 1
+    return _far_field_modes(ps, p_scat_modes, dpdn_scat_modes, k, theta, phi, 0; rtol)
+end
+
+# The same representation for a contiguous batch of Fourier orders. The public
+# evaluator starts at zero; streamed sweeps must retain the actual mode indices.
+function _far_field_modes(ps, p_scat_modes, dpdn_scat_modes, k, theta, phi, first_mode;
+        rtol = 1e-6, return_error = false)
+    m_max = first_mode + length(p_scat_modes) - 1
     sinθ, cosθ = sin(theta), cos(theta)
+    weights = [(-im)^m * cos(m * phi) for m in first_mode:m_max]
     total = zero(ComplexF64)
+    error = 0.0
     for (j, panel) in enumerate(ps)
         integrand_s = s -> begin
             ρt, zt = _panel_point(panel, s)
-            integrand_φ = φ′ -> begin
-                p_val = sum(p_scat_modes[m + 1][j] * cos(m * φ′) for m in 0:m_max)
-                dpdn_val = sum(dpdn_scat_modes[m + 1][j] * cos(m * φ′) for m in 0:m_max)
-                xdotn = sinθ * panel.nrho * cos(φ′ - phi) + cosθ * panel.nz
-                xdoty = ρt * sinθ * cos(φ′ - phi) + zt * cosθ
-                return (im * k * xdotn * p_val + dpdn_val) * cis(-k * xdoty) * ρt
+            u = k * ρt * sinθ
+            # Integral cos(m*φ′)*exp(-im*u*cos(φ′-phi)) dφ′
+            # = 2π*(-im)^m*cos(m*phi)*J_m(u). The radial-normal term
+            # follows by differentiating in u. Adjacent orders avoid division
+            # by u at the poles; evaluate J_m directly, since upward recurrence
+            # is unstable when the retained order substantially exceeds |u|.
+            previous = first_mode == 0 ? zero(u) : besselj(first_mode - 1, u)
+            current, following = besselj(first_mode, u), besselj(first_mode + 1, u)
+            value = zero(ComplexF64)
+            for m in first_mode:m_max
+                derivative = m == 0 ? -following : (previous - following) / 2
+                index = m - first_mode + 1
+                p, dp = p_scat_modes[index][j], dpdn_scat_modes[index][j]
+                value += weights[index] *
+                         ((dp + im*k*cosθ*panel.nz*p)*current -
+                          k*sinθ*panel.nrho*p*derivative)
+                if m < m_max
+                    previous, current = current, following
+                    following = besselj(m + 2, u)
+                end
             end
-            val, _ = quadgk(integrand_φ, 0.0, 2π; rtol = rtol)
-            return val * panel.L
+            return value * ρt * cis(-k*zt*cosθ) * panel.L
         end
-        val, _ = quadgk(integrand_s, 0.0, 1.0; rtol = rtol)
+        val, estimate = quadgk(integrand_s, 0.0, 1.0; rtol = rtol)
         total += val
+        error += estimate
     end
-    return -total / (4π)
+    return return_error ? (-total / 2, error / 2) : -total / 2
 end
 
 """

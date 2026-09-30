@@ -46,6 +46,27 @@ function _slice_colorrange(values, field::Symbol)
     return lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
 end
 
+_slice_pressure(sol, points, field) = AcousticScattering.pressure(sol, points; field)
+
+# A plane can cross a rigid/soft target, where acoustic pressure is undefined.
+# Mask that region explicitly, without hiding errors in exterior field evaluation.
+function _slice_pressure(
+        sol::Union{BEMSolution{AcousticScattering._FullBEMSurfaceData},
+            MFSSolution{AcousticScattering._FullMFSSurfaceData}},
+        points,
+        field)
+    mask_interior = field === :scattered ||
+                    (field === :total && sol.boundary isa Union{Rigid, PressureRelease})
+    mask_interior || return AcousticScattering.pressure(sol, points; field)
+    patches = AcousticScattering._region_patches(sol.data.quad, 0)
+    keep = map(points) do point
+        AcousticScattering._surface_location(patches, point) !== :inside
+    end
+    values = fill(ComplexF64(NaN, NaN), size(points))
+    any(keep) && (values[keep] = AcousticScattering.pressure(sol, points[keep]; field))
+    return values
+end
+
 function _slice_body_wireframe!(ax, sol, scale)
     render = _solution_render(sol, nothing)
     if render[1] === :revolved
@@ -113,7 +134,7 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
     coordinates, values = Any[], Any[]
     for spec in specs
         points, projected = _slice_sample(sol, spec, grid)
-        sampled = AcousticScattering.pressure(sol, points; field = pressure_field)
+        sampled = _slice_pressure(sol, points, pressure_field)
         push!(coordinates, projected)
         push!(values, _field_values(sampled, field))
     end
@@ -144,7 +165,8 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
     end
     legend && marked && axislegend(ax; position = :lt)
 
-    if incident_arrow
+    plane_wave = !_prescribed_illumination(sol)
+    if incident_arrow && plane_wave
         direction = _slice_incident_direction(sol)
         tail = Point3f(-0.96f0 * Float32(bound) .* direction)
         vector = 0.46f0 * Float32(bound) .* direction
@@ -154,7 +176,8 @@ function _plot_solution(sol::AbstractSolution, ::Val{:field_slices}; slices,
     end
     if colorbar
         Colorbar(fig[1, 2], first(plots);
-            label = _pressure_label(field; scattered = pressure_field === :scattered))
+            label = _pressure_label(field; scattered = pressure_field === :scattered,
+                prescribed = !plane_wave))
         colgap!(fig.layout, 1, 60)
     end
     return Makie.FigureAxisPlot(fig, ax, first(plots))

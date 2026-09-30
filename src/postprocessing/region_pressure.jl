@@ -40,7 +40,6 @@ function _pressure_values(solution::BEMSolution{_RegionBEMData}, points, field, 
                for point in points]
     field === :incident && return incident
     values = zeros(ComplexF64, length(points))
-    direction = _bem3d_incidence_direction(solution.data.incidence_angle, solution.data.incidence_azimuth)
     for region in unique(regions)
         rows = findall(==(region), regions)
         targets = points[rows]
@@ -54,9 +53,8 @@ function _pressure_values(solution::BEMSolution{_RegionBEMData}, points, field, 
             dp = inside ? interface.normal_derivative_interior :
                  interface.normal_derivative_exterior
             if region == 0
-                pinc = [_incident_pressure(solution, q.coords) for q in quad]
-                dpinc = [im * k * dot(direction, q.normal) * pinc[i]
-                         for (i, q) in enumerate(quad)]
+                pinc, dpinc = _incident_traces(quad, k, solution.data.incidence_angle,
+                    solution.data.incidence_azimuth, solution.data.incident)
                 p = p - pinc
                 dp = dp - dpinc
             end

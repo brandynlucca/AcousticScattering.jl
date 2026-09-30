@@ -263,7 +263,8 @@ function _plot_solution(sol::AbstractSolution, ::Val{:surface_field};
     incident_arrow && _add_incident_arrow!(result.axis, sol, _render_points(render))
     if colorbar
         Colorbar(result.figure[1, 2], first(result.plot.plots);
-            label = _pressure_label(field; scattered = true))
+            label = _pressure_label(field; scattered = true,
+                prescribed = _prescribed_illumination(sol)))
         colgap!(result.figure.layout, 1, 70)
     end
     return result

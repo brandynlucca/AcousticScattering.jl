@@ -29,7 +29,14 @@ function _default_colorrange(ts::AbstractArray)
 end
 
 # Colorbar label for a plotted pressure `field`, of the scattered or the total pressure.
-function _pressure_label(field::Symbol; scattered::Bool = false)
+function _pressure_label(field::Symbol; scattered::Bool = false, prescribed::Bool = false)
+    if prescribed
+        symbol = scattered ? "p_scatter" : "p"
+        field === :pressure_phase && return "arg($symbol) (rad)"
+        field === :pressure_real && return "Re($symbol) (supplied normalization)"
+        field === :pressure_imag && return "Im($symbol) (supplied normalization)"
+        return "|$symbol| (supplied normalization)"
+    end
     if scattered
         field === :pressure_phase && return L"\arg(p_\mathrm{scatter})~(\mathrm{rad})"
         field === :pressure_real &&
@@ -44,4 +51,9 @@ function _pressure_label(field::Symbol; scattered::Bool = false)
     field === :pressure_imag &&
         return L"\mathrm{Im}(p / p_\mathrm{incident})~(\mathrm{dimensionless})"
     return L"|p| / |p_\mathrm{incident}|~(\mathrm{dimensionless})"
+end
+
+function _prescribed_illumination(sol)
+    report = AcousticScattering.diagnostics(sol)
+    return report !== nothing && get(report, :illumination, :plane_wave) === :prescribed
 end

@@ -233,13 +233,15 @@ function _solution_render(
     return _mesh_render(AcousticScattering.mesh(sol.body; k = sol.k))
 end
 
-function _solution_render(
-        sol::AcousticScattering.FEMSolution{AcousticScattering._SpheroidMeridianFEMData},
-        field::Union{Nothing, Symbol})
-    field === nothing || throw(ArgumentError(
-        "Surface-field plotting is not available for spheroid meridian FEM: retained " *
-        "traces are on the enclosing DtN boundary. Use kind=:mesh for the body shape."))
-    return _mesh_render(AcousticScattering.mesh(sol.body; k = sol.k))
+if isdefined(AcousticScattering, :_SpheroidMeridianFEMData)
+    function _solution_render(
+            sol::AcousticScattering.FEMSolution{AcousticScattering._SpheroidMeridianFEMData},
+            field::Union{Nothing, Symbol})
+        field === nothing || throw(ArgumentError(
+            "Surface-field plotting is not available for spheroid meridian FEM: retained " *
+            "traces are on the enclosing DtN boundary. Use kind=:mesh for the body shape."))
+        return _mesh_render(AcousticScattering.mesh(sol.body; k = sol.k))
+    end
 end
 
 function _mesh_render(m::AcousticScattering.Mesh{AcousticScattering.MeridianMesh})

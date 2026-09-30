@@ -30,8 +30,10 @@ Locally reacting boundary with specific acoustic impedance ratio `zeta = Z/(ρc)
 and relative to the exterior fluid, under the `exp(-iωt)` convention `∂p/∂n = -ik p/zeta` at the
 surface. `zeta` must have a nonnegative real part (a passive, non-generating boundary) and be
 nonzero. [`Rigid`](@ref) and [`PressureRelease`](@ref) are its `zeta → ∞` and `zeta → 0` limits.
-Supported by `modal(Sphere, ...)` and by `bem(...; method = :axisymmetric)` at axial incidence.
-The direct BEM solve becomes ill-conditioned as `zeta → 0`; use [`PressureRelease`](@ref) there.
+Supported by `modal(Sphere, ...)` and by `bem(...; method = :axisymmetric)` on
+`Sphere`/`Spheroid`/straight `Cylinder`, at any incidence angle, including
+[`incidence_angle_sweep`](@ref)'s factorized reuse. The direct BEM solve becomes
+ill-conditioned as `zeta → 0`. Use [`PressureRelease`](@ref) there.
 """
 struct Impedance <: AbstractBoundaryCondition
     zeta::ComplexF64

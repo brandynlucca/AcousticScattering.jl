@@ -163,7 +163,8 @@ for (kind, default_field) in ((:mesh, nothing), (:surface_field, :pressure_magni
                 p -> p isa Makie.Mesh && p.color[] isa AbstractVector{<:Real},
                 result.plot.plots))
             Colorbar(result.figure[1, 2]; colormap = result.plot.colormap[],
-                limits = field_mesh.colorrange[], label = _pressure_label(field))
+                limits = field_mesh.colorrange[],
+                label = _pressure_label(field; prescribed = _prescribed_illumination(sol)))
             colgap!(result.figure.layout, 1, 70)
         end
         incident_arrow && _add_incident_arrow!(result.axis, sol,

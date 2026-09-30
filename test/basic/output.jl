@@ -56,11 +56,14 @@ let
             :ViscoelasticSolid, :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer,
             :LayeredMaterial, :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder,
             :Spheroid, :Shell, :Irregular, :IncidentField, :PlaneWave, :SphericalWave,
-            :BesselBeam, :AbstractSolution, :ModalSolution, :TMatrixSolution,
+            :BesselBeam, :AbstractTransducer, :Transducer, :Wall, :TankTransducer,
+            :AbstractSolution, :ModalSolution, :TMatrixSolution,
             :KirchhoffSolution, :FEMSolution,
             :BEMSolution, :MFSSolution, :FMSolution, :FreeSurfaceSolution, :modal, :tmatrix,
             :kirchhoff, :fem, :bem, :mfs, :fourier, :free_surface,
-            :target_strength, :scattering_amplitude, :pressure, :diagnostics, :Mesh, :mesh,
+            :target_strength, :scattering_amplitude, :pressure, :diagnostics, :received_signal,
+            :time_synthesis, :gaussian_pulse,
+            :Mesh, :mesh,
             :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
         @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
         for name in expected

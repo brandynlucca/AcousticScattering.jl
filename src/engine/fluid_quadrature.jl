@@ -61,9 +61,11 @@ function _regular_helmholtz_traces(point, center, radius, k, degree)
 end
 
 """
-    _fluid_layer_operators(op, target, source, correction; derivative=false, regular=true)
+    _fluid_layer_operators(op, target, source, correction;
+                          derivative=false, regular=true, compression=(method=:none,))
 
-Dense fluid layer quadrature. At low frequency, correct nearby interactions using
+Fluid layer quadrature, dense by default or hierarchical with `compression=(method=:hmatrix,)`.
+At low frequency, correct nearby interactions using
 regular Helmholtz solutions and a scaled minimum-norm fit to each element's traces.
 The complete harmonic space has at most twice the element's quadrature-node count.
 The Green-identity correction follows Faria, Pérez-Arancibia and Bonnet (2021),
@@ -75,7 +77,9 @@ unbounded raw kernel entries as a target approaches a source quadrature node.
 """
 function _fluid_layer_operators(
         op, target, source, correction; derivative = false, regular = true,
-        exclude_nearest = false)
+        exclude_nearest = false, compression = (method = :none,))
+    exclude_nearest && compression.method !== :none &&
+        throw(ArgumentError("nearest-element exclusion requires dense operators"))
     bounds = _fluid_quadrature_size(source)
     center, radius = bounds.center, bounds.radius
     eligible = regular && correction.method === :dim &&
@@ -83,9 +87,9 @@ function _fluid_layer_operators(
                op.k*maximum(q -> norm(q.coords-center), target) <= 2
     (eligible || exclude_nearest) ||
         return Inti.single_double_layer(; op, target, source, derivative,
-            compression = (method = :none,), correction)
+            compression, correction)
     S, D = Inti.single_double_layer(; op, target, source, derivative,
-        compression = (method = :none,), correction = (method = :none,))
+        compression, correction = (method = :none,))
     near = Inti.etype_to_nearest_points(target, source; maxdist = get(correction, :maxdist, Inf))
     location = target === source ? :on : correction.target_location
     location in (:on, :inside, :outside) ||
@@ -115,6 +119,8 @@ function _fluid_layer_operators(
              q, center, radius, op.k, degree)[derivative ? 2 : 1]) for q in target])
     mul!(defect, S, flux, 1, 1)
     mul!(defect, D, pressure, -1, 1)
+    correction_rows, correction_cols = Int[], Int[]
+    correction_S, correction_D = ComplexF64[], ComplexF64[]
     for (element, tags) in source.etype2qtags
         nq, ne = size(tags)
         for e in 1:ne
@@ -128,9 +134,30 @@ function _fluid_layer_operators(
             weights = (factor.V[:, keep] *
                        ((factor.U[:, keep]' * transpose(defect[rows, :])) ./
                         factor.S[keep])) ./ scales
-            S[rows, columns] .-= transpose(weights[(nq + 1):2nq, :])
-            D[rows, columns] .+= transpose(weights[1:nq, :])
+            if compression.method === :none
+                S[rows, columns] .-= transpose(weights[(nq + 1):2nq, :])
+                D[rows, columns] .+= transpose(weights[1:nq, :])
+            else
+                for (j, col) in enumerate(columns), (i, row) in enumerate(rows)
+
+                    push!(correction_rows, row)
+                    push!(correction_cols, col)
+                    push!(correction_S, -weights[nq + j, i])
+                    push!(correction_D, weights[j, i])
+                end
+            end
         end
+    end
+    if compression.method !== :none
+        dS = sparse(
+            correction_rows, correction_cols, correction_S, length(target), length(source))
+        dD = sparse(
+            correction_rows, correction_cols, correction_D, length(target), length(source))
+        if target !== source
+            return LinearMap(S) + LinearMap(dS), LinearMap(D) + LinearMap(dD)
+        end
+        LinearAlgebra.axpy!(true, dS, S)
+        LinearAlgebra.axpy!(true, dD, D)
     end
     return S, D
 end

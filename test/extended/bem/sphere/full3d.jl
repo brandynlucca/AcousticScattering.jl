@@ -182,7 +182,7 @@ let
                 actual = scattering_amplitude(solution)
                 @test diagnostics(solution).formulation == form
                 @test diagnostics(solution).unknown_count ==
-                      (form == :muller ? 2 : 4) * diagnostics(solution).quadrature_nodes
+                      2 * diagnostics(solution).quadrature_nodes
                 @test abs(target_strength(actual) - target_strength(reference)) < 0.1
                 @test abs(actual - reference) / abs(reference) < 0.01
             end

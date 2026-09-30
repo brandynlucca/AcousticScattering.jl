@@ -17,6 +17,22 @@ using Test
         end
     end
 
+    @testset "Impedance (locally reacting) boundary" begin
+        rigid = mfs(body, Rigid(), k; incidence_angle = 0.3, n = 40, offset = 0.2)
+        hard = mfs(body, Impedance(1e6), k; incidence_angle = 0.3, n = 40, offset = 0.2)
+        @test scattering_amplitude(hard) ≈ scattering_amplitude(rigid) rtol = 1e-4
+
+        zeta = 1.3 - 0.6im
+        reference = modal(body, Impedance(zeta), k; m_max = 30)
+        solution = mfs(body, Impedance(zeta), k; incidence_angle = 0.3, n = 40,
+            m_max = 20, offset = 0.2)
+        @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 1e-2
+
+        axial = mfs(body, Impedance(zeta), k; incidence_angle = 0.0, n = 40, offset = 0.2)
+        @test axial isa MFSSolution
+        @test isfinite(target_strength(axial))
+    end
+
     @testset "Full-surface source placement" begin
         collocation = mesh(Sphere(0.5); method = :full,
             resolution = 0.8, mesh_order = 2, qorder = 2)

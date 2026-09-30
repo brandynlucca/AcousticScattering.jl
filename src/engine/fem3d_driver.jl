@@ -264,9 +264,14 @@ function _volume_system_single(body::Union{Sphere, Spheroid}, boundary, k::Real;
 end
 
 function _fem_volume(body::Union{Sphere, Spheroid}, boundary, k::Real;
-        incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0, kwargs...)
+        incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
+        transducer::Union{Nothing, AbstractTransducer} = nothing, incident = nothing, kwargs...)
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
     system = _volume_system_single(body, boundary, k; kwargs...)
-    return _volume_solution(system, incidence_angle, incidence_azimuth)
+    field === nothing &&
+        return _volume_solution(system, incidence_angle, incidence_azimuth)
+    return _volume_solution(
+        system, field.pressure, field.gradient, incidence_angle, incidence_azimuth)
 end
 
 # Rotation taking the z axis to the unit vector `axis`.
@@ -434,7 +439,11 @@ function _volume_system_regions(bodies, materials, k::Real;
 end
 
 function _fem_volume_regions(bodies, materials, k::Real; incidence_angle::Real = π / 2,
-        incidence_azimuth::Real = 0.0, kwargs...)
+        incidence_azimuth::Real = 0.0, incident = nothing,
+        transducer::Union{Nothing, AbstractTransducer} = nothing, kwargs...)
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
     system = _volume_system_regions(bodies, materials, k; kwargs...)
-    return _volume_solution(system, incidence_angle, incidence_azimuth)
+    field === nothing && return _volume_solution(system, incidence_angle, incidence_azimuth)
+    return _volume_solution(
+        system, field.pressure, field.gradient, incidence_angle, incidence_azimuth)
 end

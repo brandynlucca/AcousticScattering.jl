@@ -39,7 +39,22 @@ using Test
             @test scattering_amplitude(solution) ≈
                   scattering_amplitude(reference) rtol = 1e-2
         end
-        @test_throws MethodError bem(body, Impedance(1.0), k; incidence_angle = 0.3, n = 8)
+
+        @testset "Oblique incidence" begin
+            zeta, incidence_angle = 1.3 - 0.6im, 0.3
+            reference = modal(body, Impedance(zeta), k; m_max = 40)
+            solution = bem(body, Impedance(zeta), k; incidence_angle, n = 40, m_max = 30)
+            @test scattering_amplitude(solution) ≈
+                  scattering_amplitude(reference) rtol = 1e-2
+            angles = [0.2, incidence_angle, 1.4]
+            sweep = incidence_angle_sweep(body, Impedance(zeta), k, angles;
+                n = 40, m_max = 30, method = :axisymmetric)
+            for (i, angle) in enumerate(angles)
+                fresh = bem(
+                    body, Impedance(zeta), k; incidence_angle = angle, n = 40, m_max = 30)
+                @test sweep.amplitudes[i] ≈ scattering_amplitude(fresh) rtol = 1e-12
+            end
+        end
     end
 
     @testset "Fluid shells" begin

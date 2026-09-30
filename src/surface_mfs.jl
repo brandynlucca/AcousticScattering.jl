@@ -4,18 +4,25 @@ struct _FullMFSSurfaceData
     coefficients::Vector{ComplexF64}
     incidence_angle::Float64
     incidence_azimuth::Float64
+    pinc::Any
     diagnostics::NamedTuple
+    incident::Union{Nothing, IncidentField}
 end
 
-function _surface_mfs_system(quad, sources, boundary, k, incident)
+function _FullMFSSurfaceData(quad, sources, coefficients, beta, alpha, pinc, report)
+    _FullMFSSurfaceData(quad, sources, coefficients, beta, alpha, pinc, report, nothing)
+end
+
+_incident_pressure(sol::MFSSolution{_FullMFSSurfaceData}, point) = sol.data.pinc(point)
+
+function _surface_mfs_system(quad, sources, boundary, k, pinc, gradinc)
     points = [Tuple(q.coords) for q in quad]
     normals = [Tuple(q.normal) for q in quad]
     matrix = Matrix{ComplexF64}(undef, length(quad), length(sources))
     rhs = Vector{ComplexF64}(undef, length(quad))
     Threads.@threads for i in eachindex(points)
-        pressure = cis(k * _dot3(incident, points[i]))
-        rhs[i] = boundary isa PressureRelease ? -pressure :
-                 -im * k * _dot3(incident, normals[i]) * pressure
+        rhs[i] = boundary isa PressureRelease ? -pinc(points[i]) :
+                 -_dot3(gradinc(points[i]), normals[i])
         for j in eachindex(sources)
             matrix[i, j] = boundary isa PressureRelease ?
                            _green3d(k, points[i], sources[j]) :
@@ -44,13 +51,19 @@ on the same body evaluates the boundary residual away from collocation points.
 
 Incidence uses the full-BEM convention, `(cos(β), sin(β)cos(α), sin(β)sin(α))`.
 `scattering_amplitude(solution; direction)` evaluates the outgoing sources' far-field
-amplitude [m] directly; the default direction is monostatic backscatter.
+amplitude [m] directly; the default direction is monostatic backscatter for a plane wave.
+Use `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)` (also
+[`TankTransducer`](@ref)) for prescribed illumination. The callables and transducer
+positions use the surface's Cartesian frame in meters. Incidence angles then specify
+only the default observation direction; use `direction` or [`received_signal`](@ref).
 """
 function mfs(
         surface::Mesh{<:Inti.Quadrature}, boundary::Union{Rigid, PressureRelease}, k::Real;
         offset::Real, source_mesh::Mesh{<:Inti.Quadrature} = surface,
         check_mesh::Union{Nothing, Mesh{<:Inti.Quadrature}} = nothing,
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
+        transducer::Union{Nothing, AbstractTransducer} = nothing,
+        incident = nothing,
         condition_limit::Integer = 512)
     isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
     isfinite(offset) && offset > 0 ||
@@ -58,18 +71,25 @@ function mfs(
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     length(source_mesh.data) <= length(surface.data) || throw(ArgumentError(
         "source_mesh must not have more points than the collocation surface"))
-    incident = Tuple(_bem3d_incidence_direction(incidence_angle, incidence_azimuth))
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
+    pinc, gradinc = if field === nothing
+        direction = Tuple(_bem3d_incidence_direction(incidence_angle, incidence_azimuth))
+        _plane_wave_incident(k, direction)
+    else
+        field.pressure, field.gradient
+    end
     sources = [Tuple(q.coords - offset * q.normal) for q in source_mesh.data]
-    matrix, rhs = _surface_mfs_system(surface.data, sources, boundary, k, incident)
+    matrix, rhs = _surface_mfs_system(surface.data, sources, boundary, k, pinc, gradinc)
     coefficients = matrix \ rhs
     boundary_residual = if check_mesh === nothing
         nothing
     else
         check_matrix, check_rhs = _surface_mfs_system(
-            check_mesh.data, sources, boundary, k, incident)
+            check_mesh.data, sources, boundary, k, pinc, gradinc)
         _linear_residual(check_matrix, coefficients, check_rhs)
     end
     report = (; method = size(matrix, 1) == size(matrix, 2) ? :direct : :least_squares,
+        illumination = field === nothing ? :plane_wave : :prescribed,
         discretization = :full,
         converged = nothing, iterations = nothing, residual_history = nothing,
         _linear_residual(matrix, coefficients, rhs)...,
@@ -80,7 +100,7 @@ function mfs(
         solver_options = (; offset, incidence_angle, incidence_azimuth))
     data = _FullMFSSurfaceData(
         surface.data, sources, coefficients, Float64(incidence_angle),
-        Float64(incidence_azimuth), report)
+        Float64(incidence_azimuth), pinc, report, field)
     return MFSSolution(surface.body, boundary, Float64(k), data)
 end
 

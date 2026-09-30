@@ -329,7 +329,12 @@ end
 # Dot product of a vector with a three-component vector or tensor.
 _dot3(a, b) = a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
 
-_volume_incident(x, k, direction) = cis(k * _dot3(direction, x))
+# Pointwise plane-wave `pinc(x)`/`gradinc(x)`, shared across solvers, matches to rounding, not bit-for-bit.
+function _plane_wave_incident(k, direction)
+    pinc = x -> cis(k * _dot3(direction, x))
+    gradinc = x -> (im * k) .* direction .* pinc(x)
+    return pinc, gradinc
+end
 
 # Unit vector of the incident wave direction in the solution frame.
 function _volume_direction(incidence_angle, incidence_azimuth)
@@ -520,8 +525,8 @@ function _volume_matrices(grid, labels, ids, facets, k, model, pml)
     return _VolumeMatrices(stiff_total, mass_total)
 end
 
-# Load of the incident plane wave travelling along `direction` on the scattered pressure and displacement unknowns.
-function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
+# Load of a general incident field, given pointwise `pinc(x)`/`gradinc(x)`.
+function _volume_load(grid, labels, ids, facets, model, n_nodes, pinc, gradinc)
     load = zeros(ComplexF64, 4n_nodes)
     cv = Ferrite.CellValues(_VOLUME_QR_CELL, _VOLUME_IP, _VOLUME_GIP)
     nb = Ferrite.getnbasefunctions(cv)
@@ -535,12 +540,12 @@ function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
         for q in 1:Ferrite.getnquadpoints(cv)
             dV = Ferrite.getdetJdV(cv, q)
             x = Ferrite.spatial_coordinate(cv, q, coords)
-            pinc = _volume_incident(x, k, direction)
+            p, dp = pinc(x), gradinc(x)
             for i in 1:nb
                 g = Ferrite.shape_gradient(cv, q, i)
-                gradient = im * k * pinc * _dot3(direction, g)
+                gradient = _dot3(dp, g)
                 load[_pressure_dof(cell.nodes[i])] -= (gradient -
-                                                       wavenumber^2 * pinc *
+                                                       wavenumber^2 * p *
                                                        Ferrite.shape_value(cv, q, i)) * dV /
                                                       density
             end
@@ -550,8 +555,7 @@ function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
     if model.kind === :rigid
         _facet_loop(grid, facets[:fluid_bare]) do nodes, N, x, n, dS
             for (i, node) in enumerate(nodes)
-                load[_pressure_dof(node)] -= im * k * _dot3(direction, n) *
-                                             _volume_incident(x, k, direction) * N[i] * dS
+                load[_pressure_dof(node)] -= _dot3(gradinc(x), n) * N[i] * dS
             end
         end
     end
@@ -559,8 +563,7 @@ function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
     if model.kind in (:fluid, :regions)
         _facet_loop(grid, facets[:fluid_interior]) do nodes, N, x, n, dS
             for (i, node) in enumerate(nodes)
-                load[_pressure_dof(node)] += im * k * _dot3(direction, n) *
-                                             _volume_incident(x, k, direction) * N[i] * dS
+                load[_pressure_dof(node)] += _dot3(gradinc(x), n) * N[i] * dS
             end
         end
     end
@@ -568,13 +571,12 @@ function _volume_load(grid, labels, ids, facets, k, model, n_nodes, direction)
         for (list, is_exterior) in ((facets[:solid_fluid], true), (
             facets[:solid_interior], false))
             _facet_loop(grid, list) do nodes, N, x, n, dS
-                pinc = _volume_incident(x, k, direction)
+                p = pinc(x)
                 for (i, ni) in enumerate(nodes)
                     is_exterior &&
-                        (load[_pressure_dof(ni)] += im * k * _dot3(direction, n) *
-                                                    pinc * N[i] * dS)
+                        (load[_pressure_dof(ni)] += _dot3(gradinc(x), n) * N[i] * dS)
                     for c in 1:3
-                        load[_displacement_dof(n_nodes, ni, c)] -= pinc * n[c] * N[i] * dS
+                        load[_displacement_dof(n_nodes, ni, c)] -= p * n[c] * N[i] * dS
                     end
                 end
             end
@@ -685,6 +687,7 @@ struct _VolumeFEMData
     rotation::Matrix{Float64}
     incidence_angle::Float64
     incidence_azimuth::Float64
+    pinc::Any
     diagnostics::NamedTuple
     system::Any
     solution::Vector{ComplexF64}
@@ -896,13 +899,20 @@ end
 # Scattered-pressure solution for a plane wave incident from the polar and azimuthal angles, in the frame of the bodies.
 function _volume_solution(system::_VolumeSystem, incidence_angle::Real, incidence_azimuth::Real)
     direction = _volume_direction(incidence_angle, incidence_azimuth)
-    k, n_nodes = system.k, system.n_nodes
-    load = _volume_load(system.grid, system.labels, system.ids, system.facets, k,
-        system.model, n_nodes, direction)
+    pinc, gradinc = _plane_wave_incident(system.k, direction)
+    return _volume_solution(system, pinc, gradinc, incidence_angle, incidence_azimuth;
+        illumination = :plane_wave)
+end
+
+# General incident field. Angle args are only kept as default-observation metadata.
+function _volume_solution(system::_VolumeSystem, pinc, gradinc,
+        incidence_angle::Real, incidence_azimuth::Real; illumination::Symbol = :prescribed)
+    n_nodes = system.n_nodes
+    load = _volume_load(system.grid, system.labels, system.ids, system.facets,
+        system.model, n_nodes, pinc, gradinc)
     values = zeros(ComplexF64, length(system.fixed))
     for (i, dof) in enumerate(system.fixed)
-        system.soft[i] &&
-            (values[i] = -_volume_incident(system.grid.nodes[dof].x, k, direction))
+        system.soft[i] && (values[i] = -pinc(system.grid.nodes[dof].x))
     end
     rhs = load[system.free]
     isempty(values) || (rhs -= system.fixed_matrix * values)
@@ -918,7 +928,8 @@ function _volume_solution(system::_VolumeSystem, incidence_angle::Real, incidenc
     else
         (ComplexF64[], ComplexF64[], _volume_extraction(system.extraction, solution))
     end
-    diagnostics = merge(system.diagnostics, (; residual, info.solver, info.iterations))
+    diagnostics = merge(system.diagnostics, (;
+        residual, info.solver, info.iterations, illumination))
     return _VolumeFEMData(positive, negative, system.R, system.L, shell, system.rotation,
-        Float64(incidence_angle), Float64(incidence_azimuth), diagnostics, system, solution)
+        Float64(incidence_angle), Float64(incidence_azimuth), pinc, diagnostics, system, solution)
 end

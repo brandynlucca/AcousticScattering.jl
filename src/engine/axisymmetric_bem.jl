@@ -1,6 +1,6 @@
 # Fourier-mode acoustic BEM on piecewise-linear meridians for rigid, soft and fluid boundaries.
 
-using QuadGK: quadgk, gauss
+using QuadGK: quadgk, gauss, alloc_segbuf
 
 """
     MeridianMesh(rho, z)
@@ -320,9 +320,36 @@ end
 
 # Integrates `integrand(Δφ)` over [0,π]. The substitution `Δφ = scale * sinh(τ)` makes the near-singular peak at Δφ = 0 smooth.
 function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ2::Real,
-        z2::Real, rtol::Real, atol::Real)
+        z2::Real, rtol::Real, atol::Real, workspace = nothing)
     scale = clamp(hypot(ρ - ρ2, z - z2) / sqrt(ρ * ρ2), _RING_PEAK_FLOOR, _RING_PEAK_CEILING)
     upper = asinh(π / scale)
+    if workspace !== nothing
+        points = workspace.breaks
+        # Start with full-cycle intervals; the embedded error estimate refines
+        # wherever the kernel or the coordinate map needs more nodes.
+        resize!(points, max(cld(m, 2) + 1, 2))
+        for j in eachindex(points)
+            points[j] = asinh(2(j - 1) * π / (max(m, 1) * scale))
+        end
+        points[end] = upper
+        # Passing the endpoints as an array avoids specializing on every mode's
+        # breakpoint count. Only storage is reused; every integral is reevaluated.
+        transformed = τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ))
+        val, error = quadgk(transformed,
+            points; rtol, atol, segbuf = workspace.azimuthal,
+            maxevals = _AZIMUTHAL_MAXEVALS)
+        (m <= 1 || error <= max(atol, rtol * norm(val))) && return val
+
+        # Preserve the former capped result when the coarser start cannot meet
+        # its error target. The fallback has the original grid and its own cap.
+        resize!(points, max(m + 1, 2))
+        for j in eachindex(points)
+            points[j] = asinh((j - 1) * π / (m * scale))
+        end
+        points[end] = upper
+        return quadgk(transformed, points; rtol, atol, segbuf = workspace.azimuthal,
+            maxevals = _AZIMUTHAL_MAXEVALS)[1]
+    end
     val, _ = quadgk(τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ)),
         _azimuthal_sinh_breakpoints(m, scale, upper)...; rtol = rtol, atol = atol,
         maxevals = _AZIMUTHAL_MAXEVALS)
@@ -330,20 +357,24 @@ function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ
 end
 
 # Calls `f(i)` for every row `i` in `1:n`. Threads take one row at a time so uneven row costs stay balanced.
-function _foreach_row(f, n::Integer)
+_foreach_row(f, n::Integer) = _foreach_row((i, _) -> f(i), n, () -> nothing)
+
+# Scratch belongs to the task, so migration between threads cannot alias buffers.
+function _foreach_row(f, n::Integer, make_workspace)
     if Threads.nthreads() == 1 || n < 2
+        workspace = make_workspace()
         for i in 1:n
-            f(i)
+            f(i, workspace)
         end
         return nothing
     end
     next = Threads.Atomic{Int}(0)
     Threads.@sync for _ in 1:min(Threads.nthreads(), n)
-        Threads.@spawn begin
+        Threads.@spawn let workspace = make_workspace()
             while true
                 i = Threads.atomic_add!(next, 1) + 1
                 i > n && break
-                f(i)
+                f(i, workspace)
             end
         end
     end
@@ -351,17 +382,18 @@ function _foreach_row(f, n::Integer)
 end
 
 # Integrates `node(s)` over a panel. A self pair uses cubic maps of each half to remove the singularity at the collocation point.
-function _meridian_quadrature(node, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real)
+function _meridian_quadrature(node, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real;
+        segbuf = nothing)
     if self
         left = quadgk(t -> node(0.5 - 0.5 * t^3) * (1.5 * t^2), 0.0, 1.0;
-            rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+            rtol = rtol, atol = _QUAD_ATOL, segbuf, maxevals = _AZIMUTHAL_MAXEVALS)[1]
         right = quadgk(t -> node(0.5 + 0.5 * t^3) * (1.5 * t^2), 0.0, 1.0;
-            rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+            rtol = rtol, atol = _QUAD_ATOL, segbuf, maxevals = _AZIMUTHAL_MAXEVALS)[1]
         return left + right
     end
     bp = _quadgk_breakpoints(xρ, xz, pj, self)
     return quadgk(
-        node, bp...; rtol = rtol, atol = _QUAD_ATOL, maxevals = _AZIMUTHAL_MAXEVALS)[1]
+        node, bp...; rtol = rtol, atol = _QUAD_ATOL, segbuf, maxevals = _AZIMUTHAL_MAXEVALS)[1]
 end
 
 function _ring_distance(ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
@@ -673,6 +705,21 @@ end
     return SVector(-(im * k - 1 / r) * G * proj / r, G)
 end
 
+# Terms independent of azimuth, shared by all nodes of one ring integral.
+@inline function _ring_geometry(ρ, z, ρ2, z2, nρ2, projection)
+    return (; delta_rho = ρ - ρ2, delta_z = z - z2,
+        chord = 2sqrt(ρ * ρ2), normal_factor = 2nρ2 * ρ, projection)
+end
+
+@inline function _ring_KV_precomputed(k, geometry, half_sin)
+    r = hypot(geometry.delta_rho, geometry.delta_z, geometry.chord * half_sin)
+    r < _RING_DISTANCE_FLOOR && return SVector(zero(ComplexF64), zero(ComplexF64))
+    inverse_r = inv(r)
+    G = cis(k * r) * (inverse_r / (4π))
+    projection = geometry.projection - geometry.normal_factor * half_sin^2
+    return SVector((inverse_r - im * k) * G * (projection * inverse_r), G)
+end
+
 # `cos(m x)` for `m = m0, m0 + 1, …` by the Chebyshev recurrence, with entries past `count` set to zero.
 @inline function _cos_multiples(x::Real, m0::Integer, count::Integer, ::Val{N}) where {N}
     c = MVector{N, Float64}(undef)
@@ -680,11 +727,13 @@ end
     if N > 1
         c[2] = cos((m0 + 1) * x)
         twocos = 2cos(x)
-        for i in 3:N
+        # The fixed-width recurrence stays on the stack when bounds checks cannot
+        # expose the mutable temporary through an exception path.
+        @inbounds for i in 3:N
             c[i] = twocos * c[i - 1] - c[i - 2]
         end
     end
-    for i in (count + 1):N
+    @inbounds for i in (count + 1):N
         c[i] = 0.0
     end
     return SVector(c)
@@ -698,13 +747,31 @@ end
     return vcat(kv[1] * c, kv[2] * c)
 end
 
+@inline function _ring_KV_modes(k, geometry, Δφ, m0, count, width::Val)
+    kv = _ring_KV_precomputed(k, geometry, sin(Δφ / 2))
+    c = _cos_multiples(Δφ, m0, count, width)
+    return vcat(kv[1] * c, kv[2] * c)
+end
+
 # Largest number of Fourier modes assembled per pass, bounds the retained K/V storage to one chunk.
 const _MODE_CHUNK = 8
+
+include("bem_modal_kernel.jl")
+
+# Nested integration needs distinct inner and outer segment buffers.
+function _bem_quadrature_workspace(modes, ::Val{N}) where {N}
+    return (; breaks = zeros(max(cld(last(modes), 2) + 1, 2)),
+        azimuthal = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
+        meridian = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
+        modal = _ring_split_workspace(modes, Val(N)))
+end
 
 # Fixed azimuthal rules and `cos(mΔφ)` tables for every order the assembly requests, built serially.
 function _mode_rules(k::Real, ps::AbstractVector{Panel},
         modes::AbstractUnitRange{<:Integer}, width::Val{N}) where {N}
-    rules = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}, Vector{SVector{N, Float64}}}}()
+    rules = Dict{Int,
+        Tuple{Vector{Float64}, Vector{Float64}, Vector{SVector{N, Float64}},
+            Vector{Float64}}}()
     radii = Float64[]
     for p in ps
         push!(radii, p.rhom)
@@ -718,7 +785,7 @@ function _mode_rules(k::Real, ps::AbstractVector{Panel},
         haskey(rules, order) && continue
         angles, weights = _azimuthal_fixed_rule(order)
         table = [_cos_multiples(φ, first(modes), length(modes), width) for φ in angles]
-        rules[order] = (angles, weights, table)
+        rules[order] = (angles, weights, table, sin.(angles ./ 2))
     end
     return rules
 end
@@ -726,32 +793,39 @@ end
 # `∫(K, V)(Δφ)cos(mΔφ)dΔφ` over [0,2π) for every mode in `modes`, with one kernel evaluation per node.
 function _azimuthal_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, nρ2::Real,
         projection::Real, modes::AbstractUnitRange{<:Integer}, far::Bool, rules, rtol::Real,
-        width::Val{N}) where {N}
+        width::Val{N}, workspace = nothing) where {N}
+    geometry = _ring_geometry(ρ, z, ρ2, z2, nρ2, projection)
     if far && hypot(ρ - ρ2, z - z2) >= 0.5sqrt(ρ * ρ2)
-        angles, weights, table = rules[_azimuthal_fixed_order(last(modes), k, ρ, ρ2)]
+        angles, weights, table, half_sines = rules[_azimuthal_fixed_order(last(modes), k, ρ, ρ2)]
         total = zero(SVector{2N, ComplexF64})
         for j in eachindex(angles)
-            kv = _ring_KV(k, ρ, z, ρ2, z2, nρ2, projection, angles[j]) * weights[j]
+            kv = _ring_KV_precomputed(k, geometry, half_sines[j]) * weights[j]
             total += vcat(kv[1] * table[j], kv[2] * table[j])
         end
         return total
     end
     m0, count = first(modes), length(modes)
+    if workspace !== nothing
+        accepted, split = _ring_split_KV(k, ρ, z, ρ2, z2, nρ2, projection,
+            modes, rtol, width, workspace.modal)
+        accepted && return split
+    end
     val = _azimuthal_peak_quadrature(
-        Δφ -> _ring_KV_modes(k, ρ, z, ρ2, z2, nρ2, projection, Δφ, m0, count, width),
-        last(modes), ρ, z, ρ2, z2, rtol, _QUAD_ATOL / 2)
+        Δφ -> _ring_KV_modes(k, geometry, Δφ, m0, count, width),
+        last(modes), ρ, z, ρ2, z2, rtol, _QUAD_ATOL / 2, workspace)
     return 2val
 end
 
 # Panel-pair meridian integral of the fused `(K, V)` kernels for every mode in `modes`.
 function _pair_KV_modes(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rtol::Real,
-        modes::AbstractUnitRange{<:Integer}, rules, width::Val{N}) where {N}
+        modes::AbstractUnitRange{<:Integer}, rules, width::Val{N}, workspace = nothing) where {N}
     projection = pj.nrho * (xρ - pj.rhom) + pj.nz * (xz - pj.zm)
     far = !self && _azimuthal_is_far(xρ, xz, pj)
     function node(s)
         ρ2, z2 = _panel_point(pj, s)
         return _azimuthal_KV_modes(
-            k, xρ, xz, ρ2, z2, pj.nrho, projection, modes, far, rules, rtol, width) *
+            k, xρ, xz, ρ2, z2, pj.nrho, projection, modes,
+            far, rules, rtol, width, workspace) *
                (ρ2 * pj.L)
     end
     if far
@@ -761,7 +835,8 @@ function _pair_KV_modes(k::Real, xρ::Real, xz::Real, pj::Panel, self::Bool, rto
         end
         return total
     end
-    return _meridian_quadrature(node, xρ, xz, pj, self, rtol)
+    return _meridian_quadrature(node, xρ, xz, pj, self, rtol;
+        segbuf = workspace === nothing ? nothing : workspace.meridian)
 end
 
 function _assemble_modes(mesh::MeridianMesh, k::Real, modes::AbstractUnitRange{<:Integer},
@@ -772,10 +847,11 @@ function _assemble_modes(mesh::MeridianMesh, k::Real, modes::AbstractUnitRange{<
     Ks = [zeros(ComplexF64, n, n) for _ in 1:count]
     Vs = [zeros(ComplexF64, n, n) for _ in 1:count]
     rules = _mode_rules(k, ps, modes, width)
-    _foreach_row(n) do i
+    _foreach_row(n, () -> _bem_quadrature_workspace(modes, width)) do i, workspace
         xρ, xz = ps[i].rhom, ps[i].zm
         for j in 1:n
-            kv = _pair_KV_modes(k, xρ, xz, ps[j], i == j, rtol, modes, rules, width)
+            kv = _pair_KV_modes(
+                k, xρ, xz, ps[j], i == j, rtol, modes, rules, width, workspace)
             for c in 1:count
                 Ks[c][i, j] = kv[c]
                 Vs[c][i, j] = kv[N + c]
@@ -1267,6 +1343,142 @@ function solve_oblique(
     end
 
     return p_scat_modes, dpdn_scat_modes, ps
+end
+
+# Each mode's system matrix depends only on the mesh/k/mode, not the incidence angle, so `incidence_angle_sweep` factorizes it once and reuses it for every angle.
+function _oblique_mode_factors(
+        ::Rigid, k::Real, mesh::MeridianMesh; m_max::Integer, rtol::Real = 1e-5,
+        modes::AbstractUnitRange{<:Integer} = 0:m_max)
+    ps = panels(mesh)
+    operators = _ModeOperators(mesh, k, m_max, rtol)
+    factors = map(modes) do m
+        K, V = _mode_operators!(operators, m)
+        matrix = 0.5I - K
+        (; matrix, factorization = lu(matrix), V)
+    end
+    return ps, factors
+end
+
+function _oblique_mode_factors(
+        ::PressureRelease, k::Real, mesh::MeridianMesh; m_max::Integer, rtol::Real = 1e-5,
+        modes::AbstractUnitRange{<:Integer} = 0:m_max)
+    ps = panels(mesh)
+    operators = _ModeOperators(mesh, k, m_max, rtol)
+    factors = map(modes) do m
+        K, V = _mode_operators!(operators, m)
+        (; matrix = V, factorization = lu(V), K)
+    end
+    return ps, factors
+end
+
+function _oblique_solve_factored(::Rigid, k::Real, ps, factors, incidence_angle::Real;
+        rtol::Real = 1e-5, solve_reports = nothing, first_mode::Integer = 0)
+    β = incidence_angle
+    m_max = length(factors) - 1
+    p_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    dpdn_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    for index in eachindex(factors)
+        m = first_mode + index - 1
+        (; matrix, factorization, V) = factors[index]
+        dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, β, p.rhom, p.zm, p.nrho, p.nz)
+                              for p in ps]
+        rhs = V * dpdn_inc
+        p_scat = factorization \ rhs
+        _record_solve!(solve_reports, matrix, p_scat, rhs; mode = m, rtol)
+        p_scat_modes[index] = p_scat
+        dpdn_scat_modes[index] = -dpdn_inc
+    end
+    return p_scat_modes, dpdn_scat_modes
+end
+
+function _oblique_solve_factored(
+        ::PressureRelease, k::Real, ps, factors, incidence_angle::Real;
+        rtol::Real = 1e-5, solve_reports = nothing, first_mode::Integer = 0)
+    β = incidence_angle
+    m_max = length(factors) - 1
+    p_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    dpdn_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    for index in eachindex(factors)
+        m = first_mode + index - 1
+        (; matrix, factorization, K) = factors[index]
+        p_scat = ComplexF64[-_p_inc_mode(m, k, β, p.rhom, p.zm) for p in ps]
+        rhs = K * p_scat .- p_scat ./ 2
+        dpdn_scat = factorization \ rhs
+        _record_solve!(solve_reports, matrix, dpdn_scat, rhs; mode = m, rtol)
+        p_scat_modes[index] = p_scat
+        dpdn_scat_modes[index] = dpdn_scat
+    end
+    return p_scat_modes, dpdn_scat_modes
+end
+
+function _oblique_mode_factors(
+        bc::Impedance, k::Real, mesh::MeridianMesh; m_max::Integer, rtol::Real = 1e-5,
+        modes::AbstractUnitRange{<:Integer} = 0:m_max)
+    ps = panels(mesh)
+    beta = im * k / bc.zeta
+    operators = _ModeOperators(mesh, k, m_max, rtol)
+    factors = map(modes) do m
+        K, V = _mode_operators!(operators, m)
+        matrix = 0.5I - K - beta * V
+        (; matrix, factorization = lu(matrix), V, beta)
+    end
+    return ps, factors
+end
+
+function _oblique_solve_factored(::Impedance, k::Real, ps, factors, incidence_angle::Real;
+        rtol::Real = 1e-5, solve_reports = nothing, first_mode::Integer = 0)
+    β = incidence_angle
+    m_max = length(factors) - 1
+    p_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    dpdn_scat_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
+    for index in eachindex(factors)
+        m = first_mode + index - 1
+        (; matrix, factorization, V, beta) = factors[index]
+        p_inc = ComplexF64[_p_inc_mode(m, k, β, p.rhom, p.zm) for p in ps]
+        dpdn_inc = ComplexF64[_dpdn_inc_mode(m, k, β, p.rhom, p.zm, p.nrho, p.nz)
+                              for p in ps]
+        rhs = beta .* (V * p_inc) .+ V * dpdn_inc
+        p_scat = factorization \ rhs
+        _record_solve!(solve_reports, matrix, p_scat, rhs; mode = m, rtol)
+        p_scat_modes[index] = p_scat
+        dpdn_scat_modes[index] = -beta .* (p_scat .+ p_inc) .- dpdn_inc
+    end
+    return p_scat_modes, dpdn_scat_modes
+end
+
+"""
+    solve_oblique(bc::Impedance, k, mesh::MeridianMesh, incidence_angle; m_max, rtol=1e-5)
+
+Solve the Robin/impedance-boundary axisymmetric CBIE for oblique incidence, mode by mode (see
+[`solve_oblique(::Rigid, ...)`](@ref), [`solve_axial(::Impedance, ...)`](@ref) and the module
+derivation above). Returns `(p_scat_modes, dpdn_scat_modes, ps)` in the same shape.
+"""
+function solve_oblique(bc::Impedance, k::Real, mesh::MeridianMesh, incidence_angle::Real;
+        m_max::Integer, rtol::Real = 1e-5, solve_reports = nothing)
+    return _oblique_solve_streamed(bc, k, mesh, incidence_angle; m_max, rtol, solve_reports)
+end
+
+function _oblique_solve_streamed(bc, k, mesh, incidence_angle;
+        m_max, rtol, solve_reports = nothing)
+    m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
+    ps = panels(mesh)
+    p_scat_modes, dpdn_scat_modes = Vector{ComplexF64}[], Vector{ComplexF64}[]
+    for first_mode in 0:_MODE_CHUNK:m_max
+        modes = first_mode:min(first_mode + _MODE_CHUNK - 1, m_max)
+        p, dp = _oblique_solve_batch(
+            bc, k, mesh, incidence_angle, modes; rtol, solve_reports)
+        append!(p_scat_modes, p)
+        append!(dpdn_scat_modes, dp)
+    end
+    return p_scat_modes, dpdn_scat_modes, ps
+end
+
+# Keep factors local to this call so only surface traces survive each batch.
+function _oblique_solve_batch(
+        boundary, k, mesh, incidence_angle, modes; rtol, solve_reports)
+    ps, factors = _oblique_mode_factors(boundary, k, mesh; m_max = last(modes), rtol, modes)
+    return _oblique_solve_factored(boundary, k, ps, factors, incidence_angle;
+        rtol, solve_reports, first_mode = first(modes))
 end
 
 # Oblique incidence, fluid-filled/transmission: generalizes solve_axial(::FluidFilled, ...)'s

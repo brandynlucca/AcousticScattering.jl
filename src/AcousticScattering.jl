@@ -12,10 +12,12 @@ using Inti: Inti
 using Gmsh: gmsh
 using HMatrices: HMatrices
 using LinearMaps: LinearMap
+import LinearMaps
 using IterativeSolvers: IterativeSolvers
 using IncompleteLU: IncompleteLU
 using NLsolve: NLsolve
 using ForwardDiff: ForwardDiff
+using FFTW: FFTW
 using StaticArrays: SVector, SMatrix, MVector
 using PrecompileTools: @compile_workload
 
@@ -43,6 +45,11 @@ include("analytical/spheroid_modal.jl")
 include("analytical/spheroid_elastic.jl")
 include("analytical/high_frequency.jl")
 include("analytical/bent_cylinder.jl")
+include("analytical/transducer.jl")
+include("analytical/tank_images.jl")
+include("analytical/tank_geometry.jl")
+include("analytical/tank_scattering.jl")
+include("analytical/time_synthesis.jl")
 
 include("engine/axisymmetric_bem.jl")
 include("engine/fourier_matching.jl")
@@ -61,6 +68,11 @@ include("engine/shell_fem_general.jl")
 include("engine/fluid_quadrature.jl")
 include("engine/edge_quadrature.jl")
 include("engine/full_bem.jl")
+include("engine/fluid_hmatrix_workspace.jl")
+include("engine/fluid_hmatrix_assembly.jl")
+include("engine/fluid_hmatrix_updates.jl")
+include("engine/compressed_fluid_bem.jl")
+include("engine/fluid_bem_setup.jl")
 include("engine/hybrid.jl")
 include("engine/hybrid_general_shell.jl")
 
@@ -73,13 +85,17 @@ include("surface_mesh.jl")
 include("cylinder_surface.jl")
 include("surface_mfs.jl")
 include("region_bem.jl")
+include("engine/compressed_region_bem.jl")
+include("analytical/reciprocity.jl")
 
 include("postprocessing/components.jl")
 include("postprocessing/surface_location.jl")
 include("postprocessing/pressure.jl")
 include("postprocessing/region_pressure.jl")
 include("postprocessing/axisymmetric_pressure.jl")
+include("postprocessing/tank_field.jl")
 include("postprocessing/sweeps.jl")
+include("postprocessing/calibration.jl")
 include("postprocessing/revolution.jl")
 
 export Rigid, PressureRelease, Impedance, FluidFilled, GasFilled, SolidElastic,
@@ -88,11 +104,17 @@ export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumI
        FluidInterior
 export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
+export AbstractTransducer, Transducer, Wall, TankTransducer
+export Tank, ProfiledTank, TankField, tank_field, boundary_scattering
+export ThinFilament, ScatteringField, ScatteringTransducer, filament_scattering,
+       sidewall_scattering, fluid_wall_reflection
 export AbstractSolution, ModalSolution, TMatrixSolution, KirchhoffSolution, FEMSolution,
        BEMSolution,
        MFSSolution, FMSolution, FreeSurfaceSolution
 export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier, free_surface
-export target_strength, scattering_amplitude, pressure, diagnostics
+export target_strength, scattering_amplitude, pressure, diagnostics, received_signal
+export time_synthesis, gaussian_pulse, tone_burst, oscillogram, received_pressure
+export TransferFunction, calibrate_response
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
 
