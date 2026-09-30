@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"
+     role="img" aria-labelledby="title">
+  <title id="title">AcousticScattering.jl</title>
+  <metadata>
+    Simplified package logo. Julia dots: copyright 2012-2022 Stefan Karpinski.
+    Source: https://github.com/JuliaLang/julia-logo-graphics
+    Adapted with wavefronts and a rounded badge. Artwork: CC BY-NC-SA 4.0.
+    https://creativecommons.org/licenses/by-nc-sa/4.0/ See the adjacent LICENSE.
+  </metadata>
+  <rect x="1" y="1" width="62" height="62" rx="10" fill="#10283F"/>
+  <circle cx="32" cy="17" r="7" fill="#389826"/>
+  <circle cx="19" cy="35" r="7" fill="#CB3C33"/>
+  <circle cx="45" cy="35" r="7" fill="#9558B2"/>
+  <g fill="none" stroke-width="2.5" stroke-linecap="round">
+    <path d="M 26 26 Q 32 30 38 26" stroke="#389826"/>
+    <path d="M 26 28 Q 30 31 30 35" stroke="#CB3C33"/>
+    <path d="M 36 29 Q 32 35 36 41" stroke="#9558B2"/>
+    <path d="M 14 48 H 50 M 14 54 H 50 M 32 59 V 44 M 29 47 L 32 44 L 35 47"
+          stroke="#F5F8FC" stroke-linejoin="round"/>
+  </g>
+</svg>

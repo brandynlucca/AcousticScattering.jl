@@ -1,0 +1,20 @@
+html[class] #documenter .docs-sidebar .docs-logo > img {
+    width: 14rem;
+    max-width: 100%;
+    height: auto;
+    max-height: none;
+}
+
+#documenter .home-logo {
+    display: none;
+}
+
+@media (max-width: 1055px) {
+    #documenter .home-logo {
+        display: block;
+        width: 14rem;
+        max-width: 70%;
+        height: auto;
+        margin: 1rem auto 1.5rem;
+    }
+}
