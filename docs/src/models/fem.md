@@ -52,7 +52,7 @@ nothing # hide
 
 ![](radial_phase.svg)
 
-Adaptive refinement uses successive target-strength changes in dB. Check complex-amplitude refinement separately when phase matters. A small magnitude change alone does not bound phase error. See [Numerical convergence](@ref convergence-tutorial). Cylinder radial and meridian FEM results retain target strength only.
+Adaptive refinement uses successive target-strength changes in dB. Check complex-amplitude refinement separately when phase matters. A small magnitude change alone does not bound phase error. See [Numerical convergence](@ref convergence-tutorial). Cylinder radial and meridian FEM, and spheroid meridian FEM retain complex amplitudes. The meridian cylinder and spheroid paths support arbitrary observation `angle` and `azimuth`.
 
 For supported radial spheres, `pressure(solution, points)` samples complex acoustic pressure normalized to the incident amplitude. It accepts one Cartesian point or an array of points, including fluid shells and fluid cavities. See [Pressure at Cartesian points](@ref pressure-evaluation) for field selection, coordinates and interface limits. `field=:shell` samples a fluid wall while `field=:interior` samples its fluid cavity. Elastic material has no acoustic pressure field. Elastic stress/displacement evaluation and radial sphere surface-field plotting are unavailable.
 
