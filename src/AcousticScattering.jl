@@ -104,17 +104,11 @@ export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumI
        FluidInterior
 export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
-export AbstractTransducer, Transducer, Wall, TankTransducer
-export Tank, ProfiledTank, TankField, tank_field, boundary_scattering
-export ThinFilament, ScatteringField, ScatteringTransducer, filament_scattering,
-       sidewall_scattering, fluid_wall_reflection
 export AbstractSolution, ModalSolution, TMatrixSolution, KirchhoffSolution, FEMSolution,
        BEMSolution,
        MFSSolution, FMSolution, FreeSurfaceSolution
 export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier, free_surface
-export target_strength, scattering_amplitude, pressure, diagnostics, received_signal
-export time_synthesis, gaussian_pulse, tone_burst, oscillogram, received_pressure
-export TransferFunction, calibrate_response
+export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
 

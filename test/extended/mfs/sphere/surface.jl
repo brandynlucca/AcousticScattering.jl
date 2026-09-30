@@ -1,4 +1,5 @@
 using AcousticScattering
+using AcousticScattering: Transducer
 using Test
 using LinearAlgebra
 using SpecialFunctions

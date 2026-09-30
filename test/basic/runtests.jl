@@ -1,4 +1,11 @@
 using Test
+using AcousticScattering: AbstractTransducer, Transducer, Wall, TankTransducer,
+                          Tank, ProfiledTank, TankField, tank_field, boundary_scattering,
+                          ThinFilament, ScatteringField, ScatteringTransducer,
+                          filament_scattering, sidewall_scattering, fluid_wall_reflection,
+                          received_signal, time_synthesis, gaussian_pulse, tone_burst,
+                          oscillogram, received_pressure, TransferFunction,
+                          calibrate_response
 
 const TEST_BASIC_GROUP = get(ENV, "TEST_BASIC_GROUP", "All")
 const BASIC_GROUPS = (

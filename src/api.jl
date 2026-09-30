@@ -506,12 +506,6 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
   `pml_sigma`, and `solver` (`:auto`, `:direct` or `:iterative`), and supports `angle`/`azimuth` in
   [`scattering_amplitude`](@ref).
 
-Volume FEM also accepts `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)`
-(including [`TankTransducer`](@ref)), for single and coupled bodies. Coordinates are in
-meters in the bodies' frame. With prescribed illumination the incidence angles retain
-only their default-observation meaning; pass explicit observation angles or evaluate
-[`pressure`](@ref). Modal/axisymmetric FEM paths do not accept these fields.
-
 `R` is the Dirichlet-to-Neumann truncation radius in m, default `1.2` times the body's
 characteristic radius. See `fem(shell::Shell, ...)` for the elastic-shell/fluid-coupling case.
 
@@ -878,12 +872,6 @@ Boundary-element solve, returns a [`BEMSolution`](@ref). `method=:axisymmetric` 
 `Sphere`/`Spheroid`/`Cylinder` or a supplied `Mesh`, and is required for a bent `Cylinder`.
 Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 [`target_strength`](@ref)`(sol; direction)` (full 3D).
-
-Full BEM accepts `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)`
-(including [`TankTransducer`](@ref)), also on supplied meshes and coupled fluid regions.
-The default remains a plane wave. With prescribed illumination, angles are retained
-as default-observation metadata; use an explicit `direction` or [`received_signal`](@ref)
-for a physical receiver measurement. Axisymmetric BEM remains plane-wave only.
 
 Full BEM accepts `meshsize` in m, geometry `mesh_order` (1, 2 or 3, default 2), quadrature
 `qorder` (default 4), `correction`, `compression` and `gmres_kwargs`. Rigid/soft full BEM
