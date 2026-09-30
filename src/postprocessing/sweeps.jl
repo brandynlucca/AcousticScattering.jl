@@ -156,7 +156,7 @@ are retained at a time; coefficients and surface fields are discarded after samp
 Nonzero angles use modes `0:m_max`; exactly zero uses only mode zero, as in `mfs`.
 No setup is cached across calls. Bent cylinders and full-surface MFS are not supported.
 
-Returns an [`IncidenceAngleSweep`](@ref). With `return_diagnostics=true`, returns
+Returns sampled angles, target strengths, and amplitudes. With `return_diagnostics=true`, returns
 `(; sweep, diagnostics)`, where `diagnostics[i]` contains the solve and independent
 boundary residuals for `angles[i]`, in the same form as `diagnostics(mfs(...))`.
 Checks are computed in either case; `condition_limit=0` skips the condition/rank SVD.
@@ -282,8 +282,8 @@ straight (unbent) `Cylinder`. Each Fourier mode's boundary operator depends only
 `k` and the mode, not the incidence angle, so it is assembled and factorized once and reused
 for every angle; only the incident-field right-hand side is rebuilt per angle. `m_max` is
 therefore fixed for the whole sweep rather than resolved per angle as a single [`bem`](@ref)
-call would. A bent `Cylinder` needs `bem(...; method=:full)` instead. Returns an
-`IncidenceAngleSweep`.
+call would. A bent `Cylinder` needs `bem(...; method=:full)` instead. Returns a
+sweep result with target strengths and amplitudes.
 
 Process all angles in batches of at most eight Fourier modes, releasing completed
 matrices and factors before assembling the next batch. Accumulate backscatter
@@ -310,7 +310,7 @@ Reuse layer operators, their compression and the system operator within this cal
 Each angle gets an independent GMRES solve with the supplied tolerances.
 
 Accepts `formulation`, `compression`, `correction` and `gmres_kwargs` as in [`bem`](@ref).
-Returns an `IncidenceAngleSweep` retaining amplitudes and strengths. Operators are discarded
+Returns sampled amplitudes and strengths. Operators are discarded
 after sampling. Subsequent calls assemble from their own inputs.
 """
 function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature},
@@ -355,7 +355,7 @@ The multiple-interface overload also accepts `parents` and `validation`. With
 coherent complex sum, using the same solver options. `labels` supplies one name per
 interface. Each system is sampled separately to limit retained matrix storage.
 
-Returns an `IncidenceAngleSweep` containing complex amplitudes and target strengths. Dense
+Returns complex amplitudes and target strengths in a sweep result. Dense
 solution state is discarded after sampling.
 
 # Examples
@@ -434,7 +434,7 @@ angle then only needs a cheap incident-coefficient recompute and matrix-vector s
 expensive boundary-matching quadrature that dominates a single [`fourier`](@ref) call.
 
 Accepts `continuation_steps`, `mapping_order`, `m_max`, `n_max`, `rtol` and `maxevals` as in
-[`fourier`](@ref). Returns an `IncidenceAngleSweep`.
+[`fourier`](@ref). Returns a sweep result with amplitudes and target strengths.
 """
 function incidence_angle_sweep(body::Irregular, boundary::AbstractBoundaryCondition,
         k::Real, angles::AbstractVector{<:Real};
@@ -468,7 +468,7 @@ end
 Sample the elastic prolate spheroid or shell backscatter at fixed exterior wavenumber `k`. The
 transition matrices do not depend on direction, so each azimuthal order is computed once and
 reused for every angle. Accepts `m_max`, `n_max` and `check` as in [`tmatrix`](@ref), and
-`method = :volume` samples the volume FEM instead. Returns an `IncidenceAngleSweep`.
+`method = :volume` samples the volume FEM instead. Returns a sweep result.
 """
 function incidence_angle_sweep(body::Spheroid, boundary::_ElasticSpheroidBoundary,
         k::Real, angles::AbstractVector{<:Real};
@@ -515,7 +515,7 @@ end
 Sample full-3D volume FEM backscatter at fixed exterior wavenumber `k`. The mesh, matrix and its
 factorization do not depend on the incident direction, so they are built once and each angle only
 needs a new load and solve. Accepts the keywords of `fem(...; method = :volume)`, with `angles` the
-polar incidence angles in radians. Returns an `IncidenceAngleSweep`.
+polar incidence angles in radians. Returns a sweep result.
 
 `method=:axisymmetric` instead samples axisymmetric BEM for a `Rigid`/`PressureRelease`/
 `Impedance` `boundary`, reusing each Fourier mode's factorized operator across angles; see
