@@ -133,7 +133,7 @@ function bem(
         surfaces::AbstractVector{<:Mesh}, materials::AbstractVector{<:FluidFilled}, k::Real;
         parents::AbstractVector{<:Integer} = collect(0:(length(surfaces) - 1)),
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         equilibrate::Bool = true, condition_limit::Integer = 512,
         correction::NamedTuple = (method = :dim,), formulation::Symbol = :muller,
         validation::NamedTuple = (;), compression::NamedTuple = (method = :none,),
@@ -146,7 +146,7 @@ function bem(
     factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs,
         norm_floor = eps(Float64))
     return _solve_region_bem(
-        system, factor; incidence_angle, incidence_azimuth, incident, transducer)
+        system, factor; incidence_angle, incidence_azimuth, incident)
 end
 
 function _assemble_region_bem(
@@ -255,9 +255,9 @@ end
 
 function _solve_region_bem(system, factor;
         incidence_angle::Real = pi / 2, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing)
+        incident = nothing)
     incident = _resolve_incident(
-        system.k, incidence_angle, incidence_azimuth; incident, transducer)
+        system.k, incidence_angle, incidence_azimuth; incident)
     b = _region_incident_rhs(system, incidence_angle, incidence_azimuth; incident)
     solved = hasproperty(system, :compression) ? _solve_compressed_fluid_system(factor, b) :
              _solve_fluid_system(factor, b)

@@ -11,7 +11,6 @@ include("sampling_plots.jl")
 include("sweep_results.jl")
 include("mesh_plots.jl")
 include("field_slices.jl")
-include("tank_fields.jl")
 include("region_plots.jl")
 
 # Backend-agnostic: constructs recipes/scene graphs (this package's own dispatch and helper

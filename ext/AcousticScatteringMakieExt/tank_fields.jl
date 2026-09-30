@@ -135,7 +135,7 @@ function Makie.plot(sample::AcousticScattering.TankField;
     end
     lo, hi=extrema(horizontal)
     bottom, top=extrema(vertical)
-    if sample.tank isa ProfiledTank
+    if sample.tank isa AcousticScattering.ProfiledTank
         contour!(ax, horizontal, vertical, Float64.(regions .!= -2);
             levels = [0.5], color = :black, linewidth = 2)
     elseif sample.tank.radius!==nothing && sample.plane===:xy
@@ -151,7 +151,7 @@ function Makie.plot(sample::AcousticScattering.TankField;
         surface=depth_view ? bottom : top
         floor=depth_view ? top : bottom
         lines!(ax, [lo, hi], [surface, surface]; color = :dodgerblue, linewidth = 3)
-        sample.tank isa ProfiledTank ||
+        sample.tank isa AcousticScattering.ProfiledTank ||
             lines!(ax, [lo, hi], [floor, floor]; color = :black, linewidth = 2)
     elseif sample.tank.radius===nothing
         lines!(ax, [lo, hi], [top, top]; color = :black, linewidth = 2)

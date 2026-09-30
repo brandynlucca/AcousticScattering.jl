@@ -40,7 +40,7 @@ function components(sol::BEMSolution{_RegionBEMData}; labels = nothing,
         :incidence_angle, :incidence_azimuth)}) : (;)
     options = merge(
         (; correction = report.correction, formulation = report.formulation,
-            incident = haskey(solver_kwargs, :transducer) ? nothing : sol.data.incident,
+            incident = sol.data.incident,
             condition_limit = report.condition_limit,
             equilibrate = report.equilibrate, compression, gmres_kwargs),
         solver_kwargs)

@@ -52,17 +52,12 @@ on the same body evaluates the boundary residual away from collocation points.
 Incidence uses the full-BEM convention, `(cos(β), sin(β)cos(α), sin(β)sin(α))`.
 `scattering_amplitude(solution; direction)` evaluates the outgoing sources' far-field
 amplitude [m] directly; the default direction is monostatic backscatter for a plane wave.
-Use `incident=IncidentField(p, gradient)` or `transducer=Transducer(...)` (also
-[`TankTransducer`](@ref)) for prescribed illumination. The callables and transducer
-positions use the surface's Cartesian frame in meters. Incidence angles then specify
-only the default observation direction; use `direction` or [`received_signal`](@ref).
 """
 function mfs(
         surface::Mesh{<:Inti.Quadrature}, boundary::Union{Rigid, PressureRelease}, k::Real;
         offset::Real, source_mesh::Mesh{<:Inti.Quadrature} = surface,
         check_mesh::Union{Nothing, Mesh{<:Inti.Quadrature}} = nothing,
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        transducer::Union{Nothing, AbstractTransducer} = nothing,
         incident = nothing,
         condition_limit::Integer = 512)
     isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
@@ -71,7 +66,7 @@ function mfs(
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     length(source_mesh.data) <= length(surface.data) || throw(ArgumentError(
         "source_mesh must not have more points than the collocation surface"))
-    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident)
     pinc, gradinc = if field === nothing
         direction = Tuple(_bem3d_incidence_direction(incidence_angle, incidence_azimuth))
         _plane_wave_incident(k, direction)

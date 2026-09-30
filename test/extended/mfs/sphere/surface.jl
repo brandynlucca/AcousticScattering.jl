@@ -1,5 +1,4 @@
 using AcousticScattering
-using AcousticScattering: Transducer
 using Test
 using LinearAlgebra
 using SpecialFunctions
@@ -127,55 +126,4 @@ let
             sources, Rigid(), 1.0; offset = 0.3, source_mesh = collocation)
     end
 
-    @time "Full-surface MFS transducer incident field" @testset "Full-surface MFS transducer incident field" begin
-        body = Sphere(0.5)
-        collocation = mesh(
-            body; method = :full, resolution = 0.3, mesh_order = 2, qorder = 2)
-        sources = mesh(body; method = :full, resolution = 0.3, mesh_order = 2, qorder = 1)
-        # Omitting `transducer` (or passing `nothing`) must reproduce the plane-wave path exactly.
-        plane = mfs(collocation, Rigid(), 0.7; source_mesh = sources, offset = 0.2,
-            incidence_angle = 0.9, incidence_azimuth = 0.4, condition_limit = 0)
-        with_nothing = mfs(collocation, Rigid(), 0.7; source_mesh = sources, offset = 0.2,
-            incidence_angle = 0.9, incidence_azimuth = 0.4, condition_limit = 0,
-            transducer = nothing)
-        @test scattering_amplitude(plane) == scattering_amplitude(with_nothing)
-
-        # field=:incident must report the transducer's own field, not a stale plane-wave reconstruction.
-        t = Transducer((0.0, 0.0, -3.0), (0.0, 0.0, 1.0), 0.1)
-        solution = mfs(collocation, Rigid(), 0.7; source_mesh = sources, offset = 0.2,
-            condition_limit = 0, transducer = t)
-        point = (0.6, 0.0, 0.0)
-        pinc, _ = AS._transducer_field(t, 0.7)
-        @test pressure(solution, point; field = :incident) ≈ pinc(point) rtol = 1e-10
-        @test isfinite(target_strength(solution))
-    end
-
-    @time "Reciprocity received signal" @testset "Reciprocity received signal" begin
-        body, boundary, k = Sphere(0.5), Rigid(), 1.0
-        collocation = mesh(
-            body; method = :full, resolution = 0.2, mesh_order = 2, qorder = 4)
-        sources = mesh(body; method = :full, resolution = 0.2, mesh_order = 2, qorder = 1)
-        tx = Transducer((0.0, 0.0, -3.0), (0.0, 0.0, 1.0), 0.1)
-        rx = Transducer((2.0, 1.0, 2.0), (-2.0, -1.0, -2.0), 0.08)
-        sol_tx = mfs(collocation, boundary, k; source_mesh = sources, offset = 0.2,
-            condition_limit = 0, transducer = tx)
-        sol_rx = mfs(collocation, boundary, k; source_mesh = sources, offset = 0.2,
-            condition_limit = 0, transducer = rx)
-        # Swapping which transducer transmits and which receives must leave the signal unchanged.
-        signal_forward = AS.received_signal(sol_tx, rx)
-        signal_reverse = AS.received_signal(sol_rx, tx)
-        @test signal_forward ≈ signal_reverse rtol = 1e-4
-
-        # As the receiver recedes the signal should approach 4pi*C_rx*(exp(ikR)/R)*f(x_hat_rx).
-        direction = (0.3, 0.5, 0.8106)
-        u = collect(direction) ./ norm(collect(direction))
-        for (distance, tolerance) in ((200.0, 0.02), (1000.0, 0.01))
-            rx_far = Transducer(Tuple(distance .* u), Tuple(-u), 0.05)
-            signal = AS.received_signal(sol_tx, rx_far)
-            C_rx = -im * k * rx_far.radius^2 / 2
-            f_dir = scattering_amplitude(sol_tx; direction = u)
-            predicted = -4pi * C_rx * cis(k * distance) / distance * f_dir
-            @test signal ≈ predicted rtol = tolerance
-        end
-    end
 end

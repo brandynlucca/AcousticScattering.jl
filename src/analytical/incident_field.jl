@@ -9,10 +9,9 @@ Supertype of incident excitations for solvers that accept an `incident` keyword.
 """
 abstract type IncidentField end
 
-struct _PointIncidentField{P, G, S} <: IncidentField
+struct _PointIncidentField{P, G} <: IncidentField
     pressure::P
     gradient::G
-    source::S
 end
 
 """
@@ -27,15 +26,9 @@ Pass as `incident=...` to full-3D BEM, closed-surface MFS or volume FEM.
 Changing frequency requires callables for the new wavenumber. This constructor
 does not project a general field into modal or axisymmetric solver bases.
 """
-IncidentField(pressure, gradient) = _PointIncidentField(pressure, gradient, nothing)
+IncidentField(pressure, gradient) = _PointIncidentField(pressure, gradient)
 
-function _resolve_incident(k, beta, alpha; incident = nothing, transducer = nothing)
-    incident !== nothing && transducer !== nothing &&
-        throw(ArgumentError("supply incident or transducer, not both"))
-    if transducer !== nothing
-        p, gradient = _transducer_field(transducer, k)
-        return _PointIncidentField(p, gradient, transducer)
-    end
+function _resolve_incident(k, beta, alpha; incident = nothing)
     incident === nothing && return nothing
     incident isa PlaneWave && return nothing
     incident isa _PointIncidentField && return incident

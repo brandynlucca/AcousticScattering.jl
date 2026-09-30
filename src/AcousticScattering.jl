@@ -17,7 +17,6 @@ using IterativeSolvers: IterativeSolvers
 using IncompleteLU: IncompleteLU
 using NLsolve: NLsolve
 using ForwardDiff: ForwardDiff
-using FFTW: FFTW
 using StaticArrays: SVector, SMatrix, MVector
 using PrecompileTools: @compile_workload
 
@@ -45,11 +44,6 @@ include("analytical/spheroid_modal.jl")
 include("analytical/spheroid_elastic.jl")
 include("analytical/high_frequency.jl")
 include("analytical/bent_cylinder.jl")
-include("analytical/transducer.jl")
-include("analytical/tank_images.jl")
-include("analytical/tank_geometry.jl")
-include("analytical/tank_scattering.jl")
-include("analytical/time_synthesis.jl")
 
 include("engine/axisymmetric_bem.jl")
 include("engine/fourier_matching.jl")
@@ -86,16 +80,13 @@ include("cylinder_surface.jl")
 include("surface_mfs.jl")
 include("region_bem.jl")
 include("engine/compressed_region_bem.jl")
-include("analytical/reciprocity.jl")
 
 include("postprocessing/components.jl")
 include("postprocessing/surface_location.jl")
 include("postprocessing/pressure.jl")
 include("postprocessing/region_pressure.jl")
 include("postprocessing/axisymmetric_pressure.jl")
-include("postprocessing/tank_field.jl")
 include("postprocessing/sweeps.jl")
-include("postprocessing/calibration.jl")
 include("postprocessing/revolution.jl")
 
 export Rigid, PressureRelease, Impedance, FluidFilled, GasFilled, SolidElastic,
@@ -111,7 +102,6 @@ export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier, free_surface
 export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
-
 @compile_workload begin
     let radius = 0.01, len = 0.07, k = 2π * 38000.0 / 1477.3
         kirchhoff(Cylinder(radius, len; radius_curvature = 1e8len), Rigid(), k; incidence_angle = π /

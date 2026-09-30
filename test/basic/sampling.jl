@@ -110,32 +110,3 @@ end
           all(isfinite, scalar.target_strength)
     @test scalar.target_strength ≈ target_strength.(scalar.amplitudes)
 end
-
-@testset "Time synthesis" begin
-    f0, bandwidth = 100e3, 20e3
-    sigma = bandwidth / (2sqrt(2log(2)))
-    frequencies = collect(range(1e3, 300e3; length = 4000))
-    spectrum = ones(ComplexF64, length(frequencies))
-    pulse = gaussian_pulse(f0, bandwidth)
-    times = collect(range(-3e-5, 3e-5; length = 401))
-    p = time_synthesis(frequencies, spectrum, pulse, times)
-    # Narrowband closed form (f0 many sigma above 0, so truncating at f=0 costs nothing):
-    # the Fourier transform of a Gaussian spectrum is a Gaussian envelope in time.
-    closed_form(t) = 2sigma * sqrt(2pi) * exp(-2pi^2 * sigma^2 * t^2) * cos(2pi * f0 * t)
-    reference = closed_form.(times)
-    @test p ≈ reference rtol = 1e-8
-
-    @test_throws ArgumentError time_synthesis([1.0, 2.0], ComplexF64[1.0], x -> 1.0, [0.0])
-    @test_throws ArgumentError time_synthesis(
-        [2.0, 1.0], ComplexF64[1.0, 1.0], x -> 1.0, [0.0])
-    @test_throws ArgumentError time_synthesis(
-        [-1.0, 1.0], ComplexF64[1.0, 1.0], x -> 1.0, [0.0])
-    @test_throws ArgumentError gaussian_pulse(-1.0, 1.0)
-    @test_throws ArgumentError gaussian_pulse(1.0, -1.0)
-
-    sphere = Sphere(0.05)
-    freqs = collect(range(50e3, 150e3; length = 50))
-    sweep = frequency_sweep(k -> modal(sphere, Rigid(), k), freqs, 1500.0)
-    p2 = time_synthesis(freqs, sweep.amplitudes, gaussian_pulse(100e3, 10e3), [0.0, 1e-5])
-    @test all(isfinite, p2)
-end

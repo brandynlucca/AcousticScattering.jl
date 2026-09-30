@@ -185,8 +185,8 @@ function _pressure_values(solution::MFSSolution{_FullMFSSurfaceData}, points, fi
     return field === :total ? values + incident : values
 end
 
-# Prescribed tank illumination may itself integrate a curved wall. Evaluate each
-# needed sample once, in parallel, and never evaluate it for a scattered-only map.
+# Evaluate each prescribed incident-field sample once, in parallel, and never
+# evaluate it for a scattered-only map.
 # Incident-field callbacks already have the solver's concurrent-call contract.
 function _incident_pressure_values(solution, points)
     if !(solution.data.incident isa _PointIncidentField) || length(points) < 64

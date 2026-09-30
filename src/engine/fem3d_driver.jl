@@ -265,8 +265,8 @@ end
 
 function _fem_volume(body::Union{Sphere, Spheroid}, boundary, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        transducer::Union{Nothing, AbstractTransducer} = nothing, incident = nothing, kwargs...)
-    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
+        incident = nothing, kwargs...)
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident)
     system = _volume_system_single(body, boundary, k; kwargs...)
     field === nothing &&
         return _volume_solution(system, incidence_angle, incidence_azimuth)
@@ -440,8 +440,8 @@ end
 
 function _fem_volume_regions(bodies, materials, k::Real; incidence_angle::Real = π / 2,
         incidence_azimuth::Real = 0.0, incident = nothing,
-        transducer::Union{Nothing, AbstractTransducer} = nothing, kwargs...)
-    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident, transducer)
+        kwargs...)
+    field = _resolve_incident(k, incidence_angle, incidence_azimuth; incident)
     system = _volume_system_regions(bodies, materials, k; kwargs...)
     field === nothing && return _volume_solution(system, incidence_angle, incidence_azimuth)
     return _volume_solution(

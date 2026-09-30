@@ -12,6 +12,8 @@ makedocs(
     # The API reference is generated from source docstrings via @docs blocks.
     # checkdocs=:exports fails the build if an exported name is missing from api.md.
     checkdocs = :exports,
+    # Keep experimental pages outside the navigation out of published documentation.
+    pagesonly = true,
     doctest = true,
     warnonly = false,
     authors = "AcousticScattering contributors",

@@ -324,9 +324,9 @@ quadrature are selected when constructing `surface`. Returns a [`BEMSolution`](@
 function bem(surface::Mesh{<:Inti.Quadrature},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing, kwargs...)
+        incident = nothing, kwargs...)
     incident = _resolve_incident(
-        k, incidence_angle, incidence_azimuth; incident, transducer)
+        k, incidence_angle, incidence_azimuth; incident)
     density = Ref{Union{Nothing, Vector{ComplexF64}}}(nothing)
     capture = boundary isa Rigid ? (; _density = density) : (;)
     p, q, quad, report = solve_full_bem(boundary, k, surface.data;

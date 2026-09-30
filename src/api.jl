@@ -971,11 +971,11 @@ end
 function _bem_full(body::Union{Sphere, Spheroid},
         boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
         mesh_order::Integer = 2, kwargs...)
     incident = _resolve_incident(
-        k, incidence_angle, incidence_azimuth; incident, transducer)
+        k, incidence_angle, incidence_azimuth; incident)
     quad = body isa Sphere ?
            gmsh_sphere_mesh(body.radius; meshsize, qorder, mesh_order) :
            gmsh_spheroid_mesh(body.a, body.b; meshsize, qorder, mesh_order)

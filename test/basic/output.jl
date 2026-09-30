@@ -56,16 +56,21 @@ let
             :ViscoelasticSolid, :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer,
             :LayeredMaterial, :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder,
             :Spheroid, :Shell, :Irregular, :IncidentField, :PlaneWave, :SphericalWave,
-            :BesselBeam, :AbstractTransducer, :Transducer, :Wall, :TankTransducer,
+            :BesselBeam,
             :AbstractSolution, :ModalSolution, :TMatrixSolution,
             :KirchhoffSolution, :FEMSolution,
             :BEMSolution, :MFSSolution, :FMSolution, :FreeSurfaceSolution, :modal, :tmatrix,
             :kirchhoff, :fem, :bem, :mfs, :fourier, :free_surface,
-            :target_strength, :scattering_amplitude, :pressure, :diagnostics, :received_signal,
-            :time_synthesis, :gaussian_pulse,
+            :target_strength, :scattering_amplitude, :pressure, :diagnostics,
             :Mesh, :mesh,
             :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
         @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
+        for name in (:Tank, :ProfiledTank, :Transducer, :TankTransducer,
+                :AbstractTransducer, :Wall, :TankField, :tank_field,
+                :received_signal, :time_synthesis, :gaussian_pulse,
+                :resonant_response, :piezo_equivalent, :receiver_oscillogram)
+            @test !isdefined(AcousticScattering, name)
+        end
         for name in expected
             @test isdefined(@__MODULE__, name)
             @test getfield(@__MODULE__, name) === getfield(AcousticScattering, name)

@@ -120,7 +120,7 @@ convergence history, recomputed linear residuals and solver settings.
 """
 function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         formulation::Symbol = :burton_miller,
         compression = (method = :hmatrix, tol = 1e-5),
         correction = (method = :dim,),
@@ -131,7 +131,7 @@ function solve_full_bem(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
     system = _assemble_full_boundary(
         boundary, k, quad; formulation, compression, correction)
     return _solve_full_boundary(system; incidence_angle, incidence_azimuth,
-        incident, transducer, gmres_kwargs, return_diagnostics, _density)
+        incident, gmres_kwargs, return_diagnostics, _density)
 end
 
 function _assemble_full_boundary(boundary::Union{Rigid, PressureRelease}, k::Real, quad;
@@ -198,13 +198,13 @@ end
 
 function _solve_full_boundary(system;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         gmres_kwargs = (reltol = 1e-4, restart = 150, maxiter = 1200),
         return_diagnostics::Bool = true, _density = nothing)
     (; A, S, D, K, H, boundary, k, quad, coupling,
         formulation, compression, correction, Pl) = system
     incident = _resolve_incident(
-        k, incidence_angle, incidence_azimuth; incident, transducer)
+        k, incidence_angle, incidence_azimuth; incident)
     n = length(quad)
     p_inc, dpdn_inc = _incident_traces(
         quad, k, incidence_angle, incidence_azimuth, incident)
@@ -331,7 +331,7 @@ Their recomputed residuals describe the compressed system, including approximate
 """
 function solve_full_bem(boundary::FluidFilled, k::Real, quad;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         formulation::Symbol = :muller, equilibrate::Bool = true,
         condition_limit::Integer = 512,
         correction = (method = :dim,), return_diagnostics::Bool = false,
@@ -341,7 +341,7 @@ function solve_full_bem(boundary::FluidFilled, k::Real, quad;
     factor = _factor_full_fluid(system; equilibrate, gmres_kwargs,
         condition_limit = return_diagnostics ? condition_limit : 0)
     return _solve_full_fluid(system, factor; incidence_angle, incidence_azimuth,
-        incident, transducer, return_diagnostics)
+        incident, return_diagnostics)
 end
 
 function _assemble_full_fluid(boundary::FluidFilled, k::Real, quad;
@@ -450,10 +450,10 @@ end
 
 function _solve_full_fluid(system, factor;
         incidence_angle::Real = 0.0, incidence_azimuth::Real = 0.0,
-        incident = nothing, transducer = nothing,
+        incident = nothing,
         return_diagnostics::Bool = true)
     incident = _resolve_incident(
-        system.k, incidence_angle, incidence_azimuth; incident, transducer)
+        system.k, incidence_angle, incidence_azimuth; incident)
     hasproperty(system, :compression) &&
         return _solve_compressed_fluid(system, factor; incidence_angle, incidence_azimuth,
             incident, return_diagnostics)
