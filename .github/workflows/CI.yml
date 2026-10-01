@@ -13,7 +13,7 @@ permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 env:
   JULIA_PKG_PRECOMPILE_AUTO: '0'
   JULIA_CPU_TARGET: generic
@@ -35,11 +35,20 @@ jobs:
           Pkg.activate(; temp = true)
           Pkg.add(Pkg.PackageSpec(; name = "JuliaFormatter", version = "2.14.0"))
           using JuliaFormatter: format
-          format(["src", "ext", "test", "docs"]; overwrite = false) ||
+          if !format(["src", "ext", "test", "docs"]; overwrite = false)
+              paths = split(read(`git ls-files -z -- src ext test docs`, String), '\0'; keepempty = false)
+              for path in paths
+                  splitext(path)[2] in (".jl", ".md", ".jmd", ".qmd") || continue
+                  format(path; overwrite = false) || println("Unformatted: $path")
+              end
               error("Formatting required. See the developer guide for the formatting command.")
+          end
   test-install-dependencies:
     name: Test install & dependencies (Julia ${{ matrix.version }}, ${{ matrix.os }}, ${{ matrix.flavor }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
     # Nightly is experimental, including the Julia download in setup-julia.
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
@@ -59,6 +68,16 @@ jobs:
           - windows-latest
           - macos-15-intel
           - macos-latest
+        # Keep macOS coverage of the supported minimum and current Julia on both
+        # architectures. Pre/nightly plotting compatibility is covered on Linux
+        # and Windows; macOS pre/nightly still install and precompile the core.
+        exclude:
+          - {flavor: plots, version: pre, os: macos-15-intel}
+          - {flavor: plots, version: nightly, os: macos-15-intel}
+          - {flavor: plots, version: pre, os: macos-latest}
+          - {flavor: plots, version: nightly, os: macos-latest}
+          - {flavor: core, version: pre, os: macos-15-intel}
+          - {flavor: core, version: nightly, os: macos-15-intel}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -68,7 +87,7 @@ jobs:
         with:
           cache-name: tests-${{ matrix.os }}-${{ matrix.version }}-${{ matrix.flavor }}
           include-matrix: false
-          delete-old-caches: false
+          delete-old-caches: ${{ github.event_name != 'pull_request' }}
       - name: Install dependencies
         shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
         run: |
@@ -99,16 +118,34 @@ jobs:
         # from LLVM ORC JIT heap corruption) for reasons outside this package's control.
         if: >-
           matrix.flavor == 'plots' &&
+          !startsWith(matrix.os, 'macos-') &&
           (github.event_name == 'workflow_dispatch' ||
            matrix.os != 'ubuntu-latest' ||
            matrix.version != '1.10')
         env:
           TEST_SUITE: Basic
         run: julia --startup-file=no --check-bounds=yes --color=yes test/runtests.jl
+      - name: Run macOS plotting tests
+        if: matrix.flavor == 'plots' && startsWith(matrix.os, 'macos-')
+        env:
+          TEST_SUITE: Basic
+          TEST_BASIC_GROUP: Plotting
+        run: julia --startup-file=no --check-bounds=yes --color=yes test/runtests.jl
+      - name: Run macOS BEM formulation tests
+        if: matrix.flavor == 'plots' && startsWith(matrix.os, 'macos-')
+        run: julia --startup-file=no --check-bounds=yes --color=yes test/basic/bem/formulations.jl
+      - name: Run macOS compressed BEM case 15
+        if: matrix.flavor == 'plots' && startsWith(matrix.os, 'macos-')
+        env:
+          TEST_REGION_BEM_CASE: '15'
+        run: julia --startup-file=no --check-bounds=yes --color=yes test/basic/bem/regions_compressed.jl
   basic_coverage:
     name: Basic coverage (Julia 1.10, ubuntu-latest)
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     env:
       JULIA_PROJECT: test
       TEST_PROJECT: test
@@ -120,9 +157,9 @@ jobs:
           version: '1.10'
       - uses: julia-actions/cache@v3
         with:
-          cache-name: tests-ubuntu-latest-1.10-plots
+          cache-name: coverage-ubuntu-latest-1.10-plots
           include-matrix: false
-          delete-old-caches: false
+          delete-old-caches: ${{ github.event_name != 'pull_request' }}
       - name: Install test dependencies
         shell: julia --startup-file=no --check-bounds=yes --color=yes {0}
         run: |
@@ -138,10 +175,10 @@ jobs:
         run: julia --startup-file=no --check-bounds=yes --color=yes --code-coverage=@src test/runtests.jl
       - name: Process coverage results
         id: process
-        if: always() && steps.tests.outcome != 'skipped'
+        if: steps.tests.outcome == 'success'
         uses: julia-actions/julia-processcoverage@v1
       - name: Upload coverage report
-        if: always() && steps.process.outcome == 'success'
+        if: steps.process.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: basic-coverage-ubuntu-1.10
@@ -149,7 +186,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Upload Basic coverage to Codecov
-        if: always() && steps.process.outcome == 'success'
+        if: steps.process.outcome == 'success'
         continue-on-error: true
         uses: codecov/codecov-action@v7
         with:
