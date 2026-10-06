@@ -33,7 +33,7 @@ end
     target_strength(ps::Vector{Panel}, p_scat, dpdn_scat, k, theta)
 
 Target strength [dB re 1 m²] of an axial-incidence axisymmetric BEM
-solution at scattering angle `theta` (see [`far_field`](@ref)).
+solution at scattering angle `theta` (see `far_field`).
 """
 function target_strength(ps::Vector{Panel}, p_scat::AbstractVector{<:Number},
         dpdn_scat::AbstractVector{<:Number}, k::Real, theta::Real)
@@ -105,7 +105,7 @@ end
     target_strength(ps::Vector{Panel}, p_scat_modes, dpdn_scat_modes, k, theta, phi)
 
 Target strength [dB re 1 m²] of an oblique-incidence axisymmetric BEM
-solution at scattering direction `(theta, phi)` (see [`far_field`](@ref)).
+solution at scattering direction `(theta, phi)` (see `far_field`).
 """
 function target_strength(
         ps::Vector{Panel}, p_scat_modes::AbstractVector{<:AbstractVector{<:Number}},

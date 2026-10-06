@@ -1,0 +1,7 @@
+include("target_strength.jl")
+include("farfield.jl")
+include("scattering_amplitude.jl")
+include("diagnostics.jl")
+include("components.jl")
+include("sweeps.jl")
+include("revolution.jl")

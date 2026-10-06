@@ -1,0 +1,6 @@
+include("types.jl")
+include("spheroid_elastic.jl")
+include("spheroid_layers.jl")
+include("spheroid_farfield.jl")
+include("dispatch.jl")
+include("postprocessing.jl")

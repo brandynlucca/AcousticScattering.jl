@@ -20,96 +20,29 @@ using ForwardDiff: ForwardDiff
 using StaticArrays: SVector, SMatrix, MVector
 using PrecompileTools: @compile_workload
 
-# Must precede every include below: Spheroid subtypes this directly.
-"""
-    AbstractBody
-
-Supertype of scattering geometries. Construct a [`Sphere`](@ref), [`Spheroid`](@ref),
-[`Cylinder`](@ref) or [`Shell`](@ref), then pass it to a solver with a boundary condition
-and exterior wavenumber. Geometry dimensions are in meters.
-"""
-abstract type AbstractBody end
-
-include("special_functions.jl")
-include("analytical/incident_field.jl")
-include("engine/diagnostics.jl")
-
-include("postprocessing/target_strength.jl")
-
-include("analytical/sphere_modal.jl")
-include("analytical/vesm.jl")
-include("analytical/cylinder_modal.jl")
-include("analytical/cylinder_elastic_modal.jl")
-include("analytical/spheroid_modal.jl")
-include("analytical/spheroid_elastic.jl")
-include("analytical/high_frequency.jl")
-include("analytical/bent_cylinder.jl")
-
-include("engine/axisymmetric_bem.jl")
-include("engine/fourier_matching.jl")
-include("engine/shell_bem.jl")
-include("engine/radial_fem.jl")
-include("engine/meridian_fem.jl")
-include("engine/cylinder_meridian_fem.jl")
-include("engine/elastic_radial_fem.jl")
-include("engine/fluid_shell_radial_fem.jl")
-include("engine/cylinder_elastic_radial_fem.jl")
-include("engine/spheroid_meridian_fem.jl")
-include("engine/fem3d.jl")
-include("engine/mfs.jl")
-include("engine/shell_fem.jl")
-include("engine/shell_fem_general.jl")
-include("engine/fluid_quadrature.jl")
-include("engine/edge_quadrature.jl")
-include("engine/full_bem.jl")
-include("engine/fluid_hmatrix_workspace.jl")
-include("engine/fluid_hmatrix_assembly.jl")
-include("engine/fluid_hmatrix_updates.jl")
-include("engine/compressed_fluid_bem.jl")
-include("engine/fluid_bem_setup.jl")
-include("engine/hybrid.jl")
-include("engine/hybrid_general_shell.jl")
-
-include("postprocessing/farfield.jl")
-
-include("api.jl")
-include("engine/fem3d_driver.jl")
-include("surface_validation.jl")
-include("surface_mesh.jl")
-include("cylinder_surface.jl")
-include("surface_mfs.jl")
-include("region_bem.jl")
-include("engine/compressed_region_bem.jl")
-
-include("postprocessing/components.jl")
-include("postprocessing/surface_location.jl")
-include("postprocessing/pressure.jl")
-include("postprocessing/region_pressure.jl")
-include("postprocessing/axisymmetric_pressure.jl")
-include("postprocessing/sweeps.jl")
-include("postprocessing/revolution.jl")
-
 export Rigid, PressureRelease, Impedance, FluidFilled, GasFilled, SolidElastic,
-       ViscoelasticSolid
+       ViscoelasticSolid, SpatialFluid
 export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumInterior,
        FluidInterior
 export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
-export AbstractSolution, ModalSolution, TMatrixSolution, KirchhoffSolution, FEMSolution,
+export incident_pressure, incident_gradient, incident_coefficient
+export AbstractSolution, ModalSolution, TMatrixSolution,
+       KirchhoffSolution, FEMSolution,
        BEMSolution,
        MFSSolution, FMSolution, FreeSurfaceSolution
-export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier, free_surface
+export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier,
+       free_surface
 export target_strength, scattering_amplitude, pressure, diagnostics
 export Mesh, mesh
 export components, frequency_sweep, incidence_angle_sweep, bistatic_sweep, bistatic_map
-@compile_workload begin
-    let radius = 0.01, len = 0.07, k = 2π * 38000.0 / 1477.3
-        kirchhoff(Cylinder(radius, len; radius_curvature = 1e8len), Rigid(), k; incidence_angle = π /
-                                                                                                  2)
-    end
-    let body = Spheroid(0.05, 0.02), k = 2π * 38000.0 / 1477.4
-        kirchhoff(body, Rigid(), k; incidence_angle = π / 2)
-    end
-end
+
+include("core/core.jl")
+include("numerics/numerics.jl")
+include("geometry/geometry.jl")
+include("solvers/solvers.jl")
+include("fields/fields.jl")
+include("postprocessing/postprocessing.jl")
+include("precompile.jl")
 
 end # module AcousticScattering

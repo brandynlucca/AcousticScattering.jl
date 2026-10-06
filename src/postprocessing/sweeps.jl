@@ -103,6 +103,202 @@ function frequency_sweep(solve::Function, frequencies::AbstractVector{<:Real}, s
     return FrequencySweep(Float64.(frequencies), k, ts, amplitudes, labels)
 end
 
+# Frozen snapshot spaces with current-equation acceptance and full-solve fallback.
+module FrequencyReduction
+using LinearAlgebra
+
+mutable struct SnapshotSpace
+    vectors::Matrix{ComplexF64}
+    count::Int
+end
+
+function SnapshotSpace(n::Integer; capacity::Integer = 16, maxbytes::Integer = 64*1024^2)
+    n > 0 || throw(ArgumentError("positive state dimension required"))
+    capacity >= 0 && maxbytes >= 0 || throw(ArgumentError("negative storage bound"))
+    count = min(capacity, n, maxbytes ÷ sizeof(ComplexF64) ÷ n)
+    return SnapshotSpace(zeros(ComplexF64, n, count), 0)
+end
+
+function add_snapshot!(space, x; tolerance = 1e-12)
+    length(x) == size(space.vectors, 1) || throw(DimensionMismatch("snapshot dimension"))
+    all(isfinite, x) || throw(ArgumentError("nonfinite snapshot"))
+    isfinite(tolerance) && 0 < tolerance < 1 ||
+        throw(ArgumentError("invalid rank tolerance"))
+    space.count == size(space.vectors, 2) && return false
+    magnitude = norm(x)
+    isfinite(magnitude) || throw(ArgumentError("snapshot norm overflow"))
+    iszero(magnitude) && return false
+    v = x ./ magnitude
+    for _ in 1:2, j in 1:space.count
+
+        q = view(space.vectors, :, j)
+        v .-= dot(q, v) .* q
+    end
+    remainder = norm(v)
+    remainder > tolerance || return false
+    space.count += 1
+    space.vectors[:, space.count] .= v ./ remainder
+    return true
+end
+
+freeze(space) = copy(space.vectors[:, 1:space.count])
+
+function relative_residual(A, x, b, rows)
+    residual = A*x-b
+    relative(r, rhs) = iszero(norm(rhs)) ? (iszero(norm(r)) ? 0.0 : Inf) : norm(r)/norm(rhs)
+    return (; original = relative(residual, b),
+        scaled = relative(residual ./ rows, b ./ rows))
+end
+
+function solve_reduced(A::Matrix{ComplexF64}, b::Vector{ComplexF64}, V::Matrix{ComplexF64};
+        tolerance = 1e-10, rank_tolerance = 1e-12, fallback = (A, b) -> A\b)
+    n, m = size(A)
+    n == m && n > 0 && length(b) == n && size(V, 1) == n ||
+        throw(DimensionMismatch("matrix, forcing and basis dimensions must agree"))
+    all(isfinite, A) && all(isfinite, b) && all(isfinite, V) ||
+        throw(ArgumentError("nonfinite system or basis"))
+    isfinite(tolerance) && 0 < tolerance < 1 ||
+        throw(ArgumentError("invalid residual tolerance"))
+    isfinite(rank_tolerance) && 0 < rank_tolerance < 1 ||
+        throw(ArgumentError("invalid rank tolerance"))
+    rows = vec(maximum(abs, A; dims = 2))
+    rows[iszero.(rows)] .= 1
+    all(isfinite, rows) || throw(ArgumentError("row norm overflow"))
+    reason = size(V, 2) == 0 ? :empty : :residual
+    x = zeros(ComplexF64, n)
+    rank = 0
+    if !iszero(norm(b)) && size(V, 2) > 0
+        # Recompute images at every frequency. Never reuse A(k_train)*V here.
+        images = (A*V) ./ rows
+        if all(isfinite, images)
+            factor = qr(images, ColumnNorm())
+            diagonal = abs.(diag(factor.R))
+            cutoff = rank_tolerance * maximum(diagonal; init = 0.0)
+            rank = count(>(cutoff), diagonal)
+            if rank == size(V, 2)
+                x = V * (factor \ (b ./ rows))
+            else
+                reason = :rank
+            end
+        else
+            reason = :nonfinite
+        end
+    end
+    projected = relative_residual(A, x, b, rows)
+    accepted = all(isfinite, x) && max(projected.original, projected.scaled) <= tolerance
+    if accepted
+        return (; x, reduced = true, reason = :accepted, rank, projected,
+            residual = projected)
+    end
+    all(isfinite, x) || (reason = :nonfinite)
+    x = fallback(A, b)
+    residual = relative_residual(A, x, b, rows)
+    all(isfinite, x) && max(residual.original, residual.scaled) <= tolerance ||
+        error("full solve failed current-equation residual acceptance")
+    return (; x, reduced = false, reason, rank, projected, residual)
+end
+
+end
+
+function _frequency_fluid_equations(
+        surface, material, k, incidence_angle, incidence_azimuth)
+    system = _assemble_full_fluid(material, k, surface.data; formulation = :cbie)
+    p, dp = _incident_traces(surface.data, k, incidence_angle, incidence_azimuth, nothing)
+    return system.A, _fluid_forcing(system, p, dp)
+end
+
+function _frequency_full_solve(A, b)
+    factor = _factor_fluid_system(A; condition_limit = 0)
+    return _solve_fluid_system(factor, b).x
+end
+
+"""
+    frequency_sweep(surface::Mesh, material::FluidFilled, frequencies, sound_speed;
+                    training_frequencies, incidence_angle=π/2, incidence_azimuth=0,
+                    tolerance=1e-10, rank_tolerance=1e-12, capacity=16,
+                    maxbytes=64*1024^2, return_diagnostics=false)
+
+Opt-in reduced-order frequency sweep for dense single-interface fluid/gas CBIE
+with DIM correction and plane-wave incidence on a fixed full-3D mesh. Frequencies
+and `training_frequencies` are in Hz, `sound_speed` in m/s, and angles in radians
+from +x with azimuth from +y toward +z. Returns a [`FrequencySweep`](@ref) of
+complex backscatter amplitudes and target strengths in the supplied query order.
+
+Train a bounded orthonormal solution basis using full Float64 solves, then freeze
+it before evaluating queries. Every query assembles its own equations and basis
+images. Both original and row-scaled relative residuals must satisfy `tolerance`.
+Rank loss or failed acceptance triggers a full Float64 solve, checked against the
+same residual target. Queries never enrich the basis. `capacity` and `maxbytes`
+bound snapshot coefficient storage, not total assembly or process memory.
+
+With `return_diagnostics=true`, return `(sweep, diagnostics)` as a named tuple.
+Diagnostics contain training and query reports, retained basis rank and bytes,
+and settings. Query reports identify reduced acceptance or full-solve fallback.
+Residual acceptance does not bound physical mesh error. Resolve the supplied mesh
+over the entire frequency range. Training cost can exceed the savings for short
+sweeps, and no automatic speedup is assumed. The callback overload is unchanged.
+"""
+function frequency_sweep(surface::Mesh{<:Inti.Quadrature}, material::FluidFilled,
+        frequencies::AbstractVector{<:Real}, sound_speed::Real;
+        training_frequencies::AbstractVector{<:Real},
+        incidence_angle::Real = π/2, incidence_azimuth::Real = 0.0,
+        tolerance::Real = 1e-10, rank_tolerance::Real = 1e-12,
+        capacity::Integer = 16, maxbytes::Integer = 64*1024^2,
+        return_diagnostics::Bool = false)
+    isfinite(sound_speed) && sound_speed > 0 ||
+        throw(ArgumentError("sound_speed must be finite and positive"))
+    for values in (frequencies, training_frequencies)
+        !isempty(values) && all(f -> isfinite(f) && f > 0, values) ||
+            throw(ArgumentError("query and training frequencies must be nonempty, finite and positive"))
+    end
+    all(isfinite, (incidence_angle, incidence_azimuth)) ||
+        throw(ArgumentError("incidence angles must be finite"))
+    all(t -> isfinite(t) && 0 < t < 1, (tolerance, rank_tolerance)) ||
+        throw(ArgumentError("residual and rank tolerances must lie in (0, 1)"))
+    k = 2π .* Float64.(frequencies) ./ Float64(sound_speed)
+    training_k = 2π .* Float64.(training_frequencies) ./ Float64(sound_speed)
+    all(t -> isfinite(t) && t > 0, k) && all(t -> isfinite(t) && t > 0, training_k) ||
+        throw(ArgumentError("converted wavenumbers must be finite and positive"))
+    n = length(surface.data)
+    space = FrequencyReduction.SnapshotSpace(2n; capacity, maxbytes)
+    empty_basis = zeros(ComplexF64, 2n, 0)
+    training = NamedTuple[]
+    for (frequency, wavenumber) in zip(training_frequencies, training_k)
+        A, b = _frequency_fluid_equations(surface, material, wavenumber,
+            incidence_angle, incidence_azimuth)
+        result = FrequencyReduction.solve_reduced(A, b, empty_basis;
+            tolerance, rank_tolerance, fallback = _frequency_full_solve)
+        kept = FrequencyReduction.add_snapshot!(space, result.x; tolerance = rank_tolerance)
+        push!(training,
+            (; frequency = Float64(frequency), k = wavenumber,
+                kept, rank = space.count, result.residual))
+    end
+    basis = FrequencyReduction.freeze(space)
+    space = nothing
+    direction = -_bem3d_incidence_direction(incidence_angle, incidence_azimuth)
+    amplitudes = ComplexF64[]
+    queries = NamedTuple[]
+    for (frequency, wavenumber) in zip(frequencies, k)
+        A, b = _frequency_fluid_equations(surface, material, wavenumber,
+            incidence_angle, incidence_azimuth)
+        result = FrequencyReduction.solve_reduced(A, b, basis;
+            tolerance, rank_tolerance, fallback = _frequency_full_solve)
+        push!(amplitudes,
+            far_field(surface.data, direction, wavenumber,
+                view(result.x, 1:n), view(result.x, (n + 1):(2n))))
+        push!(queries,
+            (; frequency = Float64(frequency), k = wavenumber,
+                result.reduced, result.reason, result.rank, result.projected, result.residual))
+    end
+    sweep = FrequencySweep(Float64.(frequencies), k, target_strength.(amplitudes),
+        amplitudes, ["Scattered field"])
+    report = (; method = :reduced_basis, formulation = :cbie,
+        compression = (method = :none,), correction = (method = :dim,),
+        training, queries, basis_rank = size(basis, 2), basis_bytes = sizeof(basis),
+        tolerance, rank_tolerance, capacity, maxbytes, incidence_angle, incidence_azimuth)
+    return return_diagnostics ? (; sweep, diagnostics = report) : sweep
+end
+
 """
     IncidenceAngleSweep
 
@@ -139,6 +335,70 @@ function _validate_incidence_sweep(angles, incidence_azimuth)
     isfinite(incidence_azimuth) || throw(ArgumentError("incidence azimuth must be finite"))
 end
 
+function _fluid_spheroid_modal_angle_sweep(body::Spheroid, boundary::FluidFilled,
+        k::Real, angles::AbstractVector{<:Real};
+        incidence_azimuth::Real = 0.0,
+        m_max::Integer = _default_spheroid_orders(k, body),
+        n_max::Integer = _default_spheroid_orders(k, body),
+        n_quad::Integer = 64, precision::Symbol = :double)
+    _validate_incidence_sweep(angles, incidence_azimuth)
+    m_max >= 0 && n_max >= 0 || throw(ArgumentError("modal orders must be nonnegative"))
+    n_quad >= 2 || throw(ArgumentError("n_quad must be at least 2"))
+    samples = Float64.(angles)
+    eta_i = cos.(samples)
+    eta_s = cos.(pi .- samples)
+    amplitudes = zeros(ComplexF64, length(samples))
+    c = k * body.q
+    c_int = c / boundary.soundspeed_contrast
+    nodes, weights = gauss(n_quad)
+    half = (n_quad ÷ 2 + 1):n_quad
+    nodes = nodes[half]
+    weights = 2 .* weights[half]
+    isodd(n_quad) && (weights[1] /= 2)
+
+    for m in 0:min(m_max, n_max)
+        active = [i
+                  for i in eachindex(samples)
+                  if m == 0 || !(abs(eta_i[i]) == 1 || abs(eta_s[i]) == 1)]
+        isempty(active) && continue
+        count = length(active)
+        exterior = _spheroid_wavefunctions(m, n_max, c, body.xi0,
+            [eta_i[active]; eta_s[active]; nodes]; spheroid = body.kind, precision)
+        interior = _spheroid_wavefunctions(m, n_max, c_int, body.xi0,
+            nodes; spheroid = body.kind, precision, radial_kind = 1)
+        degrees = m:n_max
+        Sint = collect(eachcol(interior.angular))
+        R3e = [(; value = (complex(exterior.r1[j], exterior.r2[j]),),
+                   derivative = (complex(exterior.dr1[j], exterior.dr2[j]),))
+               for j in eachindex(degrees)]
+        R1i = [(; value = (interior.r1[j],), derivative = (interior.dr1[j],))
+               for j in eachindex(degrees)]
+        surface = @view exterior.angular[(2 * count + 1):end, :]
+        azimuth_term = cos(m * (incidence_azimuth - (incidence_azimuth + pi)))
+        for (local_i, sample_i) in enumerate(active)
+            Sext = [[exterior.angular[local_i, j]; surface[:, j]]
+                    for j in eachindex(degrees)]
+            A = if precision === :quad
+                setprecision(BigFloat, 256) do
+                    _solve_fluid_coupling(BigFloat, boundary.density_contrast,
+                        degrees, Sext, Sint, weights, R3e, R1i)
+                end
+            else
+                _solve_fluid_coupling(Float64, boundary.density_contrast,
+                    degrees, Sext, Sint, weights, R3e, R1i)
+            end
+            for j in eachindex(degrees)
+                amplitudes[sample_i] += neumann_factor(m) *
+                                        exterior.angular[count + local_i, j] * A[j] *
+                                        azimuth_term
+            end
+        end
+    end
+    amplitudes .*= -2im / k
+    return IncidenceAngleSweep(samples, target_strength.(amplitudes), amplitudes,
+        ["Scattered field"])
+end
+
 """
     incidence_angle_sweep(mfs, body, boundary, k, angles; n=default, m_max=default,
         offset=0.3*characteristic_radius, oversampling=1, rtol=1e-6,
@@ -155,6 +415,8 @@ boundary-check operators and condition/rank diagnostics. Only one mode's matrice
 are retained at a time; coefficients and surface fields are discarded after sampling.
 Nonzero angles use modes `0:m_max`; exactly zero uses only mode zero, as in `mfs`.
 No setup is cached across calls. Bent cylinders and full-surface MFS are not supported.
+Rigid straight cylinders with flat caps are also unsupported by axisymmetric MFS;
+use `bem` for that sharp-rim geometry.
 
 Returns sampled angles, target strengths, and amplitudes. With `return_diagnostics=true`, returns
 `(; sweep, diagnostics)`, where `diagnostics[i]` contains the solve and independent
@@ -173,6 +435,7 @@ function incidence_angle_sweep(::typeof(mfs), body::Union{Sphere, Spheroid, Cyli
     _validate_incidence_sweep(angles, 0.0)
     body isa Cylinder && _isbent(body) &&
         throw(ArgumentError("reusable MFS sweeps require a straight Cylinder"))
+    _reject_rigid_flat_cylinder_mfs(body, boundary)
     oversampling >= 1 || throw(ArgumentError("mfs: oversampling must be at least 1"))
     condition_limit >= 0 || throw(ArgumentError("mfs: condition_limit must be nonnegative"))
     m_max >= 0 || throw(ArgumentError("mfs: m_max must be nonnegative"))
@@ -341,6 +604,9 @@ Geometry validation, operators and factorization are reused within this call. A 
 call assembles from its supplied meshes, materials, frequency and solver options.
 
 Accepts `formulation`, `correction`, `equilibrate` and `condition_limit` as in [`bem`](@ref).
+The single-interface dense overload also accepts `precision=:mixed` and
+`refinement`, reusing the guarded factorization across angles. Promotion to
+ComplexF64 persists for the remaining angles in that call.
 Both fluid overloads also accept `compression` and `gmres_kwargs`, reusing the
 compressed operators and block preconditioner across incidence angles.
 For compressed solves, `recycle_dimension=8` also retains a bounded solution subspace
@@ -369,13 +635,15 @@ function incidence_angle_sweep(surface::Mesh{<:Inti.Quadrature}, material::Fluid
         formulation::Symbol = :muller, correction::NamedTuple = (method = :dim,),
         equilibrate::Bool = true, condition_limit::Integer = 512,
         compression::NamedTuple = (method = :none,), gmres_kwargs::NamedTuple = (;),
-        recycle_dimension::Integer = 8)
+        recycle_dimension::Integer = 8, precision::Symbol = :double,
+        refinement::NamedTuple = (;))
     _validate_incidence_sweep(angles, incidence_azimuth)
     recycle_dimension >= 0 || throw(ArgumentError("recycle_dimension must be nonnegative"))
     condition_limit >= 0 || throw(ArgumentError("condition_limit must be nonnegative"))
     system = _assemble_full_fluid(
         material, k, surface.data; formulation, correction, compression)
-    factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs)
+    factor = _factor_full_fluid(system; equilibrate, condition_limit, gmres_kwargs,
+        precision, refinement)
     factor = _fluid_sweep_factor(factor, recycle_dimension, length(angles))
     return incidence_angle_sweep(angles) do incidence_angle
         p, q, quad, report = _solve_full_fluid(system, factor;
@@ -521,17 +789,27 @@ polar incidence angles in radians. Returns a sweep result.
 `Impedance` `boundary`, reusing each Fourier mode's factorized operator across angles; see
 `incidence_angle_sweep(::Cylinder, ::Union{Rigid,PressureRelease,Impedance}, ...)`. It accepts
 `n`, `m_max` and `rtol` instead of the volume-FEM keywords.
+
+`method=:modal` supports a full-coupling `FluidFilled` spheroid. It evaluates each
+azimuthal order's spheroidal basis once across all angles while retaining the
+existing coupling solve for each incident direction. Fix `m_max`, `n_max`, `n_quad`,
+and `precision` within a sweep.
 """
 function incidence_angle_sweep(body::Union{Sphere, Spheroid},
         boundary::AbstractBoundaryCondition, k::Real, angles::AbstractVector{<:Real};
         method::Symbol = :volume, kwargs...)
+    if method === :modal
+        body isa Spheroid && boundary isa FluidFilled && boundary.coupling === :full ||
+            throw(ArgumentError("method=:modal currently requires a full-coupling FluidFilled spheroid"))
+        return _fluid_spheroid_modal_angle_sweep(body, boundary, k, angles; kwargs...)
+    end
     if method === :axisymmetric
         boundary isa Union{Rigid, PressureRelease, Impedance} || throw(ArgumentError(
             "incidence_angle_sweep(..., method=:axisymmetric) only supports Rigid, PressureRelease or Impedance"))
         return _axisymmetric_angle_sweep(body, boundary, k, angles; kwargs...)
     end
     method === :volume || throw(ArgumentError(
-        "incidence_angle_sweep(::Union{Sphere,Spheroid}, ...) only supports method=:volume or :axisymmetric"))
+        "incidence_angle_sweep(::Union{Sphere,Spheroid}, ...) only supports method=:volume, :axisymmetric or :modal"))
     return _volume_angle_sweep(body, boundary, k, angles; kwargs...)
 end
 
@@ -552,7 +830,7 @@ function incidence_angle_sweep(bodies::AbstractVector{<:AbstractBody},
     all(b -> b isa Union{Sphere, Spheroid}, bodies) || throw(ArgumentError(
         "region bodies must be Sphere or Spheroid"))
     all(m -> m isa _VolumeRegionMaterial, materials) || throw(ArgumentError(
-        "region materials must be FluidFilled, SolidElastic, ViscoelasticSolid or ViscousLayer"))
+        "region materials must be FluidFilled, SpatialFluid, SolidElastic, ViscoelasticSolid or ViscousLayer"))
     system = _volume_system_regions(
         bodies, materials, k; parents, centers, orientations, kwargs...)
     geometry = _VolumeRegionGeometry(collect(AbstractBody, bodies),

@@ -1,0 +1,11 @@
+# BEM supplies operators used by FEM shell coupling; the far-field T-matrix uses volume FEM.
+include("shared/surface_data.jl")
+include("modal/modal.jl")
+include("kirchhoff/kirchhoff.jl")
+include("bem/bem.jl")
+include("fem/fem.jl")
+include("mfs/mfs.jl")
+include("fourier/fourier.jl")
+include("tmatrix/tmatrix.jl")
+include("coupled/coupled.jl")
+include("shared/postprocessing.jl")
