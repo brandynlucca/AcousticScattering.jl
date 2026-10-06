@@ -16,13 +16,13 @@ let
             Rc = AS.reflection_coefficient(boundary)
             sb, cb = sincos(angle)
             x = 2k * radius * sb
-            total = 2besselj(0, x) + im * π * besselj(1, x)
+            total = 2besselj(0, x) - im * π * besselj(1, x)
             for n in 1:60
                 term = besselj(2n, x) / (4n^2 - 1)
                 total -= 4term
                 abs(term) < 1e-15 * abs(total) && break
             end
-            return Rc * (k * radius * length) / (2π) * sb * total *
+            return -im * Rc * (k * radius * length) / (2π) * sb * total *
                    sinc(k * length * cb / π)
         end
 

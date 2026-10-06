@@ -1,6 +1,31 @@
 using AcousticScattering
 using Test
 
+@testset "Kirchhoff source-facing surface and translation" begin
+    # An axis-aligned box has just one illuminated face for axial incidence.
+    # Its physical-optics integral is analytic, including the face's position.
+    k, area = 2.3, 0.6 * 0.4
+    for x0 in (0.0, 0.37)
+        surface = mesh(; qorder = 4) do g
+            g.model.add("kirchhoff-source-facing-box")
+            g.model.occ.addBox(x0, -0.3, -0.2, 1.0, 0.6, 0.4)
+            g.model.occ.synchronize()
+            g.option.setNumber("Mesh.MeshSizeMin", 0.3)
+            g.option.setNumber("Mesh.MeshSizeMax", 0.3)
+            g.model.mesh.generate(2)
+            g.model.mesh.setOrder(2)
+        end
+        for (beta, phase) in ((0.0, 2k*x0), (pi, -2k*(x0+1)))
+            expected = -im*k*area/(2pi) * cis(phase)
+            for (boundary, reflection) in ((Rigid(), 1), (PressureRelease(), -1))
+                actual = scattering_amplitude(kirchhoff(surface, boundary, k;
+                    incidence_angle = beta))
+                @test actual ≈ reflection*expected rtol = 1e-11
+            end
+        end
+    end
+end
+
 # A supplied-mesh kirchhoff() of a canonical shape should reproduce the closed-form kirchhoff()
 # of that same shape to mesh-discretization accuracy: the two are independent code paths for the
 # same physical-optics surface integral.

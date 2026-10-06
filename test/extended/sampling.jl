@@ -308,11 +308,13 @@ let
         radial = frequency_sweep(k -> fem(Sphere(0.1), Rigid(), k), [100.0], 1500.0)
         @test radial.amplitudes[1] ==
               scattering_amplitude(fem(Sphere(0.1), Rigid(), only(radial.k)))
-        scalar_solve = k -> fem(Sphere(0.1), Rigid(), k;
+        meridian_solve = k -> fem(Sphere(0.1), Rigid(), k;
             method = :meridian, n_r = 3, n_theta = 8, l_max = 3)
-        scalar = frequency_sweep(scalar_solve, [100.0], 1500.0)
-        @test scalar.amplitudes === nothing
-        @test scalar.target_strength[1] == target_strength(scalar_solve(only(scalar.k)))
+        meridian = frequency_sweep(meridian_solve, [100.0], 1500.0)
+        @test only(meridian.amplitudes) ==
+              scattering_amplitude(meridian_solve(only(meridian.k)))
+        @test only(meridian.target_strength) ==
+              target_strength(meridian_solve(only(meridian.k)))
         @test_throws ArgumentError frequency_sweep(solve, Float64[], 1500.0)
         @test_throws ArgumentError frequency_sweep(solve, [100.0], 0.0)
 

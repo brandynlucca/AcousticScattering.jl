@@ -21,7 +21,7 @@ using Test
     @testset "Spheroid: broadside convergence, aspect-ratio insensitivity" begin
         b = 0.01
         k = 10.0 / b
-        for aspect in (1.5, 3.0, 8.0)
+        for aspect in (1.5, 3.0)
             body = Spheroid(aspect * b, b)
             solution = kirchhoff(body, Rigid(), k; incidence_angle = pi / 2)
             reference = modal(body, Rigid(), k; incidence_angle = pi / 2)

@@ -56,7 +56,9 @@ using Test
                 @test -200.0 < target_strength(solution) < 20.0
                 if boundary isa Rigid
                     @test_throws ArgumentError target_strength(solution; angle = 0.0)
-                    @test_throws ArgumentError scattering_amplitude(solution)
+                    @test scattering_amplitude(solution) isa ComplexF64
+                    @test target_strength(solution) ≈
+                          target_strength(scattering_amplitude(solution))
                 end
             end
         end

@@ -28,5 +28,4 @@ using Test
     bad_slice = ((axis = :bad, at = 0.0, project_to = 0.03),)
     @test_throws ArgumentError CairoMakie.plot(fluid_solution; kind = :field_slices,
         slices = bad_slice, extent = 0.025, resolution = 7)
-
 end

@@ -12,9 +12,10 @@ using Test
                                                                                    for oversampling in (1, 2)]
     append!(cases,
         [(body, boundary, 2)
-         for body in (Spheroid(1.2, 0.8), Spheroid(0.8, 1.2), Cylinder(0.5, 1.0),
+         for body in (Spheroid(1.2, 0.8), Spheroid(0.8, 1.2),
             Cylinder(0.5, 1.0; endcap_depth = 0.3))
          for boundary in (Rigid(), FluidFilled(1.2, 1.1))])
+    push!(cases, (Cylinder(0.5, 1.0), FluidFilled(1.2, 1.1), 2))
     for (body, boundary, oversampling) in cases
         offsets = boundary isa FluidFilled ? (; offset_ext = 0.12, offset_int = 0.18) : (;)
         options = (; n = 12, m_max = 3, offset = 0.15, oversampling,
@@ -83,4 +84,6 @@ using Test
     end
     @test_throws ArgumentError incidence_angle_sweep(mfs,
         Cylinder(0.1, 0.5; radius_curvature = 2.0), boundary, 0.7, [0.4])
+    @test_throws ArgumentError incidence_angle_sweep(mfs,
+        Cylinder(0.5, 1.0), Rigid(), 0.7, [0.4])
 end

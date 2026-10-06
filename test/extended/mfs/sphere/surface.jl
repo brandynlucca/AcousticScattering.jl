@@ -125,5 +125,4 @@ let
         @test_throws ArgumentError mfs(
             sources, Rigid(), 1.0; offset = 0.3, source_mesh = collocation)
     end
-
 end

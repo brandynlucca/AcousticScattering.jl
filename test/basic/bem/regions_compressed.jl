@@ -47,8 +47,16 @@ using Test
         ([outer, inner], [FluidFilled(1.2, 1.0), FluidFilled(0.8, 1.0)], [0, 1], 2.0),
         ([outer, inner], [gas, weak], [0, 1], 0.0276),
         ([outer, close], [weak, gas], [0, 1], 0.03))
-    @testset "case $case_index" for (case_index, (
-        surfaces, materials, parents, k)) in enumerate(cases)
+    selected_case = get(ENV, "TEST_REGION_BEM_CASE", "")
+    case_indices = if isempty(selected_case)
+        eachindex(cases)
+    else
+        index = parse(Int, selected_case)
+        index in eachindex(cases) || throw(ArgumentError("Unknown region BEM case $index"))
+        (index,)
+    end
+    @testset "case $case_index" for case_index in case_indices
+        surfaces, materials, parents, k = cases[case_index]
         # The reversed-density case is ill-conditioned
         gmres_kwargs = case_index == 15 ? (; reltol = 1e-12) : (;)
         options = (;

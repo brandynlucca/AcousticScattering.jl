@@ -2,6 +2,11 @@ using AcousticScattering
 using Test
 
 @testset "Cylinder" begin
+    @testset "Unsupported rigid flat rim" begin
+        @test_throws ArgumentError mfs(Cylinder(0.5, 1.0), Rigid(), 0.5;
+            incidence_angle = 0.0, n = 16)
+    end
+
     body = Cylinder(0.5, 1.0; endcap_depth = 0.5)
     for (name, boundary) in (("rigid", Rigid()),
         ("pressure-release", PressureRelease()),

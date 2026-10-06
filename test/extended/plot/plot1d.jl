@@ -64,13 +64,13 @@ let
                     [12000.0, 38000.0], c_water)
                 @test plot(layered; quantity = :phase) isa Figure
             end
-            scalar = frequency_sweep(
+            meridian = frequency_sweep(
                 k -> fem(sphere, Rigid(), k;
                     method = :meridian, n_r = 3, n_theta = 8, l_max = 3),
                 [20000.0],
                 c_water)
-            @test plot(scalar; quantity = :target_strength) isa Figure
-            @test_throws ArgumentError plot(scalar; quantity = :phase)
+            @test plot(meridian; quantity = :target_strength) isa Figure
+            @test plot(meridian; quantity = :phase) isa Figure
             @test_throws ArgumentError plot(sweep; quantity = :unknown)
         end
     end

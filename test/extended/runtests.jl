@@ -18,6 +18,8 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "modal-")
         @time @safetestset "Modal sphere general" include("modal/sphere/general.jl")
     selected_file("modal/sphere/concentric.jl") &&
         @time @safetestset "Modal sphere concentric" include("modal/sphere/concentric.jl")
+    selected_file("modal/sphere/layers.jl") &&
+        @time @safetestset "Modal sphere layers" include("modal/sphere/layers.jl")
     selected_file("modal/sphere/monopole.jl") &&
         @time @safetestset "Modal sphere monopole" include("modal/sphere/monopole.jl")
     selected_file("modal/spheroid.jl") &&
@@ -29,6 +31,10 @@ end
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "tmatrix-")
     selected_file("tmatrix/spheroid.jl") &&
         @time @safetestset "T-matrix spheroid" include("tmatrix/spheroid.jl")
+    selected_file("tmatrix/spheroid_mixed_layers.jl") &&
+        @time @safetestset "T-matrix mixed spheroid layers" include("tmatrix/spheroid_mixed_layers.jl")
+    selected_file("tmatrix/spheroid_farfield.jl") &&
+        @time @safetestset "T-matrix mixed spheroid far field" include("tmatrix/spheroid_farfield.jl")
 end
 
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "kirchhoff-")
@@ -38,6 +44,8 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "kirchhoff-")
         @time @safetestset "Kirchhoff sphere layer reflection" include("kirchhoff/sphere/layer_reflection.jl")
     selected_file("kirchhoff/spheroid.jl") &&
         @time @safetestset "Kirchhoff spheroid" include("kirchhoff/spheroid.jl")
+    selected_file("kirchhoff/spheroid_slender_envelope.jl") &&
+        @time @safetestset "Kirchhoff slender spheroid envelope" include("kirchhoff/spheroid_slender_envelope.jl")
     selected_file("kirchhoff/cylinder/surface.jl") &&
         @time @safetestset "Kirchhoff cylinder surface" include("kirchhoff/cylinder/surface.jl")
     selected_file("kirchhoff/cylinder/integral.jl") &&
@@ -59,6 +67,8 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "fem-")
         @time @safetestset "FEM spheroid coupled" include("fem/spheroid/coupled.jl")
     selected_file("fem/spheroid/volume.jl") &&
         @time @safetestset "FEM spheroid volume" include("fem/spheroid/volume.jl")
+    selected_file("fem/spheroid/layers.jl") &&
+        @time @safetestset "FEM spheroid layers" include("fem/spheroid/layers.jl")
     selected_file("fem/cylinder/radial.jl") &&
         @time @safetestset "FEM cylinder radial" include("fem/cylinder/radial.jl")
     selected_file("fem/cylinder/meridian.jl") &&
@@ -70,8 +80,14 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "bem-")
         @time @safetestset "BEM sphere axisymmetric" include("bem/sphere/axisymmetric.jl")
     selected_file("bem/sphere/full3d.jl") &&
         @time @safetestset "BEM sphere full 3D" include("bem/sphere/full3d.jl")
+    selected_file("bem/sphere/venas_fluid_shell.jl") &&
+        @time @safetestset "BEM Venas fluid shell" include("bem/sphere/venas_fluid_shell.jl")
     selected_file("bem/spheroid/axisymmetric.jl") &&
         @time @safetestset "BEM spheroid axisymmetric" include("bem/spheroid/axisymmetric.jl")
+    selected_file("bem/spheroid/lavia_confocal.jl") &&
+        @time @safetestset "BEM Lavia confocal spheroid" include("bem/spheroid/lavia_confocal.jl")
+    selected_file("bem/spheroid/nearfield.jl") &&
+        @time @safetestset "BEM spheroid near fields" include("bem/spheroid/nearfield.jl")
     selected_file("bem/spheroid/full3d.jl") &&
         @time @safetestset "BEM spheroid full 3D" include("bem/spheroid/full3d.jl")
     selected_file("bem/cylinder/axisymmetric.jl") &&
@@ -85,16 +101,22 @@ if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "bem-")
 end
 
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "mfs-")
+    selected_file("mfs/bladder_backbone.jl") &&
+        @time @safetestset "MFS bladder and backbone" include("mfs/bladder_backbone.jl")
     selected_file("mfs/sphere/axisymmetric.jl") &&
         @time @safetestset "MFS sphere axisymmetric" include("mfs/sphere/axisymmetric.jl")
     selected_file("mfs/sphere/surface.jl") &&
         @time @safetestset "MFS sphere surface" include("mfs/sphere/surface.jl")
     selected_file("mfs/spheroid.jl") &&
         @time @safetestset "MFS spheroid" include("mfs/spheroid.jl")
+    selected_file("mfs/nested_fluid.jl") &&
+        @time @safetestset "MFS nested fluid" include("mfs/nested_fluid.jl")
     selected_file("mfs/cylinder/axisymmetric.jl") &&
         @time @safetestset "MFS cylinder axisymmetric" include("mfs/cylinder/axisymmetric.jl")
     selected_file("mfs/cylinder/surface.jl") &&
         @time @safetestset "MFS cylinder surface" include("mfs/cylinder/surface.jl")
+    selected_file("mfs/cylinder/penetrable.jl") &&
+        @time @safetestset "MFS penetrable capped cylinder" include("mfs/cylinder/penetrable.jl")
 end
 
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "fourier-")

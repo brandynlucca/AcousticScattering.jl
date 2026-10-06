@@ -1,5 +1,17 @@
 using Test
 
+macro timed_include(path)
+    quote
+        let test_file = $(esc(path)), started = time_ns()
+            try
+                include(test_file)
+            finally
+                @info "Basic test file completed" file=test_file elapsed_seconds=(time_ns()-started)/1e9
+            end
+        end
+    end
+end
+
 const TEST_BASIC_GROUP = get(ENV, "TEST_BASIC_GROUP", "All")
 const BASIC_GROUPS = (
     "Modal", "TMatrix", "Kirchhoff", "FEM", "BEM", "MFS", "Fourier", "Plotting",
@@ -11,90 +23,112 @@ TEST_BASIC_GROUP == "All" || TEST_BASIC_GROUP in BASIC_GROUPS ||
 
 @testset "Basic regression tests" begin
     if TEST_BASIC_GROUP in ("All", "Modal")
-        @testset "Modal" begin
-            include("modal/sphere.jl")
-            include("modal/cylinder.jl")
-            include("modal/cylinder_envelope.jl")
-            include("modal/spheroid.jl")
-            include("modal/vesm.jl")
+        elapsed = @elapsed @testset "Modal" begin
+            @timed_include "modal/sphere.jl"
+            @timed_include "modal/cylinder.jl"
+            @timed_include "modal/cylinder_envelope.jl"
+            @timed_include "modal/spheroid.jl"
+            @timed_include "modal/spheroid_incident.jl"
+            @timed_include "modal/vesm.jl"
         end
+        @info "Basic group completed" group="Modal" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "TMatrix")
-        @testset "T-matrix" begin
-            include("tmatrix/spheroid.jl")
+        elapsed = @elapsed @testset "T-matrix" begin
+            @timed_include "tmatrix/spheroid.jl"
         end
+        @info "Basic group completed" group="T-matrix" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "Kirchhoff")
-        @testset "Kirchhoff" begin
-            include("kirchhoff/sphere.jl")
-            include("kirchhoff/spheroid.jl")
-            include("kirchhoff/cylinder.jl")
-            include("kirchhoff/high_frequency.jl")
-            include("kirchhoff/envelope.jl")
-            include("kirchhoff/mesh.jl")
+        elapsed = @elapsed @testset "Kirchhoff" begin
+            @timed_include "kirchhoff/sphere.jl"
+            @timed_include "kirchhoff/spheroid.jl"
+            @timed_include "kirchhoff/cylinder.jl"
+            @timed_include "kirchhoff/high_frequency.jl"
+            @timed_include "kirchhoff/envelope.jl"
+            @timed_include "kirchhoff/envelope_slender.jl"
+            @timed_include "kirchhoff/mesh.jl"
         end
+        @info "Basic group completed" group="Kirchhoff" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "FEM")
-        @testset "FEM" begin
-            include("fem/sphere.jl")
-            include("fem/spheroid.jl")
-            include("fem/cylinder.jl")
-            include("fem/volume.jl")
-            include("fem/free_surface.jl")
+        elapsed = @elapsed @testset "FEM" begin
+            @timed_include "fem/sphere.jl"
+            @timed_include "fem/spheroid.jl"
+            @timed_include "fem/cylinder.jl"
+            @timed_include "fem/pressure_meridian.jl"
+            @timed_include "fem/meridian_reference.jl"
+            @timed_include "fem/material_fields.jl"
+            @timed_include "fem/mesh.jl"
+            @timed_include "fem/volume.jl"
+            @timed_include "fem/volume_regions.jl"
+            @timed_include "fem/spatial_fluid.jl"
+            @timed_include "fem/volume_rotation.jl"
+            @timed_include "fem/volume_solvers.jl"
+            @timed_include "fem/free_surface.jl"
         end
+        @info "Basic group completed" group="FEM" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "BEM")
-        @testset "BEM" begin
-            include("bem/sphere.jl")
-            include("bem/spheroid.jl")
-            include("bem/cylinder.jl")
-            include("bem/assembly.jl")
-            include("bem/quadrature_workspace.jl")
-            include("bem/quadrature_cycles.jl")
-            include("bem/kernel_reuse.jl")
-            include("bem/modal_kernel.jl")
-            include("bem/mode_storage.jl")
-            include("bem/arbitrary.jl")
-            include("bem/edge.jl")
-            include("bem/formulations.jl")
-            include("bem/preconditioner.jl")
-            include("bem/setup.jl")
-            include("bem/regions_compressed.jl")
-            include("bem/adaptive.jl")
+        elapsed = @elapsed @testset "BEM" begin
+            @timed_include "bem/sphere.jl"
+            @timed_include "bem/spheroid.jl"
+            @timed_include "bem/cylinder.jl"
+            @timed_include "bem/assembly.jl"
+            @timed_include "bem/quadrature_workspace.jl"
+            @timed_include "bem/quadrature_cycles.jl"
+            @timed_include "bem/kernel_reuse.jl"
+            @timed_include "bem/modal_kernel.jl"
+            @timed_include "bem/mode_storage.jl"
+            @timed_include "bem/arbitrary.jl"
+            @timed_include "bem/edge.jl"
+            @timed_include "bem/formulations.jl"
+            @timed_include "bem/preconditioner.jl"
+            @timed_include "bem/setup.jl"
+            @timed_include "bem/regions_compressed.jl"
+            @timed_include "bem/adaptive.jl"
         end
+        @info "Basic group completed" group="BEM" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "MFS")
-        @testset "MFS" begin
-            include("mfs/sphere.jl")
-            include("mfs/spheroid.jl")
-            include("mfs/cylinder.jl")
-            include("mfs/sweeps.jl")
-            include("mfs/assembly.jl")
+        elapsed = @elapsed @testset "MFS" begin
+            @timed_include "mfs/sphere.jl"
+            @timed_include "mfs/spheroid.jl"
+            @timed_include "mfs/cylinder.jl"
+            @timed_include "mfs/sweeps.jl"
+            @timed_include "mfs/assembly.jl"
         end
+        @info "Basic group completed" group="MFS" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "Fourier")
-        @testset "Fourier matching" begin
-            include("fourier/sphere.jl")
-            include("fourier/spheroid.jl")
-            include("fourier/irregular.jl")
+        elapsed = @elapsed @testset "Fourier matching" begin
+            @timed_include "fourier/sphere.jl"
+            @timed_include "fourier/spheroid.jl"
+            @timed_include "fourier/irregular.jl"
         end
+        @info "Basic group completed" group="Fourier matching" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "Plotting")
-        @testset "Plotting" begin
-            include("plot/plot1d.jl")
-            include("plot/plot2d.jl")
-            include("plot/plot3d.jl")
-            include("plot/volume.jl")
+        elapsed = @elapsed @testset "Plotting" begin
+            @timed_include "plot/plot1d.jl"
+            @timed_include "plot/plot2d.jl"
+            @timed_include "plot/plot3d.jl"
+            @timed_include "plot/volume.jl"
         end
+        @info "Basic group completed" group="Plotting" elapsed_seconds=elapsed
     end
     if TEST_BASIC_GROUP in ("All", "Utilities")
-        @testset "Utilities" begin
-            include("mesh.jl")
-            include("sampling.jl")
-            include("farfield.jl")
-            include("output.jl")
-            include("internals.jl")
-            include("pressure.jl")
+        elapsed = @elapsed @testset "Utilities" begin
+            @timed_include "mesh.jl"
+            @timed_include "sampling.jl"
+            @timed_include "farfield.jl"
+            @timed_include "output.jl"
+            @timed_include "internals.jl"
+            @timed_include "source_layout.jl"
+            @timed_include "pressure.jl"
+            @timed_include "incident.jl"
+            @timed_include "incident_solvers.jl"
         end
+        @info "Basic group completed" group="Utilities" elapsed_seconds=elapsed
     end
 end

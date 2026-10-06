@@ -47,6 +47,15 @@ using Test
               pressure(solution, (0.02, 0.0, 0.0);
             field = :incident) + pressure(solution, (0.02, 0.0, 0.0); field = :scattered)
 
+        # With j_l=(h_l^(1)+h_l^(2))/2, the outgoing/incoming partial-wave
+        # ratio is S_l=1+2A_l. A passive boundary cannot amplify it.
+        for impedance in (Impedance(1.0), Impedance(zeta))
+            @test all(abs(1 + 2AcousticScattering._modal_coefficient(
+                          impedance, l, k, sphere.radius)) <= 1 + 2e-14 for l in 0:8)
+        end
+        @test all(abs(abs(1 + 2AcousticScattering._modal_coefficient(
+                      Impedance(1im), l, k, sphere.radius)) - 1) < 2e-14 for l in 0:8)
+
         @test Impedance(1im) isa Impedance
         @test_throws ArgumentError Impedance(-1.0)
         @test_throws ArgumentError Impedance(0.0)
@@ -147,7 +156,7 @@ using Test
         @test_throws ArgumentError SphericalWave(0.0)
         @test_throws ArgumentError SphericalWave(-1.0)
         solution = modal(sphere, Rigid(), k; incident = SphericalWave(r0))
-        @test_throws ArgumentError pressure(solution, (0.02, 0.0, 0.0))
+        @test isfinite(pressure(solution, (0.02, 0.0, 0.0)))
     end
 
     @testset "Bessel-beam incident field" begin
@@ -170,6 +179,6 @@ using Test
         @test_throws ArgumentError BesselBeam(NaN)
         @test_throws ArgumentError BesselBeam(Inf)
         solution = modal(sphere, Rigid(), k; incident = BesselBeam(deg2rad(30)))
-        @test_throws ArgumentError pressure(solution, (0.02, 0.0, 0.0))
+        @test isfinite(pressure(solution, (0.02, 0.0, 0.0)))
     end
 end

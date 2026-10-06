@@ -1,6 +1,7 @@
 [deps]
 AcousticScattering = "37bc0722-8b3f-41d8-b4ae-17decd3486a9"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+FMM3D = "1e13804c-f9b7-11ea-0ef0-29f3b1745df8"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
@@ -10,8 +11,9 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
-AcousticScattering = "0.1.1"
+AcousticScattering = "0.1.2"
 CairoMakie = "0.12 - 0.15"
+FMM3D = "1.0.1"
 LinearAlgebra = "1.10"
 Preferences = "1"
 QuadGK = "2.10.1"

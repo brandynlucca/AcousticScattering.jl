@@ -16,6 +16,13 @@ using Test
     incident = pressure(modal_solution, point; field = :incident)
     scattered = pressure(modal_solution, point; field = :scattered)
     total = pressure(modal_solution, point)
+    @test modal_solution(point) == total
+    @test modal_solution(point; quantity = :pressure, field = :scattered) == scattered
+    @test modal_solution([point, point]) == pressure(modal_solution, [point, point])
+    @test_throws ArgumentError modal_solution(point; quantity = :unknown)
+    @test_throws ArgumentError modal_solution(point; quantity = :displacement,
+        density_exterior = 1000.0, soundspeed_exterior = 1500.0)
+    @test_throws ArgumentError modal_solution(point; region = 0)
     @test incident isa ComplexF64
     @test scattered isa ComplexF64
     @test total ≈ incident + scattered
@@ -24,6 +31,8 @@ using Test
 
     fluid_solution = modal(body, FluidFilled(1.2, 1.1), k; m_max = 3)
     @test pressure(fluid_solution, (0.0, 0.0, 0.0); field = :interior) isa ComplexF64
+    @test fluid_solution((0.0, 0.0, 0.0); field = :interior) ==
+          pressure(fluid_solution, (0.0, 0.0, 0.0); field = :interior)
 
     boundary_solution = mfs(Sphere(1.0), Rigid(), k; incidence_angle = 0.0,
         n = 12, offset = 0.2, condition_limit = 0)
@@ -52,11 +61,11 @@ end
 let
     @time "Public exports and source docstrings" @testset "Public exports and source docstrings" begin
         expected = Set((:Rigid, :PressureRelease, :Impedance, :FluidFilled, :GasFilled,
-            :SolidElastic,
+            :SolidElastic, :SpatialFluid,
             :ViscoelasticSolid, :Shelled, :FluidLayer, :ElasticLayer, :ViscousLayer,
             :LayeredMaterial, :VacuumInterior, :FluidInterior, :AbstractBody, :Sphere, :Cylinder,
             :Spheroid, :Shell, :Irregular, :IncidentField, :PlaneWave, :SphericalWave,
-            :BesselBeam,
+            :BesselBeam, :incident_pressure, :incident_gradient, :incident_coefficient,
             :AbstractSolution, :ModalSolution, :TMatrixSolution,
             :KirchhoffSolution, :FEMSolution,
             :BEMSolution, :MFSSolution, :FMSolution, :FreeSurfaceSolution, :modal, :tmatrix,
@@ -66,9 +75,11 @@ let
             :components, :frequency_sweep, :incidence_angle_sweep, :bistatic_sweep, :bistatic_map))
         @test Set(names(AcousticScattering)) == union(expected, Set((:AcousticScattering,)))
         for name in (:Tank, :ProfiledTank, :Transducer, :TankTransducer,
-                :AbstractTransducer, :Wall, :TankField, :tank_field,
-                :received_signal, :time_synthesis, :gaussian_pulse,
-                :resonant_response, :piezo_equivalent, :receiver_oscillogram)
+            :AbstractTransducer, :Wall, :TankField, :tank_field,
+            :received_signal, :time_synthesis, :gaussian_pulse,
+            :resonant_response, :piezo_equivalent, :receiver_oscillogram,
+            :FarFieldTMatrix, :farfield_tmatrix, :elastic_displacement, :elastic_stress,
+            :viscous_velocity, :viscous_stress)
             @test !isdefined(AcousticScattering, name)
         end
         for name in expected

@@ -110,3 +110,58 @@ end
           all(isfinite, scalar.target_strength)
     @test scalar.target_strength ≈ target_strength.(scalar.amplitudes)
 end
+
+module BEMFrequencySweepIntegrationChecks
+using AcousticScattering, LinearAlgebra, Test
+const AS = AcousticScattering
+
+@testset "Public frozen-basis frequency sweep" begin
+    surface = mesh(
+        Sphere(1.0); method = :full, resolution = 0.8, mesh_order = 2, qorder = 4)
+    material = FluidFilled(1.05, 1.02)
+    speed = 1500.0
+    frequencies = [0.6, 0.7, 1.2, 0.7] .* speed ./ (2π)
+    training_frequencies = [0.6, 0.8] .* speed ./ (2π)
+    angles = (; incidence_angle = 0.7, incidence_azimuth = 0.3)
+    direct = frequency_sweep(
+        k -> bem(surface, material, k;
+            formulation = :cbie, condition_limit = 0, angles...),
+        frequencies, speed)
+    reduced = frequency_sweep(surface, material, frequencies, speed;
+        training_frequencies, angles..., return_diagnostics = true)
+    @test reduced.sweep.frequencies == frequencies
+    @test reduced.sweep.k ≈ [0.6, 0.7, 1.2, 0.7]
+    @test reduced.sweep.amplitudes≈direct.amplitudes rtol=1e-8 atol=1e-12
+    @test reduced.sweep.target_strength ≈ direct.target_strength atol=1e-7
+    report = reduced.diagnostics
+    @test report.basis_rank == 2
+    @test report.basis_bytes == 16*2length(surface.data)*report.basis_rank
+    @test first(report.queries).reduced
+    @test any(q -> !q.reduced, report.queries)
+    @test all(q -> max(q.residual.original, q.residual.scaled) <= 1e-10, report.queries)
+    @test length(report.training) == 2
+    # Empty storage forces independently validated full solves at every query.
+    fallback = frequency_sweep(surface, material, frequencies, speed;
+        training_frequencies, maxbytes = 0, angles..., return_diagnostics = true)
+    @test fallback.diagnostics.basis_rank == 0
+    @test all(q -> !q.reduced && q.reason === :empty, fallback.diagnostics.queries)
+    @test fallback.sweep.amplitudes ≈ direct.amplitudes rtol=1e-12
+    plain = frequency_sweep(surface, material, frequencies[1:1], speed;
+        training_frequencies, capacity = 0, angles...)
+    @test plain isa AS.FrequencySweep
+    @test plain.amplitudes ≈ direct.amplitudes[1:1] rtol=1e-12
+    for bad in (Float64[], [NaN], [-1.0])
+        @test_throws ArgumentError frequency_sweep(
+            surface, material, bad, speed; training_frequencies)
+        @test_throws ArgumentError frequency_sweep(surface, material, frequencies, speed;
+            training_frequencies = bad)
+    end
+    for options in ((capacity = -1,), (maxbytes = -1,), (tolerance = NaN,),
+        (rank_tolerance = 0.0,), (incidence_angle = Inf,))
+        @test_throws ArgumentError frequency_sweep(surface, material, frequencies, speed;
+            training_frequencies, options...)
+    end
+    @test_throws ArgumentError frequency_sweep(
+        surface, material, frequencies, 0.0; training_frequencies)
+end
+end

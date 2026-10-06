@@ -140,6 +140,26 @@ let
             end
         end
 
+        @testset "fluid spheroid modal incidence reuse" begin
+            body = AS.Spheroid(0.07, 0.01)
+            water = AS.FluidFilled(1028.9 / 1026.8, 1480.3 / 1477.3)
+            gas = AS.FluidFilled(1.24 / 1026.8, 345.0 / 1477.3)
+            angles = [0.0, pi / 3, pi / 2]
+            for (boundary, frequency, precision) in ((water, 12_000.0, :double), (
+                gas, 12_000.0, :quad))
+                k_sweep = 2pi * frequency / 1477.3
+                sweep = AS.incidence_angle_sweep(body, boundary, k_sweep, angles;
+                    method = :modal, m_max = 5, n_max = 14, n_quad = 32, precision)
+                fresh = [AS.scattering_amplitude(AS.modal(body, boundary, k_sweep;
+                             incidence_angle = angle, m_max = 5, n_max = 14,
+                             n_quad = 32, precision)) for angle in angles]
+                @test sweep.amplitudes≈fresh rtol=1e-10 atol=1e-12
+                @test sweep.target_strength ≈ AS.target_strength.(fresh) atol = 1e-8
+            end
+            @test_throws ArgumentError AS.incidence_angle_sweep(
+                body, AS.Rigid(), 2pi * 12_000 / 1477.3, angles; method = :modal)
+        end
+
         @testset "Rigid/PressureRelease: precision keyword now actually reaches the modal coefficient" begin
             body = AS.Spheroid(0.10, 0.03)
             k_safe = 2pi * 38000.0 / 1477.4

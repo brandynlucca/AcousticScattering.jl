@@ -35,13 +35,15 @@ let
             end
         end
 
-        @time "Complex amplitude and scalar-only FEM fallback" @testset "Complex amplitude and scalar-only FEM fallback" begin
+        @time "Complex amplitude across solution representations" @testset "Complex amplitude across solution representations" begin
             for sol in (modal_sol, kirch_sol, fem_sol, bem_sol, mfs_sol)
                 @test AS.scattering_amplitude(sol) isa Complex
             end
-            scalar = AS.fem(sphere, AS.Rigid(), k;
+            meridian = AS.fem(sphere, AS.Rigid(), k;
                 method = :meridian, n_r = 3, n_theta = 8, l_max = 3)
-            @test_throws ArgumentError AS.scattering_amplitude(scalar)
+            @test AS.scattering_amplitude(meridian) isa Complex
+            @test AS.target_strength(meridian) ==
+                  AS.target_strength(AS.scattering_amplitude(meridian))
         end
 
         @time "angle/azimuth keywords: supported where a real bistatic query exists, explicit error otherwise" @testset "angle/azimuth keywords: supported where a real bistatic query exists, explicit error otherwise" begin

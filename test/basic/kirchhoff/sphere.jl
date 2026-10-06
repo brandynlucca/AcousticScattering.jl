@@ -1,6 +1,16 @@
 using AcousticScattering
 using Test
 
+@testset "Kirchhoff outgoing-wave phase" begin
+    # The physical-optics error is O(1/ka) here. A modulus-only check cannot
+    # detect a conjugated phase or a missing factor of i.
+    for boundary in (Rigid(), PressureRelease())
+        exact = scattering_amplitude(modal(Sphere(1.0), boundary, 40.0))
+        approximate = scattering_amplitude(kirchhoff(Sphere(1.0), boundary, 40.0))
+        @test abs(approximate - exact) / abs(exact) < 0.04
+    end
+end
+
 @testset "Sphere" begin
     body = Sphere(0.01)
     k = 2pi * 12000.0 / 1477.3
