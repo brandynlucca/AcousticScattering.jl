@@ -80,7 +80,7 @@ target_strength(solution) # dB re 1 m²
 
 If you use this package in research, cite the archived version you used:
 
-> Lucca, B. (2026). *AcousticScattering.jl* (v0.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22776330
+> Lucca, B. (2026). *AcousticScattering.jl* (v0.1.2) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22776330
 
 Please also cite the relevant model papers listed in the [documentation references](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/references/).
 
