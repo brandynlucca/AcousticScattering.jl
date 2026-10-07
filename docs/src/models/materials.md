@@ -51,6 +51,6 @@ Volume FEM provides displacement [m], velocity [m/s] and stress [Pa] through `so
 
 Structural shell FEM uses `Shelled(poisson, density, youngs_modulus)` with absolute density [kg/m^3] and modulus [Pa]. Supply fluid properties to `fem`.
 
-`ViscoelasticSolid`, `ViscousLayer` and `SpatialFluid` do not supply pore-pressure or temperature fields. See [Surface waves, guided waves and resonances](@ref wave-diagnostics) for physics outside these models.
+`ViscoelasticSolid`, `ViscousLayer` and `SpatialFluid` do not supply pore-pressure or temperature fields.
 
 See [References](@ref references) for the underlying scattering and elasticity models.

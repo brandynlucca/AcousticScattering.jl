@@ -1,8 +1,5 @@
 # [Kirchhoff physical optics](@id kirchhoff-theory)
 
-For the distinction between physical-edge diffraction, smooth-surface creeping
-waves and elastic guided waves, see [Surface waves and resonances](@ref wave-diagnostics).
-
 Kirchhoff replaces the true boundary field with a locally reflected incident field on the illuminated surface and suppresses the shadowed contribution. Numerical integration can be accurate at any chosen frequency while the physical-optics approximation remains inaccurate outside its validity regime. Do not equate an “exact integral” with exact wave scattering.
 
 ## Reflection and amplitude
