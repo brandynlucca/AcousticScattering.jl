@@ -4,13 +4,18 @@
 
 [![Julia Registry](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaRegistries%2FGeneral%2Fmaster%2FA%2FAcousticScattering%2FVersions.toml&search=.*%5C%5B%22%28%5B%5E%22%5D%2B%29%22%5C%5D&flags=s&replace=v%241&label=Julia%20Registry&color=blue)](https://juliahub.com/ui/Packages/AcousticScattering)
 [![GitHub Version](https://img.shields.io/github/v/release/brandynlucca/AcousticScattering.jl?label=GitHub)](https://github.com/brandynlucca/AcousticScattering.jl)
+[![Julia Compatibility](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbrandynlucca%2FAcousticScattering.jl%2Fmaster%2FProject.toml&query=%24.compat.julia&suffix=%2B&label=Julia&color=purple)](https://julialang.org)
+[![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/AcousticScattering.jl?label=Last%20commit)](https://github.com/brandynlucca/AcousticScattering.jl/commits/master)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776330.svg)](https://doi.org/10.5281/zenodo.22776330)
 
-[![Documentation](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation)](https://brandynlucca.github.io/AcousticScattering.jl)
+[![Documentation (stable)](https://img.shields.io/badge/docs-stable-blue?label=Package%20documentation%20(stable))](https://brandynlucca.github.io/AcousticScattering.jl/stable/)
+[![Documentation (latest)](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation%20(latest))](https://brandynlucca.github.io/AcousticScattering.jl/dev/)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
+
 [![Build status (basic)](https://img.shields.io/github/actions/workflow/status/brandynlucca/AcousticScattering.jl/CI.yml?label=Build%20status%20(basic)&logo=github&labelColor=24292e)](https://github.com/brandynlucca/AcousticScattering.jl/actions/workflows/CI.yml)
 [![Build status (extended)](https://img.shields.io/github/actions/workflow/status/brandynlucca/AcousticScattering.jl/ExtendedCI.yml?label=Build%20status%20(extended)&logo=github&labelColor=24292e)](https://github.com/brandynlucca/AcousticScattering.jl/actions/workflows/ExtendedCI.yml)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
 [![codecov](https://codecov.io/gh/brandynlucca/AcousticScattering.jl/graph/badge.svg?token=FYNNGQSCDB)](https://codecov.io/gh/brandynlucca/AcousticScattering.jl)
+[![SciML Code Style](https://img.shields.io/badge/code%20style-SciML-9558b2?label=Style)](https://github.com/SciML/SciMLStyle)
 
 AcousticScattering.jl models how individual objects scatter sound in a fluid. It provides access to modal series solutions, Kirchhoff approximations in physical optics, boundary- and finite-element methods, the method of fundamental solutions, and Fourier matching methods for calculating scattering amplitude and target strength. Supported geometries include spheres, spheroids, straight and bent cylinders, shells, and general bodies of revolution. Material options include rigid, pressure-release, fluid-filled, and elastic configurations. Support varies by solver. See the [model guide](https://brandynlucca.github.io/AcousticScattering.jl/stable/models/selection/) for available combinations and limitations.
 
@@ -82,3 +87,7 @@ Please also cite the relevant model papers listed in the [documentation referenc
 ## License
 
 [GPL-3.0-only license](LICENSE) for the package. The [logo artwork](docs/src/assets/LICENSE) incorporates Julia's dots and is licensed separately under CC BY-NC-SA 4.0.
+
+## Contributors
+
+![GitHub Contributors Image](https://contrib.rocks/image?repo=brandynlucca/AcousticScattering.jl)
