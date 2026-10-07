@@ -2,7 +2,8 @@
   <img src="docs/src/assets/logo.svg" alt="AcousticScattering.jl" width="300">
 </h1>
 
-[![AcousticScattering](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FAcousticScattering%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=AcousticScattering&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/AcousticScattering)
+[![JuliaHub](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaRegistries%2FGeneral%2Fmaster%2FA%2FAcousticScattering%2FVersions.toml&search=.*%5C%5B%22%28%5B%5E%22%5D%2B%29%22%5C%5D&flags=s&replace=v%241&label=JuliaHub&color=blue)](https://juliahub.com/ui/Packages/AcousticScattering)
+[![GitHub Version](https://img.shields.io/github/v/release/brandynlucca/AcousticScattering.jl?label=GitHub)](https://github.com/brandynlucca/AcousticScattering.jl)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22776330.svg)](https://doi.org/10.5281/zenodo.22776330)
 
 [![Documentation](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation)](https://brandynlucca.github.io/AcousticScattering.jl)
