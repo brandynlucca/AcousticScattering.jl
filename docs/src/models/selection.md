@@ -131,7 +131,7 @@ Start with the least costly method that supports both your physics and your desi
       <td>
         <a href="../boundary_methods/#boundary-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Axisymmetric.">ℹ️</span><br>
         <a href="../boundary_methods/#boundary-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Axisymmetric.">ℹ️</span><br>
-        Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders only, axisymmetric, where endcap_depth shapes domed caps for reliable source placement. Bent cylinders are not supported for fluid transmission.">ℹ️</span>
+        Cylinder&nbsp;<span class="hint" tabindex="0" data-tooltip="Straight cylinders use axisymmetric MFS. Bent cylinders require a closed full-3D mesh with genuine endcaps and checked source placement for fluid transmission.">ℹ️</span>
       </td>
       <td>
         Sphere<br>
@@ -209,6 +209,16 @@ Start with the least costly method that supports both your physics and your desi
       <td></td>
     </tr>
     <tr>
+      <td>Mixed fluid/elastic layers, fluid interior</td>
+      <td><a href="../modal/#modal-theory">Sphere</a></td>
+      <td><a href="../tmatrix/#tmatrix-theory">Prolate spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Projected transition through aspect ratio 1.25 and ka 1.5; FEM-generated angular transition through aspect ratio 1.5 and ka 1.8, with a fluid core.">ℹ️</span></td>
+      <td></td>
+      <td><a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM for confocal layers with a fluid core; refine mesh and exterior closure near resonances.">ℹ️</span></td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
       <td>Viscoelastic layered shell, fluid interior</td>
       <td>
         <a href="../modal/#modal-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Monopole-only reduction.">ℹ️</span>
@@ -259,6 +269,7 @@ Start with the least costly method that supports both your physics and your desi
 - Use sphere or spheroid modal methods as analytical references, while checking series convergence and special-function conditioning. 
 - Use Kirchhoff to explore physical-optics behavior. A numerically converged surface integral   does not establish validity of physical optics at low frequency. 
 - Use FEM or BEM when checking analytical reductions, geometry discretization, or interface   coupling. Compare against a canonical case first. Full 3D volume FEM is the general-purpose reference for elastic and shelled spheres and spheroids.
+- Use volume FEM with `SpatialFluid` for smooth density and sound-speed variation inside sphere/spheroid regions. The exterior remains homogeneous. See [Full 3D volume FEM](@ref) for coordinates and mesh controls.
 - Use MFS when source placement is well controlled and its supported geometry suits the problem.
 - Use BEM surface results for repeated observation-angle queries. Radial FEM spheres and cylinders provide complex backscatter; meridian FEM cylinders and spheroids also provide complex amplitudes at arbitrary bistatic angles.
 - Use Fourier matching for a smooth irregular body of revolution between the canonical (sphere/spheroid) and general numerical (BEM/MFS/FEM) solvers. See [Fourier matching](@ref fourier-matching-theory).

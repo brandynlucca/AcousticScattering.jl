@@ -1,34 +1,69 @@
 # [Performance](@id performance-tutorial)
 
-Separate compilation, solution, and post-processing timings. Establish a converged small case before increasing frequency, resolution, or sweep size.
+Choose a solver for the geometry and material, then establish numerical convergence before tuning runtime. Compare complete solves at the same accuracy, including assembly, factorization and post-processing.
 
-## Compilation and threads
+## Timing and memory
 
-Start Julia with `julia --project=. -t auto` to make threads available. Actual parallelism depends on the implementation and dependency constraints. Special-function backends and shared caches are not automatically safe to call from arbitrary parallel loops.
+Measure the first call separately from repeated calls because Julia compiles code on first use. Start Julia with `julia --project=. -t auto` to enable multiple threads. Compare thread counts on your workload. Special-function backends and shared caches may restrict concurrent calls.
 
-Compare `@time` on first and second identical calls in a session. For repeated source edits, consider the [precompile opt-out](@ref getting-started). It shifts compilation cost to first use.
+If Julia threads compete with BLAS threads, test one BLAS thread:
 
-Axisymmetric BEM assembles its panel rows in parallel and hands them out one at a time, so uneven row costs stay balanced. It is the dominant cost of an oblique solve, and the dense solves are negligible next to it. Expect the gain to flatten near the physical core count.
+```julia
+using LinearAlgebra
+BLAS.set_num_threads(1)
+```
 
-When BLAS and Julia threads compete, compare configurations explicitly. For example, `using LinearAlgebra: BLAS; BLAS.set_num_threads(1)` changes the entire process, so use it as a measured tuning choice. Do not assume more threads always improve performance.
+Record allocation traffic separately from peak memory and retained solution storage. Dense matrix storage grows quadratically with the number of unknowns. A smaller allocation count does not necessarily reduce peak memory.
 
-## Accuracy and memory controls
+## Reuse across angles and observation directions
 
-For fluid/gas full-3D BEM at a fixed frequency, pass meshes directly to `incidence_angle_sweep(surface, material, k, angles)` or
-`incidence_angle_sweep(surfaces, materials, k, angles; parents)`. These forms assemble and factorize once, then solve each incident forcing using that factorization. The callback form executes its callback at every angle. Add `components=true` to the multiple-interface form to compare coupled and isolated responses. Each system is sampled separately, and the result retains only amplitudes and strengths. Changing frequency, material, mesh or numerical options requires a new call and assembly. See [the fish tutorial](@ref fish-tutorial) for an example.
+Use an incidence-sweep overload to reuse assembly and factorization at fixed frequency:
 
-The single-mesh overload also accepts `Rigid()` and `PressureRelease()`. It reuses assembled operators and their compression, while each angle starts a fresh GMRES iteration with the supplied `gmres_kwargs`. See [closed bent cylinders](@ref bent-cylinder-tutorial) for a complete example. These iterative solves do not use a dense LU factorization.
+```julia
+sweep = incidence_angle_sweep(surface, material, k, angles)
+```
 
-| Method | Controls | Cost or limitation |
-|:--|:--|:--|
-| Sphere modal | `m_max` | Series convergence near resonances |
-| Spheroid modal | `m_max`, `n_max`, fluid `coupling` | Special functions and dense coupling |
-| Axisymmetric BEM | `n`, `m_max`, quadrature | Dense systems per mode and near-singular integration |
-| Full BEM | `meshsize`, `compression`, `gmres_kwargs` | Compressed rigid/soft systems, dense fluid transmission |
-| Radial FEM | Element counts, `order` where supported, `m_max` | Retains target strength only |
-| Meridian FEM | Radial/angular grids and modal orders | Two-dimensional system per mode |
-| MFS | `n`, `offset`, modal orders | Conditioning depends on source placement |
+For coupled fluid regions, pass the meshes and materials together with `parents`. Add `components=true` to compare coupled and isolated responses. For axisymmetric MFS, use `incidence_angle_sweep(mfs, body, boundary, k, angles)`.
 
-The documentation's reduced cases are not problem-size benchmarks. Dense matrix memory scales quadratically with unknown count. Factorization cost grows faster. Record numerical controls, hardware, Julia version, thread settings, and whether caches were warm with any benchmark.
+These overloads retain sampled amplitudes and target strengths. The callback form evaluates its solver at each angle. Changing the frequency, material, mesh or numerical options requires a new assembly.
 
-See [Building and contributing](@ref developer-guide) for documentation execution and testing.
+Use `bistatic_sweep` or `bistatic_map` to sample additional observation directions from a retained solution. These queries reuse the solved field.
+
+## BEM compression
+
+For full rigid or pressure-release BEM and fluid Müller BEM, compare dense operators with `compression=(method=:hmatrix, tol=1e-9)`. Compression can reduce memory at larger sizes but adds setup cost. Dense solves can be faster for small systems.
+
+Compressed fluid incidence sweeps reuse a bounded solution subspace with `recycle_dimension=8`. Set it to zero to compare independent GMRES starts. Each solve checks the current residual and retries if reuse fails. This reuse applies at fixed frequency.
+
+Refine mesh size and quadrature independently of compression and GMRES tolerances. Small linear residuals alone do not establish physical accuracy. See [BEM and MFS](@ref boundary-theory).
+
+## Mixed-precision fluid BEM
+
+For dense single-interface fluid or gas BEM, `precision=:mixed` uses ComplexF32 factors with ComplexF64 residual refinement:
+
+```julia
+solution = bem(surface, material, k; formulation=:cbie,
+    precision=:mixed, condition_limit=0)
+report = diagnostics(solution)
+report.factor_precision
+report.componentwise_backward_error
+```
+
+Keep `equilibrate=true`. Both normwise and componentwise backward errors must satisfy the refinement tolerance. Conditioning or failed refinement triggers ComplexF64 factorization. `refinement=(tolerance=1e-13, maxiter=8)` changes the acceptance tolerance and correction budget. The default remains `precision=:double`.
+
+The dense single-interface incidence sweep accepts the same options and reuses the factorization across angles. Promotion can make mixed precision slower than a direct double-precision solve, particularly near resonances.
+
+## Reuse across frequencies
+
+For dense single-interface fluid CBIE on a fixed mesh, supply training frequencies to build a reduced solution basis:
+
+```julia
+result = frequency_sweep(surface, material, [150.0, 200.0, 250.0], 1500.0;
+    training_frequencies=[120.0, 180.0, 240.0, 300.0], return_diagnostics=true)
+result.sweep.amplitudes
+result.diagnostics.queries
+```
+
+Frequencies are in Hz and sound speed is in m/s. Resolve the mesh over the full frequency range. The sweep fixes the training basis, rebuilds the equations at each query, and checks original and scaled residuals. Queries that fail acceptance use a full Float64 solve.
+
+`capacity=16` and `maxbytes=64*1024^2` limit snapshot coefficients. They do not limit total process memory. Training can cost more than it saves for a short sweep. Compare training plus query time with independent solves.

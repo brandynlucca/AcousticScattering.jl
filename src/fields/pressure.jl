@@ -3,7 +3,7 @@
     pressure(solution, points; field=:total, region=nothing)
 
 Complex acoustic pressure under the `exp(-iωt)` convention. Plane-wave solutions use
-unit incident amplitude; prescribed fields retain their supplied normalization.
+unit incident amplitude. Fields passed through `incident` keep their normalization.
 Coordinates are in meters.
 
 `point` is a three-coordinate tuple or vector. A collection of points returns an array of the
@@ -296,7 +296,7 @@ function _pressure_values(solution::MFSSolution{_FullMFSSurfaceData}, points, fi
     return values
 end
 
-# Evaluate each prescribed incident-field sample once, in parallel, and never
+# Evaluate each incident-field sample once, in parallel, and never
 # evaluate it for a scattered-only map.
 # Incident-field callbacks already have the solver's concurrent-call contract.
 function _incident_pressure_values(solution, points)

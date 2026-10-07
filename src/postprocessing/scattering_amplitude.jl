@@ -9,7 +9,7 @@ Return the complex far-field scattering amplitude in meters. Axisymmetric BEM/MF
 structural shell FEM accept observation `angle` and `azimuth` [rad] in body coordinates;
 their defaults are backscatter, `angle = pi - incidence_angle`, `azimuth = pi`.
 Full BEM accepts a unit-vector `direction`, defaulting to the negative incident direction.
-For prescribed `incident` fields, numerical defaults use the solve's incidence-angle
+When `incident` is supplied, numerical defaults use the solve's incidence-angle
 keywords, not the field's Cartesian axis; specify the observation explicitly.
 Cartesian body length is x, width is y and height/depth is z. Polar angles are from +x;
 azimuth is from +y toward +z, so `(angle,azimuth)=(pi/2,0)` points along +y.

@@ -11,7 +11,7 @@ In a homogeneous exterior fluid, pressure satisfies
 k = \frac{2\pi f}{c}, \qquad p = p_{\mathrm{inc}} + p_{\mathrm{scat}}.
 ```
 
-Here frequency is in Hz, sound speed in m/s, and wavenumber in rad/m. The outgoing kernel `exp(im * k * r) / (4pi * r)` used by the numerical solvers implies the time convention `exp(-im * omega * t)`. This sign convention is inferred from the implementation. The incident plane wave is `exp(im * k * dot(direction, position))`.
+Here frequency is in Hz, sound speed in m/s, and wavenumber in rad/m. The outgoing kernel `exp(im * k * r) / (4pi * r)` used by the numerical solvers implies the time convention `exp(-im * omega * t)`. The incident plane wave is `exp(im * k * dot(direction, position))`.
 
 The outgoing pressure at large radius has scattering amplitude of dimension length
 
@@ -20,8 +20,6 @@ p_{\mathrm{scat}}(r\hat{\boldsymbol q})
 \sim f_s(\hat{\boldsymbol q})\frac{e^{ikr}}{r}.
 ```
 
-The sphere modal implementation uses
-`-im / k * sum((2l + 1) * P_l(cos(angle)) * A_l)`.
 Compare complex values only after matching phase, incident direction, and normalization.
 
 ## Target strength

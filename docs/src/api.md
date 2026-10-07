@@ -24,6 +24,9 @@ IncidentField
 PlaneWave
 SphericalWave
 BesselBeam
+incident_pressure
+incident_gradient
+incident_coefficient
 ```
 
 ## Boundary conditions and materials
@@ -33,6 +36,7 @@ Rigid
 PressureRelease
 Impedance
 FluidFilled
+SpatialFluid
 GasFilled
 SolidElastic
 ViscoelasticSolid

@@ -22,7 +22,7 @@ R(\theta) = a + \sum_{n\ge1} r_n^c\cos(n\theta),
 
 Both poles lie on the axis, so only cosine terms appear. Odd cosine harmonics still allow fore-aft asymmetry. `Irregular` fits the mirrored profile and rejects nonzero sine coefficients.
 
-The ``\delta`` coefficients solve a nonlinear system (`NLsolve.jl`, forward-mode automatic differentiation), using a continuation homotopy for bodies far from circular. The mapping is rejected (`is_admissible`) if its Jacobian vanishes anywhere outside the body.
+The ``\delta`` coefficients solve a nonlinear system with forward-mode automatic differentiation. A continuation homotopy handles bodies far from circular. The mapping is rejected (`is_admissible`) if its Jacobian vanishes anywhere outside the body.
 
 ## Pressure-release boundary matching
 

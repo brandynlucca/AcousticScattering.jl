@@ -53,8 +53,9 @@ end
 changes
 ```
 
-These checks concern this frequency and these directions. Refine across the requested spectrum and angular range before drawing conclusions near resonances or scattering nulls. Rigid/soft closed-surface MFS provides a separate numerical method: pass the full mesh to `mfs`, choose a coarser `source_mesh`, and vary its source count and inward `offset`. BCMS's coherent-length correction and lateral-only bent MFS omit end scattering and are not exact closed-cylinder benchmarks away from broadside. See
-[Jech et al. (2015)](https://doi.org/10.1121/1.4937607) for finite-cylinder model limitations. 
+Refine across the requested frequency and angular range, especially near resonances or scattering nulls. For a separate MFS comparison, pass the closed mesh to `mfs` and vary `source_mesh` and source offsets. Fluid transmission uses separate `offset_ext` and `offset_int` controls.
+
+The bent modal and lateral MFS approximations omit end scattering. Restrict their use near broadside and compare with a converged closed-surface solution. See [Jech et al. (2015)](https://doi.org/10.1121/1.4937607) for finite-cylinder model limitations.
 
 ## Frequency, incidence and bistatic patterns
 

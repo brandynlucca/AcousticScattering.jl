@@ -14,7 +14,7 @@ Single- and double-layer potentials integrate ``G`` and its normal derivative ag
 
 Axisymmetric BEM expands azimuthal dependence into Fourier modes over a meridian mesh. Panel count, Fourier cutoff and quadrature tolerance each control a separate error source ([Helsing and Karlsson, 2014](https://doi.org/10.1016/j.jcp.2014.04.053)). Fluid shells use paired inner and outer surfaces.
 
-At axial incidence, the direct CBIE ``\tfrac12 p_{\rm scat}-K[p_{\rm scat}]=-G[\partial p_{\rm scat}/\partial n]`` holds for any boundary. `Rigid`/`PressureRelease` prescribe one trace and solve for the other. [`Impedance`](@ref)`(zeta)`'s Robin condition, `∂p_scat/∂n = -ik/zeta*(p_scat+p_inc) - ∂p_inc/∂n`, substitutes directly into it, giving a single equation in `p_scat`:
+At axial incidence, the direct CBIE ``\tfrac12 p_{\rm scat}-K[p_{\rm scat}]=-G[\partial p_{\rm scat}/\partial n]`` holds for any boundary. `Rigid` and `PressureRelease` set one boundary value and solve for the other. [`Impedance`](@ref)`(zeta)`'s Robin condition, `∂p_scat/∂n = -ik/zeta*(p_scat+p_inc) - ∂p_inc/∂n`, substitutes directly into it, giving a single equation in `p_scat`:
 
 ```math
 \left(\tfrac12 I-K-\frac{ik}{\zeta}G\right)p_{\rm scat}=\frac{ik}{\zeta}G[p_{\rm inc}]+G\!\left[\frac{\partial p_{\rm inc}}{\partial n}\right],
@@ -60,6 +60,20 @@ bem(surface, boundary, k; formulation = :muller, equilibrate = true)
 
 `equilibrate=true` (default) row- and column-scales the matrix before solving.
 
+Dense single-interface fluid BEM supports `precision=:mixed` with equilibration and double-precision fallback. Dense CBIE also supports `frequency_sweep` with explicit training frequencies and full-solve fallback. See [Performance](@ref performance-tutorial) for both options.
+
+Single-interface Müller supports an opt-in compressed solve:
+
+```julia
+solution = bem(surface, boundary, k;
+    compression = (method = :hmatrix, tol = 1e-9),
+    gmres_kwargs = (reltol = 1e-10, restart = 150, maxiter = 500))
+```
+
+Compression uses GMRES. Dense LU remains the default. Compressed CBIE and edge quadrature are unsupported. Refine mesh, compression and iteration tolerances independently.
+
+`formulation=:cbie` avoids hypersingular operators but retains fictitious interior resonances. Both fluid formulations solve for two unknowns per surface node.
+
 ## Coupled fluid regions
 
 Several fluid interfaces can share one coupled field. Surface `i` separates region `i` from `parents[i]`, with `0` denoting the unbounded exterior, and normals point out of the volume each
@@ -77,8 +91,9 @@ p_i^{(r)}=p_i^{(s)},\qquad \frac{1}{g_r}\partial_n p_i^{(r)}=\frac{1}{g_s}\parti
 
 continuity of pressure and the density-scaled normal derivative, without requiring coincident mesh nodes on either side. Assembling these traces over every interface gives the same coupled Müller system as above, one block per interface. `formulation=:muller` (default) assembles that system directly. `formulation=:cbie` enforces the pressure equation separately on each side, trading the hypersingular operator for the fictitious-eigenfrequency protection `:muller` provides.
 
-Every interface must be closed, connected, outward oriented and disjoint from the others, checked numerically at assembly. `solution.data.interfaces` and `diagnostics(solution).interface_residuals` retain the per-side pressure, normal derivatives and
-residuals. This formulation covers lossless scalar fluids only.
+Every interface must be closed, connected, outward oriented and disjoint from the others, checked numerically at assembly. `diagnostics(solution).interface_residuals` reports interface continuity errors. This formulation covers lossless scalar fluids only.
+
+Coupled `:muller` accepts the same compression options. `incidence_angle_sweep` reuses operators and factorizations across angles. `recycle_dimension=0` disables reuse of previous solutions. Refine tolerances when interfaces are close or near resonance.
 
 ## Method of fundamental solutions
 
@@ -92,10 +107,23 @@ using fictitious sources placed inside the scatterer, with collocation enforcing
 
 ```julia
 mfs(body, boundary, k) # axisymmetric for straight bodies, lateral-only for bent
-mfs(surface, boundary, k) # full 3D, rigid or pressure-release only
+mfs(Spheroid(1.2, 1.0),
+    Shelled(FluidLayer(1.2, 1.1), FluidInterior(0.7, 0.8), 0.55), 1.5;
+    incidence_angle = 0.0, n = 40, oversampling = 2) # confocal fluid shell
+mfs(surface, boundary, k) # full 3D, rigid, pressure-release or fluid-filled
+mfs(bladder_surface, backbone_surface, FluidFilled(g_bone, h_bone), k;
+    bladder_offset, backbone_offset_ext, backbone_offset_int) # coupled components
 ```
 
 `offset` places sources a physical distance from the surface, not a fraction of body length. Sharp cylinder corners make normal-offset placement unreliable, so smooth caps help where geometry permits them. Compare offset and source count against a modal or BEM reference before trusting a new configuration.
+
+Rigid flat-ended cylinders are unsupported by axisymmetric `mfs`. Use `bem` for that geometry, or smooth caps when physically appropriate.
+
+The bladder/backbone overload couples a pressure-release bladder to a disjoint scalar-fluid backbone. Contrasts are relative to exterior water. Refine source meshes and check boundary residuals on independent meshes. This overload provides far-field results only.
+
+Nested-fluid MFS supports axial incidence on spheres and confocal prolate spheroids with one fluid shell and a fluid core. `offset_outer` and `offset_inner` are positive distances in meters. `pressure(...; field=:total)` selects the region by position. Oblique incidence, oblate bodies, multiple shells and elastic layers are unsupported.
+
+Closed-surface fluid MFS uses `offset_ext` and `offset_int` for exterior and interior sources. Refine `source_mesh` and offsets independently of collocation, and use `check_mesh` for boundary residuals.
 
 ## Post-processing
 
@@ -103,7 +131,7 @@ The stored boundary fields enter the package's far-field integral.
 
 ```julia
 target_strength(solution; angle, azimuth) # axisymmetric BEM/MFS
-target_strength(solution; direction) # full BEM
+target_strength(solution; direction) # full BEM and full MFS
 target_strength(solution) # bent MFS, monostatic only
 ```
 
@@ -123,7 +151,7 @@ report = diagnostics(solution)
 
 GMRES failure emits a warning and sets `report.converged = false`, with the residual recomputed from the assembled operator including any compression. `solver_options`, `formulation`, `coupling` and `mesh_order` record the solve settings.
 
-Fluid transmission instead reports its dense coupled system's residual, with no iteration count. `relative_residual` and `scaled_relative_residual` refer to the original and equilibrated systems respectively, matching when `equilibrate=false`. `condition_number` and `scaled_condition_number` are SVD 2-norm condition numbers, computed only up to `condition_limit` (default 512) unknowns.
+`relative_residual` and `scaled_relative_residual` describe the original and equilibrated equations. Dense condition estimates are available up to `condition_limit=512` unknowns. Compressed solves omit them. Mixed precision also reports refinement iterations and backward errors. Small residuals do not establish mesh or compression accuracy.
 
 ## Pressure fields and solver diagnostics
 
@@ -133,7 +161,7 @@ Fluid transmission instead reports its dense coupled system's residual, with no 
 pressure(solution, points; field = :scattered)
 ```
 
-[`pressure`](@ref pressure-evaluation) evaluates exterior and transmitted fields for spheres, straight cylinders, and (via full BEM/MFS) closed bent or supplied meshes. Coupled fluid BEM evaluates every region, including the unbounded exterior. Axisymmetric BEM subtracts a constant-pressure Laplace double layer to resolve the near-singular double-layer peak. Full BEM
+[`pressure`](@ref pressure-evaluation) evaluates exterior and transmitted fields for spheres, straight cylinders, and spheroids via axisymmetric BEM/MFS or full BEM. It also supports closed bent or supplied full surfaces. Coupled fluid BEM evaluates every region, including the unbounded exterior. Axisymmetric BEM subtracts a constant-pressure Laplace double layer to resolve the near-singular double-layer peak. Full BEM
 uses density-interpolation quadrature, and MFS evaluates its retained source fields directly.
 
 For rigid, pressure-release or fluid rims, full BEM supports an edge correction that factors out the leading wedge singularity in triangles adjoining a sharp edge, where the normal jump exceeds 30 degrees.
@@ -146,7 +174,7 @@ solution = bem(mesh(body; method = :full, mesh_order = 3), boundary, k;
 `rtol`, `atol` and `maxsubdiv` in `correction` control this integration independently of the
 linear solve.
 
-Bent and supplied surfaces locate a query point's fluid region from ray crossings against Bernstein-bounded curved patches. In a coupled fluid region, `region=0` is the unbounded exterior and `region=i` is the fluid immediately inside interface `i`.
+Full spheroid, bent and supplied surfaces locate a query point's fluid region from ray crossings against Bernstein-bounded curved patches. In a coupled fluid region, `region=0` is the unbounded exterior and `region=i` is the fluid immediately inside interface `i`.
 
 ### Residuals and conditioning
 
@@ -157,4 +185,5 @@ diagnostics(solution).systems[i].condition_number
 ```
 
 Each MFS system reports `boundary_residual` (held-out point residuals), `pressure_residual` and `velocity_residual` (separate transmission checks), and `condition_number`/`numerical_rank` (SVD diagnostics of the unscaled collocation matrix, up to `condition_limit=512` unknowns). `n`/`oversampling` set the source and collocation budget (`n_s`/`n_phi` for bent cylinders).
-Direct solves leave `converged` and `iterations` as `nothing`.
+
+Use `incidence_angle_sweep(mfs, body, boundary, k, angles)` to reuse axisymmetric MFS assembly and factorization. Add `return_diagnostics=true` for per-angle reports. Bent and full-surface MFS use the callback sweep. Direct solves report `converged = iterations = nothing`.

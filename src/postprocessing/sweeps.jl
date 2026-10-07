@@ -89,6 +89,12 @@ The callback may return a solution or a [`components`](@ref) comparison. Dense s
 state is discarded after sampling. Plot the result directly with `plot(sweep)` or
 `plot(sweep; quantity=:phase)`; multiple sweeps can share a comparison figure.
 
+The result contains `frequencies` in Hz, exterior `k` in rad/m, `target_strength`
+in dB re 1 m², complex `amplitudes` in meters, and `labels`. Arrays have samples
+along the first dimension, with one column per label for component comparisons.
+`amplitudes` is `nothing` for scalar-only FEM results. When available, phase is
+`angle.(sweep.amplitudes)` in radians.
+
 # Examples
 ```julia
 sweep = frequency_sweep(k -> modal(Sphere(0.01), Rigid(), k), 10e3:1e3:100e3, 1477.4)
@@ -221,7 +227,7 @@ end
 Opt-in reduced-order frequency sweep for dense single-interface fluid/gas CBIE
 with DIM correction and plane-wave incidence on a fixed full-3D mesh. Frequencies
 and `training_frequencies` are in Hz, `sound_speed` in m/s, and angles in radians
-from +x with azimuth from +y toward +z. Returns a [`FrequencySweep`](@ref) of
+from +x with azimuth from +y toward +z. Returns a sweep of
 complex backscatter amplitudes and target strengths in the supplied query order.
 
 Train a bounded orthonormal solution basis using full Float64 solves, then freeze
@@ -303,7 +309,7 @@ end
     IncidenceAngleSweep
 
 Incidence `angles` in radians and sampled `target_strength`, `amplitudes`, and `labels`,
-with the same layout and units as [`FrequencySweep`](@ref). Observation follows
+with the same layout and units as [`frequency_sweep`](@ref). Observation follows
 backscatter, opposite each sample's incident direction.
 """
 struct IncidenceAngleSweep{T, A}
@@ -863,7 +869,7 @@ end
 
 Observation `angles` and fixed `azimuth` in radians, sampled `target_strength` and
 complex `amplitudes`, and solve-time `incidence_angle` and `incidence_azimuth` in radians.
-Arrays use the same layout and units as [`FrequencySweep`](@ref).
+Arrays use the same layout and units as [`frequency_sweep`](@ref).
 """
 struct BistaticSweep{T, A}
     angles::Vector{Float64}

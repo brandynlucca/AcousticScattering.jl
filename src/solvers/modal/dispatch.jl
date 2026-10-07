@@ -12,7 +12,7 @@ Acoustic spheroids accept `incident=field`, including pointwise callbacks, by su
 projection. `incident_n_eta=max(32,2n_max+12)` and
 `incident_n_phi=max(32,4m_max+4)` control incident quadrature independently of modal
 truncation. Observation angles remain body-frame `scatter_angle`/`scatter_azimuth`.
-Prescribed spheroid fields currently provide far-field amplitudes only.
+Spheroid solutions with `incident=field` provide far-field amplitudes only.
 Post-process with [`target_strength`](@ref)`(sol)` in dB re 1 m² or [`scattering_amplitude`](@ref)`(sol)`,
 the complex scattering amplitude in m.
 """

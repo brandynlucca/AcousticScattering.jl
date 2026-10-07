@@ -1,6 +1,6 @@
 # [Geometry and materials](@id geometry-materials)
 
-Geometry specifies shape. Boundary or material configuration specifies its acoustic response. Keep these separate when comparing methods. See [Materials and shells](@ref materials-tutorial) for executable constructor examples.
+Geometry specifies shape, while materials and boundaries specify acoustic response. See [Materials and shells](@ref materials-tutorial) for constructor examples.
 
 ## Geometry and discretization
 
@@ -10,11 +10,11 @@ Geometry specifies shape. Boundary or material configuration specifies its acous
 \frac{x^2+y^2}{b^2}+\frac{z^2}{a^2}=1.
 ```
 
-`Cylinder(radius, length; radius_curvature = Inf, endcap_depth = 0.0)` uses meters. A finite curvature radius selects bending in full BEM and the bent approximations. Positive cap depth gives smooth half-spheroid ends in full-3D meshes and straight-cylinder MFS. Axisymmetric BEM/FEM use flat caps. In full BEM, the bend is fixed in the `xy` plane with its midpoint tangent along `+x`. Incidence and observation do not alter the geometry.
+`Cylinder(radius, length; radius_curvature=Inf, endcap_depth=0.0)` uses meters. Finite curvature bends the cylinder. Positive cap depth adds half-spheroid ends in full meshes and straight-cylinder MFS. Axisymmetric BEM/FEM use flat caps. Full-BEM bends lie in the `xy` plane, with midpoint tangent along `+x`.
 
 `Shell(body, thickness)` specifies structural shell geometry. `Shelled` specifies the material and interior configuration.
 
-`mesh(body; resolution)` returns `Mesh`. Axisymmetric discretization represents a meridian curve that is revolved during integration. It is not a flat 2D obstacle. Full meshes represent a surface via Gmsh/Inti quadrature. Resolution is panel count for `:axisymmetric`, target edge length in meters for `:full`. Increasing panel count refines a mesh, while increasing edge length makes it coarser.
+`mesh(body; resolution)` returns `Mesh`. Resolution means panel count for `:axisymmetric` and target edge length in meters for `:full`. Increase panel count or decrease edge length to refine. Axisymmetric meshes represent a revolved meridian.
 
 ## Fluid boundaries
 
@@ -29,6 +29,8 @@ p_{\mathrm{ext}}=p_{\mathrm{int}},\qquad
 Both derivatives here use the same geometrical normal. `FluidFilled(g, h)` uses `g = density_interior / density_exterior` and
 `h = sound_speed_interior / sound_speed_exterior`. `GasFilled` is its alias. 
 
+`SpatialFluid(g, c; min_soundspeed_contrast)` accepts positive constants or position callbacks for lossless volume-FEM regions. Callbacks use global Cartesian coordinates in meters, with default symmetry axis `+z`. Moving or rotating a region does not transform its profiles. The minimum speed contrast controls mesh wavelength and must bound sampled values. See [Full 3D volume FEM](@ref).
+
 ## Elastic and layered boundaries
 
 An elastic solid supports longitudinal and shear waves. For an isotropic material,
@@ -39,10 +41,16 @@ c_L^2=(\lambda+2\mu)/\rho_s,\qquad c_T^2=\mu/\rho_s.
 
 Normal displacement and normal traction couple to the fluid. Tangential traction vanishes at an inviscid-fluid interface. `SolidElastic(g, longitudinal_contrast, shear_contrast)` describes a solid body with no cavity.
 
-`Shelled(material, interior, radius_ratio)` combines `FluidLayer` or `ElasticLayer` with `VacuumInterior` or `FluidInterior` where supported. All contrasts use the exterior fluid, including the cavity contrasts. A fluid shell with vacuum interior imposes zero pressure at its inner radius. An elastic shell with fluid interior includes elastic stresses.
+`Shelled(material, interior, radius_ratio)` combines fluid or elastic layers with a fluid or vacuum core where supported. All contrasts, including core contrasts, are relative to the exterior fluid. A vacuum core imposes zero pressure on a fluid shell.
 
-`LayeredMaterial(outer, inner, interface_ratio)` represents two layers, but the implemented viscous model specifically supports viscous outer material over an elastic wall and a fluid core. This generic constructor does not implement arbitrary stacks. The interface ratio and core ratio both refer to the outer body radius and must be physically ordered.
+`LayeredMaterial(outer, inner, interface_ratio)` composes concentric layers. Its interface ratio refers to the enclosing layer, while the `Shelled` core ratio refers to the body. Thus `LayeredMaterial(f1, LayeredMaterial(f2, f3, 0.75), 0.8)` places interfaces at 0.8 and 0.6 of the body radius, requiring a core ratio below 0.6. Fluid interfaces match pressure and $(1/\rho)\partial_r p$. Fluid-solid interfaces match normal displacement and traction with zero tangential traction. Bonded solids match displacement and traction, using the same radial direction on both sides.
 
-Structural shell FEM uses `Shelled(poisson, density, youngs_modulus)` with absolute units (kg/m³ and Pa). Its fluid properties are supplied to `fem`. This is a different constructor from a contrast-based layer model, and the supported material laws are not arbitrary callbacks.
+Spherical `modal` supports fluid/elastic stacks with `interior_coupling=:generalized`. Confocal spheroids use volume FEM or the bounded [mixed-layer T-matrix](@ref tmatrix-theory). The viscous monopole model supports a `ViscousLayer`, elastic wall and fluid core. Acoustic pressure is defined only in fluid regions.
 
-These interface descriptions follow the equations used in the package. Sphere/shell benchmark  context and elastic references appear in [References](@ref references).
+Volume FEM provides displacement [m], velocity [m/s] and stress [Pa] through `solution(points; quantity=...)`. See [Material fields in volume FEM](@ref fem-material-fields) for normalization and supported regions.
+
+Structural shell FEM uses `Shelled(poisson, density, youngs_modulus)` with absolute density [kg/m^3] and modulus [Pa]. Supply fluid properties to `fem`.
+
+`ViscoelasticSolid`, `ViscousLayer` and `SpatialFluid` do not supply pore-pressure or temperature fields. See [Surface waves, guided waves and resonances](@ref wave-diagnostics) for physics outside these models.
+
+See [References](@ref references) for the underlying scattering and elasticity models.

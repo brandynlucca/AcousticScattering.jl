@@ -89,7 +89,7 @@ function _spheroid_incident_amplitude(boundary, k, body;
         incident_n_phi::Integer = max(32, 4m_max + 4), precision::Symbol = :double,
         n_quad::Integer = 64, transition = nothing)
     boundary isa Union{Rigid, PressureRelease, FluidFilled} || transition !== nothing ||
-        throw(ArgumentError("prescribed spheroidal incidence requires acoustic modal or elastic tmatrix"))
+        throw(ArgumentError("custom incident fields on spheroids require acoustic modal or elastic tmatrix"))
     all(isfinite, (incidence_angle, incidence_azimuth, scatter_angle, scatter_azimuth)) ||
         throw(ArgumentError("incidence and observation angles must be finite"))
     traces = _spheroid_incident_traces(body, k, incident, m_max, n_max;

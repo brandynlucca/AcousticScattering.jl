@@ -54,15 +54,28 @@ nothing # hide
 
 Adaptive refinement uses successive target-strength changes in dB. Check complex-amplitude refinement separately when phase matters. A small magnitude change alone does not bound phase error. See [Numerical convergence](@ref convergence-tutorial). Cylinder radial and meridian FEM, and spheroid meridian FEM retain complex amplitudes. The meridian cylinder and spheroid paths support arbitrary observation `angle` and `azimuth`.
 
-For supported radial spheres, `pressure(solution, points)` samples complex acoustic pressure normalized to the incident amplitude. It accepts one Cartesian point or an array of points, including fluid shells and fluid cavities. See [Pressure at Cartesian points](@ref pressure-evaluation) for field selection, coordinates and interface limits. `field=:shell` samples a fluid wall while `field=:interior` samples its fluid cavity. Elastic material has no acoustic pressure field. Elastic stress/displacement evaluation and radial sphere surface-field plotting are unavailable.
+For supported radial spheres, `pressure(solution, points)` samples complex acoustic pressure normalized to the incident amplitude. It accepts one Cartesian point or an array of points, including fluid shells and fluid cavities. See [Pressure at Cartesian points](@ref pressure-evaluation) for field selection, coordinates and interface limits. `field=:shell` samples a fluid wall while `field=:interior` samples its fluid cavity. Elastic material has no acoustic pressure field. Mechanical point queries are available for the full-3D volume FEM as described below; radial-sphere mechanical point queries and surface-field plotting are unavailable.
 
 Volume FEM solutions also support `pressure`, at any point inside the meshed domain that is not part of a solid region. `field=:total`/`:scattered` apply outside the outermost body and `field=:total`/`:interior` inside an enclosed fluid region, both using the region's own scattered-relative-to-background unknown internally.
+
+For a confocal spheroid with a fluid core, `fem` accepts nested `LayeredMaterial` entries containing `FluidLayer` and `ElasticLayer`. Each layer ratio scales the enclosing equatorial semi-axis; the core ratio scales the outer equatorial semi-axis. The resulting surfaces share the outer spheroid's focal distance. This path uses full-3D coupled volume FEM and exterior-relative density and wave-speed contrasts:
+
+```julia
+body = Spheroid(1.2, 1.0)
+layers = Shelled(LayeredMaterial(FluidLayer(1.2, 1.1),
+    ElasticLayer(2.7, 4.2, 2.1), 0.8), FluidInterior(0.8, 0.9), 0.55)
+solution = fem(body, layers, 1.2; method=:volume, closure=:dtn)
+```
+
+This composition requires `interior_coupling=:generalized` for elastic layers and a `FluidInterior` core. A [bounded mixed-layer spheroidal T-matrix](@ref tmatrix-theory) provides a separate far-field route for low-order prolate cases. For multiple mixed layers near a resonance or beyond its bounds, refine the volume mesh and exterior closure before interpreting the result.
 
 ## Meridian acoustic FEM
 
 Meridian FEM discretizes radial/axial dependence and uses azimuthal Fourier modes. For mode `m`, cylindrical-coordinate operators contain the term `-m^2 / rho^2`. Regularity on the axis and the transformed volume weighting are essential. Meridian FEM supports spheres, straight cylinders, and spheroids.
 
 Increase mesh resolution and angular/modal orders separately. Oblique cylinder/spheroid incidence requires the corresponding Fourier content. These methods do not model bend curvature.
+
+`pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries; straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use bilinear interpolation in its radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
 
 ## Elastic and coupled shell FEM
 
@@ -77,6 +90,8 @@ Isotropic solid displacement satisfies
 ```
 
 Normal displacement and traction couple to fluid pressure. Coupled shell implementations combine structural finite elements with exterior and, where supported, interior boundary elements.
+
+For `fem(Shell(...), ...)`, `pressure` evaluates the retained exterior acoustic Cauchy traces. Fluid-backed thin and general shells also retain inner cavity traces, so `field=:interior` evaluates cavity pressure. The elastic wall has no scalar acoustic pressure field. The cylinder radial elastic approximation returns a directional scattering amplitude and has no spatial acoustic field to sample.
 
 ### Geometry and material parameters
 
@@ -170,7 +185,7 @@ solution = fem(body, material, 1026.8, 1477.4, 1000.0, 1480.0, 100.0;
 strength = target_strength(solution)
 ```
 
-This expensive structural example is illustrative and is not executed in the ordinary docs build. The four fluid arguments are exterior density/speed followed by interior density/speed. The final positional input is exterior wavenumber.
+The four fluid arguments are exterior density/speed followed by interior density/speed. The final positional input is exterior wavenumber.
 
 `:thin` supports prolate spheroids and a vacuum cavity with zero interior density. `:general` supports spheres and prolate spheroids and requires a positive interior density. A small positive density approximates a vacuum since the general method has no exact vacuum branch.
 
@@ -188,7 +203,33 @@ Compare complex amplitude, including phase, under refinement. Near elastic or ca
 
 `method = :volume` meshes the body and the surrounding fluid with curved order-2 tetrahedra. Fluid regions carry pressure and solid regions carry displacement, with continuity of normal displacement and traction across interfaces. It supports `Sphere` and `Spheroid` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries, with a fluid or empty interior.
 
-The default `closure = :auto` uses the exact Dirichlet-to-Neumann map on a sphere of radius `domain_radius`, by default 1.2 times the body's largest semi-axis, or a perfectly matched layer when that domain is smaller. The map is applied without forming its dense matrix, so it works with the iterative solver. `closure = :pml` truncates the exterior with a layer of thickness `pml_thickness`, one wavelength by default and shorter layers lose accuracy. Its domain is a sphere, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that is under 60% of the spherical volume. `:pml_spherical`, `:pml_spheroidal` and `:dtn` force a closure. For compact bodies the layer holds 87 to 97% of the mesh at moderate `ka`, so the Dirichlet-to-Neumann closure needs about 10 times fewer unknowns. A rigid sphere at `ka = 12` agrees with the modal series to `0.2%`. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
+`SpatialFluid` supplies smooth positive density and sound-speed contrasts at
+every fluid quadrature point. Both may be callbacks or constants. For example,
+this graded sphere uses contrasts relative to its homogeneous exterior:
+
+```julia
+a = 0.5 # meters
+material = SpatialFluid(
+    x -> 1.2 * (1 + 0.5 * sum(abs2, x) / a^2),
+    x -> 0.9 * (1 + 0.2 * sum(abs2, x) / a^2);
+    min_soundspeed_contrast = 0.9)
+solution = fem(Sphere(a), material, 2.0; method = :volume,
+    incidence_angle = 0.0, h = 0.1, h_body = 0.1)
+pressure(solution, (0.0, 0.0, 0.2); field = :total)
+```
+
+The callbacks receive global volume-FEM coordinates in meters, in the same
+frame as `centers` and pressure queries. They must be deterministic and safe
+for concurrent evaluation. The minimum speed contrast controls wavelength
+resolution; `h` and `h_body` must also resolve spatial variation of the material.
+Represent jumps with separate regions. A `SpatialFluid` can appear in the
+`materials` vector alongside homogeneous fluid, elastic, and damped-solid
+regions. Its exterior must remain homogeneous; `free_surface` does not yet
+reflect these profiles.
+
+The default `closure = :auto` uses the exact Dirichlet-to-Neumann map on a sphere of radius `domain_radius`, by default 1.2 times the body's largest semi-axis, or a perfectly matched layer when that domain is smaller. The map is applied without forming its dense matrix, so it works with the iterative solver. `closure = :pml` truncates the exterior with a layer of thickness `pml_thickness`, one wavelength by default and shorter layers lose accuracy. Its domain is a sphere, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that is under 60% of the spherical volume. `:pml_spherical`, `:pml_spheroidal` and `:dtn` force a closure. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
+
+Use `closure = :auto` as a starting point. Check mesh resolution, enclosure size and closure parameters independently. For elongated bodies using confocal PML, refine the layer and compare with an independent solution.
 
 ```julia
 solution = fem(Spheroid(0.75, 0.25), SolidElastic(2.7, 4.2, 2.1), 1.0;
@@ -196,7 +237,7 @@ solution = fem(Spheroid(0.75, 0.25), SolidElastic(2.7, 4.2, 2.1), 1.0;
 scattering_amplitude(solution; angle = pi, azimuth = 0.0)
 ```
 
-Set `points_per_wavelength` for the fluid and the shortest solid wave, or `h` and `h_body` directly. `solver = :auto` uses a direct sparse solve below 60,000 unknowns and GMRES above, preconditioned by an incomplete LU factorization of the matrix with its wave terms shifted by `1 + i`. It falls back to the direct solve if GMRES does not converge, and `diagnostics(solution)` reports the solver and its iteration count. Use `solver = :direct` or `:iterative` to force one, and `ilu_tolerance` and `solver_tolerance` to tune the iteration. An aluminium sphere at `ka = 6` agrees with the modal series to `0.4%`. Element assembly runs over Julia threads, so start Julia with `-t auto`.
+Set `points_per_wavelength` for the fluid and the shortest solid wave, or `h` and `h_body` directly. `solver = :auto` uses a direct sparse solve below 60,000 unknowns and GMRES above, preconditioned by an incomplete LU factorization of the matrix with its wave terms shifted by `1 + i`. It falls back to the direct solve if GMRES does not converge, and `diagnostics(solution)` reports the solver and its iteration count. Use `solver = :direct` or `:iterative` to force one, and `ilu_tolerance` and `solver_tolerance` to tune the iteration. Element assembly runs over Julia threads, so start Julia with `-t auto`.
 
 `incidence_angle_sweep(body, boundary, k, angles; method = :volume)` samples backscatter over incidence angle. The mesh, matrix and factorization do not depend on the incident direction, so a sweep builds them once and each angle needs only a new load and solve. Five angles for a 3:1 aluminium prolate cost about one and a half single solves and agree with the transition-matrix sweep to 0.05 dB.
 
@@ -213,7 +254,23 @@ solution = fem([Spheroid(0.1, 0.02), Spheroid(0.025, 0.007)], materials, 2pi * 2
 target_strength(solution)
 ```
 
-The mesh size inside each region follows its own wavelength, so a gas region is refined much more than the flesh around it. A tilted, displaced bladder at 2250 Hz agrees with the coupled-region `bem` to `0.4%` in complex amplitude. An elastic shell built from a solid region around a fluid region agrees with the modal series for a sphere and the transition matrix for a spheroid to a few percent, and the elements in a thin layer are sized from its thickness.
+The mesh size inside each region follows its own wavelength, so a gas region is refined much more than the flesh around it. Elements in thin layers are sized from the layer thickness. For a thin layer, vary `h_body` separately from `points_per_wavelength`: the gap can cap the interface mesh so that increasing the latter barely changes it. Removing a zero-contrast outer region also removes that gap-based mesh cap, so specify and refine `h_body` when simplifying such a geometry.
+
+### [Material fields in volume FEM](@id fem-material-fields)
+
+Call the solution with `quantity=:displacement` for complex Cartesian displacement [m], `:velocity` for particle velocity [m/s], or `:stress` for the Cauchy stress tensor [Pa]. The material at each point determines the constitutive law: `SolidElastic`, `ElasticLayer` and `ViscoelasticSolid` use elastic stress, while `ViscousLayer` includes bulk and shear viscous terms. All use the `exp(-iωt)` convention, tension-positive stress and the solution frame.
+
+```julia
+solid = fem(Sphere(0.5), SolidElastic(2.7, 4.2, 2.1), 2.0;
+    method = :volume, incidence_angle = pi / 2)
+u = solid((0.1, 0.0, 0.0); quantity = :displacement,
+    density_exterior = 1000.0, soundspeed_exterior = 1500.0)
+v = solid((0.1, 0.0, 0.0); quantity = :velocity,
+    density_exterior = 1000.0, soundspeed_exterior = 1500.0)
+sigma = solid((0.1, 0.0, 0.0); quantity = :stress)
+```
+
+`density_exterior` [kg/m³] and `soundspeed_exterior` [m/s] set the physical displacement scale; the solver inputs contain only material contrasts. `pressure_amplitude` defaults to 1 Pa per unit of the solver's incident-pressure normalization and scales every query. If `ũ` is the stored volume displacement, physical displacement is `pressure_amplitude*ũ/(density_exterior*soundspeed_exterior^2)`. The stress uses the solve's Lamé moduli relative to exterior `ρc²`, multiplied by `pressure_amplitude`. For a nearly incompressible element, its volumetric stress uses the same cell-averaged dilatation as the reduced-integration solve. Velocity is `-im*k*soundspeed_exterior` times physical displacement. In a viscous region, any supplied sound speed must match the `ViscousLayer` used in the solve. Mechanical queries reject scalar acoustic fluid and exterior points. For acoustic pressure use `solution(points)` or `pressure(solution, points)` with the existing pressure normalization and `field`/`region` keywords. Query strictly inside a material: an exact-interface point has two material-side limits and the point locator may select either adjacent cell. These queries currently require `method=:volume`; the spherical VESM modal path retains no internal material coefficients.
 
 ### Planar free surface
 
@@ -224,6 +281,16 @@ solution = free_surface(Sphere(0.25), FluidFilled(1.05, 1.05), 2.0, 1.4;
     condition = :pressure_release, incidence_angle = 0.3)
 target_strength(solution)
 ```
+
+### Element order and wave resolution
+
+Full-3D volume FEM uses quadratic fields and curved quadratic tetrahedra.
+`points_per_wavelength` sets a target element size; curvature controls and
+meshing can produce different actual edge lengths. There is no volume
+`order` keyword. The radial solver's `order=1` or `order=2` applies only to
+its supported radial configurations.
+
+Check complex amplitudes or fields under mesh refinement at each frequency and material regime. A small linear-system residual does not bound accumulated phase error. Refine the exterior closure separately from the mesh. No single points-per-wavelength setting guarantees accuracy across frequencies and materials.
 
 ## Solve diagnostics
 

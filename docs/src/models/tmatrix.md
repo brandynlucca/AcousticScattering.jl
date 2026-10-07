@@ -1,6 +1,6 @@
 # [Transition-matrix solutions](@id tmatrix-theory)
 
-`tmatrix` solves scattering by elastic prolate and oblate spheroids and elastic shells in spheroidal coordinates ([Hackman, 1984](https://doi.org/10.1121/1.390297)). It returns a `TMatrixSolution`.
+`tmatrix` solves elastic spheroid and shell scattering in spheroidal coordinates ([Hackman, 1984](https://doi.org/10.1121/1.390297)).
 
 ## Field expansions
 
@@ -14,7 +14,7 @@ with ``R_{mn}^{(1)}`` the regular radial spheroidal wave function, ``R_{mn}^{(3)
 
 ## Elastic displacement
 
-Solid displacement satisfies the Navier equation of [FEM and shell coupling](@ref fem-theory). It is expanded in vector spheroidal wave functions built from the same ``R_{mn}S_{mn}e^{im\phi}`` scalar potentials, one longitudinal family at the solid's compressional wavenumber ``k_L`` and two transverse families at its shear wavenumber ``k_T``:
+Solid displacement satisfies the [Navier equation](@ref fem-theory). Its expansion uses scalar potentials $R_{mn}S_{mn}e^{im\phi}$, one longitudinal family at $k_L$ and two transverse families at $k_T$:
 
 ```math
 \boldsymbol u=\frac{1}{k_L}\nabla\chi_L
@@ -26,27 +26,64 @@ where ``\lambda`` is ``\chi_T``'s own separation constant.
 
 ## Transition matrix
 
-Pressure, normal displacement and zero shear traction are matched at the interface, tested against Betti's reciprocal identity for two elastodynamic states of the same frequency:
+Interface matching uses pressure, normal displacement and zero shear traction, with Betti's identity:
 
 ```math
 \int_S\left(\boldsymbol u\cdot\boldsymbol t(\boldsymbol v)-\boldsymbol v\cdot\boldsymbol t(\boldsymbol u)\right)dS=0.
 ```
 
-Every incident degree pairs with every test degree through this surface integral, so the resulting matrix ``f=Ta`` is dense, unlike the diagonal series of [`modal`](@ref modal-theory).
+Coupling between incident and test degrees makes $f=Ta$ dense.
 
 ## Solid spheroid
+
+Single elastic spheroids and shells accept `incident=field`, including Bessel beams and pressure/gradient callbacks, in the x-polar body frame.
+
+Refine `incident_n_eta` and `incident_n_phi` separately from modal orders. Observation angles `scatter_angle` and `scatter_azimuth` are fixed at solve time. Mixed-layer methods accept plane waves only.
 
 ```julia
 tmatrix(Spheroid(a, b), SolidElastic(g, hl, ht), k; incidence_angle = pi / 3)
 ```
 
-The solution reduces to the elastic sphere as the aspect ratio approaches one and to the rigid spheroid as the solid becomes stiff and dense. It agrees with a full-wave isogeometric reference and with the volume FEM of [FEM and shell coupling](@ref fem-theory).
+The spherical limit recovers elastic-sphere scattering. Large stiffness and density approach the rigid limit.
 
 ## Elastic shell
 
 `Shelled(ElasticLayer(...), FluidInterior(...) or VacuumInterior(), radius_ratio)` is a shell with a confocal inner surface, whose equatorial semi-axis is `radius_ratio` times the outer one. An oblate shell needs a `radius_ratio` above the focal ratio so that this surface exists.
 
-Elongated and thin shells converge slowly in `n_max`. Each shell solve is repeated with `m_max` and `n_max` reduced by 2 and warns when the amplitude changes by more than 1%. Use `n_max` near 30 for a 3:1 shell with `radius_ratio = 0.8` and check against `bem` beyond that.
+Thin or elongated shells need larger `n_max`. Reducing both modal orders by two checks convergence and warns if amplitude changes exceed 1%.
+
+## Mixed confocal layers
+
+Prolate mixed stacks combine `FluidLayer` and `ElasticLayer` around a fluid or vacuum core. Interfaces must be confocal, contrasts relative to the exterior fluid, and elastic coupling `:generalized`.
+
+```julia
+body = Spheroid(1.2, 1.0)
+layers = Shelled(LayeredMaterial(FluidLayer(1.2, 1.1),
+    ElasticLayer(2.7, 4.2, 2.1), 0.8), FluidInterior(0.8, 0.9), 0.55)
+solution = tmatrix(body, layers, 1.2)
+```
+
+Limits are $a/b \leq 1.25$, $ka \leq 1.5$, `m_max <= 4` and `4 <= n_max <= 8`. The default compares `n_max=8` with 6 and rejects amplitude changes above 3%. Use refined volume FEM outside this range.
+
+### Far-field-generated transition
+
+`method=:farfield` builds a reusable angular transition from volume FEM for mixed prolate stacks with a fluid core ([Ganesh and Hawkins, 2022](https://doi.org/10.1121/10.0009679)).
+
+```julia
+body = Spheroid(1.5, 1.0)
+layers = Shelled(LayeredMaterial(FluidLayer(1.2, 1.1),
+    ElasticLayer(2.7, 4.2, 2.1), 0.8), FluidInterior(0.8, 0.9), 0.55)
+transition = tmatrix(body, layers, 1.2; method = :farfield)
+f = scattering_amplitude(transition;
+    incidence_angle = pi / 2, angle = pi / 2, azimuth = 0.0)
+diagnostics(transition).holdout_error
+```
+
+Defaults are `polar_order=6` and `m_max=4`. An independent incidence check rejects angular reconstruction errors above 1%. The validated range is $a/b \leq 1.5$ and $ka \leq 1.8$.
+
+Refine angular orders together, fluid mesh size with `points_per_wavelength` or `h`, interfaces with `h_body`, and exterior closure with `domain_radius` and `dtn_order`. Thin layers need explicit `h_body` refinement. Check resonances separately.
+
+Reuse the transition with `scattering_amplitude` or `target_strength` without further FEM solves. Defaults use the original directions. Changing incidence alone selects backscatter. Projected and single-shell solutions retain fixed observation directions.
 
 ## Sweeps
 

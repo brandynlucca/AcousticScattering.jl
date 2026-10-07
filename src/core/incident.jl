@@ -23,7 +23,7 @@ end
 """
     IncidentField(pressure, gradient)
 
-Prescribe a harmonic incident pressure and its Cartesian gradient at a fixed
+Define a harmonic incident pressure and its Cartesian gradient at a fixed
 wavenumber. Both callables accept a point in meters in the solver's body frame;
 `gradient(x)` returns three components per meter. The field must satisfy the
 exterior Helmholtz equation near the target, with all sources outside it.
@@ -207,7 +207,7 @@ end
 """
     incident_pressure(field::IncidentField, k, point)
 
-Evaluate the prescribed complex incident pressure at one Cartesian point [m],
+Evaluate the complex incident pressure at one Cartesian point [m],
 with exterior wavenumber `k` [rad/m], under `exp(-i*omega*t)`. Built-in fields
 can be reused at different frequencies. Callable `IncidentField(p, grad)` fields
 are already tied to their construction frequency; `k` cannot retune those callbacks.

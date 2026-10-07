@@ -30,7 +30,7 @@ layers reject a change above 3%. Pass `check = false` to skip that check. Post-p
 [`target_strength`](@ref) or
 [`scattering_amplitude`](@ref).
 
-Single elastic spheroids/shells accept `incident=field`, projecting prescribed pressure
+Single elastic spheroids/shells accept `incident=field`, projecting incident pressure
 and gradient into their regular spheroidal basis. `incident_n_eta=max(32,2n_max+12)`
 and `incident_n_phi=max(32,4m_max+4)` control incident quadrature separately.
 The transition is assembled once per azimuthal order for both incident Fourier sectors.
