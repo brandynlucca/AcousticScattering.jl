@@ -3,9 +3,22 @@
 _characteristic_radius(body::Sphere) = body.radius
 _characteristic_radius(body::Spheroid) = max(body.a, body.b)
 _characteristic_radius(body::Cylinder) = max(body.radius, body.length / 2)
+_characteristic_radius(body::RevolvedBody) = maximum(hypot.(body.x, body.radius))
+function _characteristic_radius(body::Torus)
+    max(body.axial_radius, body.major_radius + body.radial_radius)
+end
+_characteristic_radius(body::Union{Ellipsoid, Superellipsoid}) = maximum(body.semiaxes)
+function _characteristic_radius(body::LoftedBody)
+    maximum(norm(body.centers[:, i]) +
+            maximum(body.semiaxes[:, i]) for i in axes(body.centers, 2))
+end
 
 function _axisymmetric_default_panels(body::AbstractBody, k::Real)
     bem_panel_count(k, _characteristic_radius(body))
+end
+
+function _axisymmetric_default_panels(body::RevolvedBody, k::Real)
+    max(length(body.x) - 1, bem_panel_count(k, _characteristic_radius(body)))
 end
 
 _axisymmetric_mesh(body::Sphere, n::Integer) = sphere_mesh(body.radius, n)
@@ -28,6 +41,42 @@ struct Mesh{D}
     body::AbstractBody
     method::Symbol
     resolution::Float64
+end
+
+"""
+    mesh(body::Union{RevolvedBody,Torus,LoftedBody,Ellipsoid,Superellipsoid};
+         resolution=nothing, k=nothing, method, qorder=4, mesh_order=2,
+         validation=(;))
+
+Mesh a generated geometry. `RevolvedBody` and `Torus` default to
+`method=:axisymmetric`, where `resolution` is the total number of meridian
+panels. Every supplied profile corner is retained. Other bodies require
+`method=:full`, where `resolution` is a target edge length in meters.
+Exactly one of `resolution` or positive exterior wavenumber `k` is required.
+Full surfaces are validated like supplied meshes. `mesh_order` is 1, 2 or 3.
+"""
+function mesh(body::_GeneratedBody; resolution::Union{Nothing, Real} = nothing,
+        k::Union{Nothing, Real} = nothing,
+        method::Symbol = body isa _RevolutionBody ? :axisymmetric : :full,
+        qorder::Integer = 4, mesh_order::Integer = 2, validation::NamedTuple = (;))
+    (resolution === nothing) == (k === nothing) &&
+        throw(ArgumentError("mesh needs exactly one of resolution or k"))
+    k === nothing || (isfinite(k) && k > 0) ||
+        throw(ArgumentError("k must be finite and positive"))
+    resolution === nothing || (isfinite(resolution) && resolution > 0) ||
+        throw(ArgumentError("resolution must be finite and positive"))
+    if method === :axisymmetric
+        body isa _RevolutionBody || throw(ArgumentError("this body requires method=:full"))
+        n = resolution === nothing ? _axisymmetric_default_panels(body, k) : resolution
+        isinteger(n) ||
+            throw(ArgumentError("axisymmetric resolution must be an integer panel count"))
+        return Mesh(_axisymmetric_mesh(body, Int(n)), body, method, Float64(n))
+    end
+    method === :full || throw(ArgumentError("method must be :axisymmetric or :full"))
+    mesh_order in (1, 2, 3) || throw(ArgumentError("mesh_order must be 1, 2 or 3"))
+    h = resolution === nothing ? bem3d_elements_per_wavelength(k) : Float64(resolution)
+    surface = _generated_surface(body; meshsize = h, qorder, mesh_order, validation)
+    return Mesh(surface.data, body, :full, h)
 end
 
 """

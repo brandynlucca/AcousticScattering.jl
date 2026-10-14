@@ -1,6 +1,59 @@
 # --- `bem`: axisymmetric and full 3D boundary element method ---------------
 
 """
+    bem(body::Union{RevolvedBody,Torus,LoftedBody,Ellipsoid,Superellipsoid}, boundary, k;
+        method, n, meshsize, qorder=4, mesh_order=2, kwargs...)
+
+Scatter from a generated geometry with rigid, pressure-release or homogeneous
+fluid/gas material. Revolved bodies and tori default to `method=:axisymmetric`.
+Lofts, ellipsoids and superellipsoids use `method=:full`. Full solves accept the
+same formulations, compression and convergence controls as supplied meshes.
+Axisymmetric solves use `n` meridian panels and `m_max` azimuthal modes.
+`meshsize` is the full-surface target edge length in meters.
+"""
+function bem(
+        body::_GeneratedBody, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
+        method::Symbol = body isa _RevolutionBody ? :axisymmetric : :full,
+        incidence_angle::Real = pi / 2, incidence_azimuth::Real = 0.0,
+        n::Integer = _axisymmetric_default_panels(body, k),
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, validation::NamedTuple = (;), kwargs...)
+    isfinite(k) && k > 0 && all(isfinite, (incidence_angle, incidence_azimuth)) ||
+        throw(ArgumentError("k must be positive and finite and incidence angles finite"))
+    m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
+    if method === :full
+        surface = mesh(body; method, resolution = meshsize, qorder, mesh_order, validation)
+        return bem(surface, boundary, k; incidence_angle, incidence_azimuth, kwargs...)
+    end
+    method === :axisymmetric && body isa _RevolutionBody ||
+        throw(ArgumentError("this geometry requires method=:full, or a revolution body for :axisymmetric"))
+    iszero(incidence_azimuth) ||
+        throw(ArgumentError("axisymmetric solves use incidence_azimuth=0"))
+    meridian = _axisymmetric_mesh(body, n)
+    iszero(incidence_angle) && return _bem_axial(body, boundary, k, meridian; kwargs...)
+    return _bem_oblique(body, boundary, k, meridian, incidence_angle; m_max, kwargs...)
+end
+
+"""
+    bem(surface::Mesh, boundary, k; incidence_angle=pi/2, m_max, kwargs...)
+
+Reuse an axisymmetric mesh of a revolution body for rigid, pressure-release or
+fluid scattering. Its meridian panels are used unchanged.
+"""
+function bem(surface::Mesh{MeridianMesh},
+        boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
+        incidence_angle::Real = pi / 2,
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(surface.body)), kwargs...)
+    isfinite(k) && k > 0 && isfinite(incidence_angle) && m_max >= 0 ||
+        throw(ArgumentError("positive finite k, finite incidence_angle and nonnegative m_max are required"))
+    iszero(incidence_angle) &&
+        return _bem_axial(surface.body, boundary, k, surface.data; kwargs...)
+    return _bem_oblique(
+        surface.body, boundary, k, surface.data, incidence_angle; m_max, kwargs...)
+end
+
+"""
     bem(body::AbstractBody, boundary::AbstractBoundaryCondition, k; method=:axisymmetric, incidence_angle=π/2, kwargs...)
 
 Boundary-element solve, returns a [`BEMSolution`](@ref). `method=:axisymmetric` supports

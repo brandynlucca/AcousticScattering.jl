@@ -11,6 +11,138 @@ struct _SurfaceGeometry <: AbstractBody
     validation::NamedTuple
 end
 
+function _loft_frames(centers, semiaxes, directions, twists)
+    size(centers, 1) == 3 && size(semiaxes) == (2, size(centers, 2)) &&
+    size(centers, 2) >= 2 ||
+        throw(ArgumentError("centers must be 3 by N and semiaxes 2 by N, with N >= 2"))
+    all(isfinite, centers) && all(a -> isfinite(a) && a > 0, semiaxes) ||
+        throw(ArgumentError("centers must be finite and semi-axes finite and positive"))
+    cc, aa = Matrix{Float64}(centers), Matrix{Float64}(semiaxes)
+    count = size(cc, 2)
+    steps = [SVector{3}(cc[:, i + 1] - cc[:, i]) for i in 1:(count - 1)]
+    all(v -> norm(v) > 0, steps) || throw(ArgumentError("consecutive centers must differ"))
+    tangents = [v / norm(v) for v in steps]
+    normals = if directions === nothing
+        [i == 1 ? first(tangents) :
+         i == count ? last(tangents) :
+         tangents[i - 1] + tangents[i] for i in 1:count]
+    else
+        size(directions) == size(cc) && all(isfinite, directions) ||
+            throw(ArgumentError("directions must be a finite 3 by N matrix"))
+        [SVector{3, Float64}(v) for v in eachcol(directions)]
+    end
+    all(v -> norm(v) > 1e-12, normals) ||
+        throw(ArgumentError("section normals must be nonzero and the centerline must not reverse"))
+    normals = [v / norm(v) for v in normals]
+    all(
+        i -> dot(normals[i], tangents[i]) > 1e-10 &&
+             dot(normals[i + 1], tangents[i]) > 1e-10,
+        eachindex(steps)) ||
+        throw(ArgumentError("section normals must point along adjacent centerline segments"))
+    angles = twists === nothing ? zeros(count) : Float64.(twists)
+    length(angles) == count && all(isfinite, angles) ||
+        throw(ArgumentError("twists must supply one finite angle per section"))
+    reference = abs(normals[1][2]) < 0.9 ? SVector(0.0, 1.0, 0.0) : SVector(0.0, 0.0, 1.0)
+    u = reference - dot(reference, normals[1]) * normals[1]
+    u /= norm(u)
+    frames = SMatrix{3, 3, Float64, 9}[]
+    for i in 1:count
+        n = normals[i]
+        if i > 1
+            v = cross(normals[i - 1], n)
+            cosine = dot(normals[i - 1], n)
+            cosine > -1 + 1e-10 ||
+                throw(ArgumentError("adjacent section normals cannot be opposite"))
+            u = u + cross(v, u) + cross(v, cross(v, u)) / (1 + cosine)
+            u -= dot(u, n) * n
+            u /= norm(u)
+        end
+        v = cross(n, u)
+        s, c = sincos(angles[i])
+        push!(frames, hcat(c * u + s * v, -s * u + c * v, n))
+    end
+    return cc, aa, frames
+end
+
+function _generated_surface(body::_GeneratedBody; meshsize, qorder, mesh_order, validation)
+    return mesh(; qorder, validation, provenance = string(nameof(typeof(body)))) do g
+        g.model.add(string(nameof(typeof(body))))
+        _generated_cad(g, body)
+        g.model.occ.synchronize()
+        size = body isa Superellipsoid ? meshsize / maximum(body.semiaxes) : meshsize
+        g.option.setNumber("Mesh.MeshSizeMin", size)
+        g.option.setNumber("Mesh.MeshSizeMax", size)
+        g.model.mesh.generate(2)
+        g.model.mesh.setOrder(mesh_order)
+        if body isa Superellipsoid
+            tags, coordinates, _ = g.model.mesh.getNodes()
+            for (tag, point) in zip(tags, eachcol(reshape(coordinates, 3, :)))
+                g.model.mesh.setNode(tag, _superellipsoid_point(body, point / norm(point)), Float64[])
+            end
+        end
+    end
+end
+
+function _generated_cad(g, body::RevolvedBody)
+    o = g.model.occ
+    indices = body.closed ? (1:(length(body.x) - 1)) : eachindex(body.x)
+    points = [o.addPoint(body.x[i], body.radius[i], 0.0) for i in indices]
+    curves = [o.addLine(points[i], points[mod1(i + 1, length(points))])
+              for i in eachindex(points)]
+    face = o.addPlaneSurface([o.addWire(curves)])
+    o.revolve([(2, face)], 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2pi)
+    # The generating face is an internal seam, not part of the scatterer's boundary.
+    o.remove([(2, face)], true)
+    return nothing
+end
+
+function _generated_cad(g, body::LoftedBody)
+    o = g.model.occ
+    wires = Int[]
+    for i in axes(body.centers, 2)
+        a, b = body.semiaxes[:, i]
+        frame = body.frames[i]
+        center = body.centers[:, i]
+        origin = o.addPoint(center...)
+        offsets = (a * frame[:, 1], b * frame[:, 2], -a * frame[:, 1], -b * frame[:, 2])
+        points = [o.addPoint((center + offset)...) for offset in offsets]
+        major = points[a >= b ? 1 : 2]
+        # Keep the same four section landmarks even when the major axis swaps.
+        # A single closed ellipse starts on its major axis and would twist the loft.
+        arcs = [o.addEllipseArc(points[j], origin, major, points[mod1(j + 1, 4)])
+                for j in 1:4]
+        push!(wires, o.addWire(arcs, -1, true))
+    end
+    o.addThruSections(wires, -1, true, true)
+    return nothing
+end
+
+function _generated_cad(g, body::Ellipsoid)
+    tag = g.model.occ.addSphere(0.0, 0.0, 0.0, 1.0)
+    g.model.occ.dilate([(3, tag)], 0.0, 0.0, 0.0, body.semiaxes...)
+    return nothing
+end
+
+_generated_cad(g, ::Superellipsoid) = g.model.occ.addSphere(0.0, 0.0, 0.0, 1.0)
+
+function _superellipsoid_point(body, p)
+    a, b, c = body.semiaxes
+    e1, e2 = body.axial_exponent, body.equatorial_exponent
+    # Radial projection avoids concentrating nodes near coordinate planes when
+    # the signed-power latitude parametrization has an unbounded derivative.
+    level = (abs(p[1])^(2 / e1) +
+             (abs(p[2])^(2 / e2) + abs(p[3])^(2 / e2))^(e2 / e1))^(e1 / 2)
+    return [a * p[1] / level, b * p[2] / level, c * p[3] / level]
+end
+
+function _generated_cad(g, body::Torus)
+    o = g.model.occ
+    tag = o.addTorus(0.0, 0.0, 0.0, body.major_radius, body.radial_radius)
+    o.rotate([(3, tag)], 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, pi / 2)
+    o.dilate([(3, tag)], 0.0, 0.0, 0.0, body.axial_radius / body.radial_radius, 1.0, 1.0)
+    return nothing
+end
+
 function _surface_scale(units::Symbol)
     units === :m && return 1.0
     units === :cm && return 0.01

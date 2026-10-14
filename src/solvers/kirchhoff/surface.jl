@@ -13,7 +13,21 @@ convention is `exp(-im*omega*t)`, with outgoing scattered pressure
 Kirchhoff amplitudes to quadrature/geometry accuracy. Local normal selection
 does not test visibility: a concave surface may include self-shadowed points.
 Returns a [`KirchhoffSolution`](@ref).
+
+    kirchhoff(body::Union{RevolvedBody,Torus,LoftedBody,Ellipsoid,Superellipsoid}, boundary, k;
+        meshsize, qorder=4, mesh_order=2, kwargs...)
+
+Generate a full surface and evaluate Kirchhoff backscatter. The same local-normal
+illumination rule as `kirchhoff(surface, ...)` applies, without self-shadowing tests.
 """
+function kirchhoff(body::_GeneratedBody, boundary::AbstractBoundaryCondition, k::Real;
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, validation::NamedTuple = (;), kwargs...)
+    isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
+    surface = mesh(
+        body; method = :full, resolution = meshsize, qorder, mesh_order, validation)
+    return kirchhoff(surface, boundary, k; kwargs...)
+end
 
 function kirchhoff(surface::Mesh{<:Inti.Quadrature}, boundary::AbstractBoundaryCondition,
         k::Real; incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0)

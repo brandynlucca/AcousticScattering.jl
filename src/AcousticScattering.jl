@@ -25,6 +25,8 @@ export Rigid, PressureRelease, Impedance, FluidFilled, GasFilled, SolidElastic,
 export Shelled, FluidLayer, ElasticLayer, ViscousLayer, LayeredMaterial, VacuumInterior,
        FluidInterior
 export AbstractBody, Sphere, Cylinder, Spheroid, Shell, Irregular
+export RevolvedBody, LoftedBody, Ellipsoid, Superellipsoid, Torus,
+       Cone, Bicone, Frustum, FrustumChain
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
 export incident_pressure, incident_gradient, incident_coefficient
 export AbstractSolution, ModalSolution, TMatrixSolution,

@@ -15,6 +15,15 @@ Spheroid
 Cylinder
 Shell
 Irregular
+RevolvedBody
+LoftedBody
+Ellipsoid
+Superellipsoid
+Torus
+Cone
+Bicone
+Frustum
+FrustumChain
 ```
 
 ## Incident fields

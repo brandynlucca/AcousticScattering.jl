@@ -1,6 +1,13 @@
 using AcousticScattering
 using Test
 
+@testset "Generated ellipsoid Kirchhoff spherical limit" begin
+    solution = kirchhoff(Ellipsoid(1.0, 1.0, 1.0), Rigid(), 2.0;
+        meshsize = 0.15, qorder = 4)
+    reference = kirchhoff(Sphere(1.0), Rigid(), 2.0)
+    @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 0.005
+end
+
 @testset "Kirchhoff source-facing surface and translation" begin
     # An axis-aligned box has just one illuminated face for axial incidence.
     # Its physical-optics integral is analytic, including the face's position.

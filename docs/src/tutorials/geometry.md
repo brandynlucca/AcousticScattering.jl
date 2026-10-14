@@ -64,7 +64,33 @@ surface_mesh = mesh(prolate; resolution = 32)
 typeof(surface_mesh)
 ```
 
-This is an axisymmetric meridian discretization. `resolution` means panel count for `method = :axisymmetric`, but target edge length in meters for `method = :full`. Supply either `resolution` or `k`, not both. Built-in full surface meshing supports spheres, spheroids and cylinders. See the [gallery](@ref gallery) for mesh and surface-field plots.
+This is an axisymmetric meridian discretization. `resolution` means panel count for `method = :axisymmetric`, but target edge length in meters for `method = :full`. Supply either `resolution` or `k`, not both. See [Geometries](@ref geometries) for built-in geometries and the [visualization gallery](@ref gallery) for surface-field plots.
+
+## Generated shapes and profiles
+
+`Cone`, `Bicone`, circular `Frustum` and circular `FrustumChain` return
+`RevolvedBody` geometries. `Torus` supports circular or elliptical tube sections.
+These geometries support axisymmetric BEM and full surface BEM. `Ellipsoid`,
+`Superellipsoid`, elliptical frustums and `LoftedBody` use full surface BEM.
+All generated full meshes also work with MFS, mesh Kirchhoff and coupled fluid
+BEM. Dimensions are in meters and the revolution axis is x.
+
+```julia
+cone = Cone(0.01, 0.06)
+bicone = Bicone(0.01, 0.06; waist=0.4)
+chain = FrustumChain([-0.03, -0.01, 0.02, 0.03], [0.0, 0.008, 0.006, 0.0])
+torus = Torus(0.025, (0.006, 0.004)) # axial and radial tube radii
+solution = bem(torus, PressureRelease(), 100.0; n=64, m_max=8)
+```
+
+The [Geometries](@ref geometries) page includes sampled revolution profiles,
+elliptical lofts, capped paraboloids and hyperboloids. It explains profile
+sampling, section frames, topology constraints and mesh refinement separately.
+
+Full BEM supports rigid, pressure-release and homogeneous fluid/gas interiors
+on these bodies. Their meshes do not add elastic-solid or volume-FEM support.
+MFS additionally requires suitable source offsets, especially near rims and
+concavities. Kirchhoff uses local-normal illumination without self-shadowing.
 
 ## Supplied closed surfaces
 

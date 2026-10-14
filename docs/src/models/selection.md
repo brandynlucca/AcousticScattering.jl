@@ -272,6 +272,14 @@ Start with the least costly method that supports both your physics and your desi
 
 ## Choosing by question
 
+Generated shapes extend the surface methods beyond the canonical entries above.
+`RevolvedBody` and `Torus` support axisymmetric and full BEM. `LoftedBody`,
+`Ellipsoid` and `Superellipsoid` support full BEM. The cone, bicone and frustum
+constructors return revolution bodies or elliptical lofts. These full meshes
+also support MFS and Kirchhoff, and may form interfaces in coupled fluid BEM.
+Material restrictions still apply. See [Geometries](@ref geometries)
+for profile sampling, section frames and mesh refinement.
+
 - Use sphere or spheroid modal methods as analytical references, while checking series convergence and special-function conditioning. 
 - Use Kirchhoff to explore physical-optics behavior. A numerically converged surface integral   does not establish validity of physical optics at low frequency. 
 - Use FEM or BEM when checking analytical reductions, geometry discretization, or interface   coupling. Compare against a canonical case first. Full 3D volume FEM is the general-purpose reference for elastic and shelled spheres and spheroids.

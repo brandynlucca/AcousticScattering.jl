@@ -480,7 +480,48 @@ function incidence_angle_sweep(::typeof(mfs), body::Union{Sphere, Spheroid, Cyli
     return (; sweep, diagnostics)
 end
 
-# Shared by the Cylinder and Sphere/Spheroid axisymmetric-BEM sweep entry points below.
+"""
+    incidence_angle_sweep(body::Union{RevolvedBody,Torus,LoftedBody,Ellipsoid,Superellipsoid},
+        boundary, k, angles; method, kwargs...)
+
+Sample BEM backscatter on a generated geometry. Revolved bodies and tori default
+to axisymmetric solves, reusing rigid/soft operators across angles. Other bodies
+default to full BEM, reusing the generated surface and its boundary operators.
+"""
+function incidence_angle_sweep(body::_GeneratedBody,
+        boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real,
+        angles::AbstractVector{<:Real};
+        method::Symbol = body isa _RevolutionBody ? :axisymmetric : :full,
+        n::Integer = _axisymmetric_default_panels(body, k),
+        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)),
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, validation::NamedTuple = (;), kwargs...)
+    isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
+    if method === :full
+        surface = mesh(body; method, resolution = meshsize, qorder, mesh_order, validation)
+        return incidence_angle_sweep(surface, boundary, k, angles; kwargs...)
+    end
+    method === :axisymmetric && body isa _RevolutionBody ||
+        throw(ArgumentError("this geometry requires method=:full, or a revolution body for :axisymmetric"))
+    if boundary isa Union{Rigid, PressureRelease}
+        sweep = _axisymmetric_angle_sweep(body, boundary, k, angles; n, m_max, kwargs...)
+        if any(iszero, angles)
+            # The axial solver integrates its incident trace within each panel.
+            # Preserve that discretization at zero angle, as in a single solve.
+            axial = bem(body, boundary, k; incidence_angle = 0.0, n, m_max, kwargs...)
+            sweep.amplitudes[iszero.(angles)] .= scattering_amplitude(axial)
+            return IncidenceAngleSweep(sweep.angles, target_strength.(sweep.amplitudes),
+                sweep.amplitudes, sweep.labels)
+        end
+        return sweep
+    end
+    surface = mesh(body; method, resolution = n)
+    return incidence_angle_sweep(angles) do angle
+        bem(surface, boundary, k; incidence_angle = angle, m_max, kwargs...)
+    end
+end
+
+# Shared by the canonical and generated axisymmetric-BEM sweep entry points.
 function _axisymmetric_angle_sweep(
         body, boundary::Union{Rigid, PressureRelease, Impedance}, k::Real,
         angles::AbstractVector{<:Real};

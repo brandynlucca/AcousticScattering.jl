@@ -11,6 +11,26 @@ struct _FullMFSSurfaceData
     interior_coefficients::Union{Nothing, Vector{ComplexF64}}
 end
 
+"""
+    mfs(body::Union{RevolvedBody,Torus,LoftedBody,Ellipsoid,Superellipsoid}, boundary, k;
+        meshsize, qorder=4, mesh_order=2, kwargs...)
+
+Generate a full surface and use point-source MFS. Supply `offset` for rigid/soft
+bodies or `offset_ext`/`offset_int` for fluids. All source-placement and independent
+boundary-residual controls of `mfs(surface, ...)` apply. Sharp rims, tips and
+concavities require particular care. Use BEM when normal-offset sources cannot
+represent the boundary accurately.
+"""
+function mfs(
+        body::_GeneratedBody, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
+        meshsize::Real = bem3d_elements_per_wavelength(k), qorder::Integer = 4,
+        mesh_order::Integer = 2, validation::NamedTuple = (;), kwargs...)
+    isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
+    surface = mesh(
+        body; method = :full, resolution = meshsize, qorder, mesh_order, validation)
+    return mfs(surface, boundary, k; kwargs...)
+end
+
 function _FullMFSSurfaceData(quad, sources, coefficients, beta, alpha, pinc, report)
     _FullMFSSurfaceData(quad, sources, coefficients, beta, alpha, pinc, report,
         nothing, nothing, nothing)

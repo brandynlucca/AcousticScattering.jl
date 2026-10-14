@@ -2,6 +2,9 @@
 
 Explore geometry, materials, coupled bodies, pressure fields and scattering patterns. Click any figure to enlarge it, or open its short, runnable Julia example.
 
+For a visual catalog of body constructors and supported geometry families, see
+the [Geometries](@ref geometries) page.
+
 ```@raw html
 <div class="scattering-gallery">
   <figure>

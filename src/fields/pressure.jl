@@ -59,9 +59,9 @@ function _check_pressure_solution(solution)
                  solution isa FEMSolution{_SphereMeridianFEMData})
     full = solution isa
            Union{BEMSolution{_FullBEMSurfaceData}, MFSSolution{_FullMFSSurfaceData}}
-    boundary_geometry = solution.body isa Union{Sphere, Spheroid} ||
+    boundary_geometry = solution.body isa Union{Sphere, Spheroid, _RevolutionBody} ||
                         (solution.body isa Cylinder && (full || !_isbent(solution.body))) ||
-                        (full && solution.body isa _SurfaceGeometry)
+                        (full && solution.body isa Union{_SurfaceGeometry, _GeneratedBody})
     boundary_data = solution isa Union{BEMSolution{_FullBEMSurfaceData},
         BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_FullMFSSurfaceData}} ||
                     (solution isa MFSSolution{_AxisymmetricSurfaceData} &&
@@ -472,7 +472,8 @@ end
 
 function _boundary_pressure_regions(solution, points, field)
     body = solution.body
-    if body isa Union{Spheroid, _SurfaceGeometry} || (body isa Cylinder && _isbent(body))
+    if body isa Union{Spheroid, _SurfaceGeometry, _GeneratedBody} ||
+       (body isa Cylinder && _isbent(body))
         patches = _region_patches(solution.data.quad, 0)
         # Bernstein control hulls enclose the full curved surface, including any
         # excursion beyond mesh nodes. Reject distant points once per batch before
@@ -511,6 +512,10 @@ function _boundary_pressure_region(solution, point, field)
     end
     body = solution.body
     rho, axial = hypot(point[2], point[3]), abs(point[1])
+    if body isa _RevolutionBody
+        return _surface_pressure_region(solution.boundary,
+            _meridian_location(solution.data.mesh, point), field)
+    end
     level = if body isa Spheroid
         hypot(axial/body.a, rho/body.b)
     else

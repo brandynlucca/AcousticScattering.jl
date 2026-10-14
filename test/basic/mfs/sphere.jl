@@ -1,6 +1,17 @@
 using AcousticScattering
 using Test
 
+@testset "Generated ellipsoid spherical limit" begin
+    body = Ellipsoid(1.0, 1.0, 1.0)
+    source_mesh = mesh(body; resolution = 0.5, mesh_order = 2, qorder = 1)
+    solution = mfs(body, PressureRelease(), 0.5; meshsize = 0.4, qorder = 2,
+        source_mesh, offset = 0.4, incidence_angle = 0.0, condition_limit = 0)
+    reference = modal(Sphere(1.0), PressureRelease(), 0.5)
+    @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 0.005
+    @test pressure(solution, (2.0, 0.0, 0.0)) ≈ pressure(reference, (2.0, 0.0, 0.0)) rtol = 0.005
+    @test_throws ArgumentError pressure(solution, (0.0, 0.0, 0.0))
+end
+
 @testset "Sphere" begin
     body = Sphere(1.0)
     k = 0.5

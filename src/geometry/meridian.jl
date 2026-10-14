@@ -18,6 +18,120 @@ struct MeridianMesh
     z::Vector{Float64}
 end
 
+function _validate_revolved_profile(x, radius, closed)
+    length(x) == length(radius) >= 3 ||
+        throw(ArgumentError("a meridian needs matching x/radius vectors with at least three vertices"))
+    all(isfinite, x) && all(isfinite, radius) ||
+        throw(ArgumentError("meridian coordinates must be finite"))
+    xx, rr = Float64.(x), Float64.(radius)
+    scale = max(maximum(xx) - minimum(xx), maximum(rr) - minimum(rr))
+    scale > 0 || throw(ArgumentError("meridian has zero extent"))
+    tolerance = 64eps(Float64) * scale
+    if closed
+        all(>(0), rr) ||
+            throw(ArgumentError("a closed meridian loop must stay strictly away from the axis"))
+        if hypot(last(xx) - first(xx), last(rr) - first(rr)) <= tolerance
+            xx[end], rr[end] = xx[1], rr[1]
+        else
+            push!(xx, xx[1])
+            push!(rr, rr[1])
+        end
+    else
+        iszero(first(rr)) && iszero(last(rr)) && all(>(0), rr[2:(end - 1)]) ||
+            throw(ArgumentError("an open meridian must meet the axis only at its two endpoints"))
+    end
+    # Work in local, dimensionless coordinates so tolerance is independent of units.
+    vertices = [SVector((xx[i] - xx[1]) / scale, (rr[i] - rr[1]) / scale)
+                for i in eachindex(xx)]
+    closed || push!(vertices, first(vertices))
+    count = length(vertices) - 1
+    count >= 3 || throw(ArgumentError("meridian must enclose an area"))
+    tol = 64eps(Float64)
+    cross2(a, b) = a[1] * b[2] - a[2] * b[1]
+    for i in 1:count
+        a, b = vertices[i], vertices[i + 1]
+        norm(b - a) > tol ||
+            throw(ArgumentError("meridian has a repeated or unresolved vertex"))
+        c = vertices[mod1(i + 2, count)]
+        abs(cross2(b - a, c - b)) <= tol && dot(b - a, c - b) < 0 &&
+            throw(ArgumentError("adjacent meridian segments overlap"))
+        for j in (i + 2):count
+            i == 1 && j == count && continue
+            c, d = vertices[j], vertices[j + 1]
+            any(
+                k -> max(a[k], b[k]) < min(c[k], d[k]) - tol ||
+                     max(c[k], d[k]) < min(a[k], b[k]) - tol, 1:2) && continue
+            ab_c, ab_d = cross2(b - a, c - a), cross2(b - a, d - a)
+            cd_a, cd_b = cross2(d - c, a - c), cross2(d - c, b - c)
+            separated(u, v) = (u > tol && v > tol) || (u < -tol && v < -tol)
+            separated(ab_c, ab_d) || separated(cd_a, cd_b) ||
+                throw(ArgumentError("meridian segments cross, touch or have unresolved separation"))
+        end
+    end
+    area = sum(cross2(vertices[i], vertices[i + 1]) for i in 1:count)
+    abs(area) > tol || throw(ArgumentError("meridian has zero or unresolved area"))
+    if area < 0
+        reverse!(xx)
+        reverse!(rr)
+    end
+    return xx, rr
+end
+
+# Preserve every supplied corner while allocating extra panels by segment length.
+function _axisymmetric_mesh(body::RevolvedBody, n::Integer)
+    lengths = hypot.(diff(body.x), diff(body.radius))
+    n >= length(lengths) ||
+        throw(ArgumentError("panel count must be at least the number of profile segments"))
+    extra = (n - length(lengths)) .* lengths ./ sum(lengths)
+    counts = 1 .+ floor.(Int, extra)
+    remainder = n - sum(counts)
+    counts[sortperm(extra .- floor.(extra); rev = true)[1:remainder]] .+= 1
+    x, rho = Float64[], Float64[]
+    for i in eachindex(counts), j in 0:(counts[i] - 1)
+
+        t = j / counts[i]
+        push!(x, (1 - t) * body.x[i] + t * body.x[i + 1])
+        push!(rho, (1 - t) * body.radius[i] + t * body.radius[i + 1])
+    end
+    push!(x, last(body.x))
+    push!(rho, last(body.radius))
+    return MeridianMesh(rho, x)
+end
+
+function _axisymmetric_mesh(body::Torus, n::Integer)
+    n >= 8 || throw(ArgumentError("a toroidal meridian needs at least eight panels"))
+    t = range(0.0, 2pi; length = n + 1)
+    x = body.axial_radius .* cos.(t)
+    rho = body.major_radius .+ body.radial_radius .* sin.(t)
+    x[end], rho[end] = x[1], rho[1]
+    return MeridianMesh(rho, x)
+end
+
+function _meridian_location(mesh::MeridianMesh, point)
+    x, rho = point[1], hypot(point[2], point[3])
+    scale = max(maximum(abs, mesh.z), maximum(mesh.rho), abs(x), rho)
+    tol = 128eps(Float64) * scale
+    for panel in panels(mesh)
+        t = clamp(
+            ((rho - panel.rho1) * (panel.rho2 - panel.rho1) +
+             (x - panel.z1) * (panel.z2 - panel.z1)) / panel.L^2,
+            0.0,
+            1.0)
+        hypot(rho - ((1 - t) * panel.rho1 + t * panel.rho2),
+            x - ((1 - t) * panel.z1 + t * panel.z2)) <= tol && return :on
+    end
+    inside = false
+    for i in eachindex(mesh.rho)
+        j = mod1(i + 1, length(mesh.rho))
+        a, b = mesh.rho[i], mesh.rho[j]
+        if (a > rho) != (b > rho)
+            crossing = mesh.z[i] + (rho - a) * (mesh.z[j] - mesh.z[i]) / (b - a)
+            x < crossing && (inside = !inside)
+        end
+    end
+    return inside ? :inside : :outside
+end
+
 npanels(mesh::MeridianMesh) = length(mesh.rho) - 1
 
 "A single straight meridian panel: endpoints, midpoint (collocation point), length, and outward normal."

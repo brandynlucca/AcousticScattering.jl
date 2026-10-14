@@ -34,6 +34,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Getting Started" => "getting_started/index.md",
+        "Geometries" => "geometries.md",
         "Visualization Gallery" => [
             "Gallery" => "gallery/index.md",
             "Short examples" => "gallery/examples/index.md",
