@@ -332,3 +332,106 @@ function _solid_elastic_sphere_radial_fem_modes(k::Real, a::Real;
                           speed_transversal_contrast, n_elements; solve_reports)
                       for m in 0:m_max]
 end
+
+# Radial displacement, rather than displacement potentials, gives an independent
+# weak form for the monopole in arbitrary concentric fluid/elastic/viscous layers.
+# Moduli are relative to rho_ext*c_ext^2, density to rho_ext, and x = r/a.
+function _layered_radial_moduli(layer::Union{FluidLayer, FluidInterior}, k)
+    rho = layer.density_contrast
+    return rho, complex(rho * layer.soundspeed_contrast^2), zero(ComplexF64)
+end
+
+function _layered_radial_moduli(layer::ElasticLayer, k)
+    rho = layer.density_contrast
+    mu = complex(rho * layer.speed_transversal_contrast^2)
+    return rho, rho * layer.speed_longitudinal_contrast^2 - 2mu, mu
+end
+
+function _layered_radial_moduli(layer::ViscousLayer, k)
+    rho = layer.density_contrast
+    omega = k * layer.soundspeed_exterior
+    scale = rho * omega / layer.soundspeed_exterior^2
+    mu = -im * scale * layer.kinematic_viscosity_shear
+    lambda = rho * layer.soundspeed_contrast^2 -
+             im * scale * layer.kinematic_viscosity_compressional - 2mu
+    return rho, lambda, mu
+end
+
+function _layered_sphere_displacement_fem(body::Sphere, boundary, k::Real;
+        n_elements::Integer = 256, m_max::Integer = 0)
+    m_max == 0 || throw(ArgumentError(
+        "layered displacement radial FEM supports only m_max=0. Use method=:volume for the complete field"))
+    n_elements >= 2 || throw(ArgumentError("n_elements must be at least 2 per region"))
+    isfinite(k) && k > 0 || throw(ArgumentError("k must be finite and positive"))
+    a = body.radius
+    isfinite(a) && a > 0 || throw(ArgumentError("radius must be finite and positive"))
+    layers, ratios = _layered_fem_layers(boundary)
+    materials = vcat([boundary.interior], reverse(layers))
+    interfaces = vcat(0.0, boundary.radius_ratio, reverse(ratios))
+    n_regions = length(materials)
+    nodes = Float64[0.0]
+    for region in 1:n_regions
+        append!(nodes, range(interfaces[region], interfaces[region + 1];
+            length = 2n_elements + 1)[2:end])
+    end
+    rows, cols, values = Int[], Int[], ComplexF64[]
+    sizehint!(rows, 9n_regions * n_elements)
+    sizehint!(cols, 9n_regions * n_elements)
+    sizehint!(values, 9n_regions * n_elements)
+    ka = k * a
+    for region in 1:n_regions
+        rho, lambda, mu = _layered_radial_moduli(materials[region], k)
+        all(isfinite, (rho, lambda, mu)) ||
+            throw(ArgumentError("layer densities, wave speeds and viscosities must be finite"))
+        for element in 1:n_elements
+            first_node = 2n_elements * (region - 1) + 2element - 1
+            indices = first_node:(first_node + 2)
+            x0, x1 = nodes[first(indices)], nodes[last(indices)]
+            h = x1 - x0
+            local_matrix = zeros(ComplexF64, 3, 3)
+            for (xi, wi) in zip(_GL4_X, _GL4_W)
+                x = (x0 + x1 + h * xi) / 2
+                basis = (xi * (xi - 1) / 2, 1 - xi^2, xi * (xi + 1) / 2)
+                derivative = ((2xi - 1) / h, -4xi / h, (2xi + 1) / h)
+                # epsilon_rr = u', epsilon_tt = epsilon_pp = u/x.
+                # Expand x^2*div(u)*div(v) to avoid dividing by x at the origin.
+                for j in 1:3, i in 1:3
+
+                    local_matrix[i, j] += wi * h / 2 * (
+                        lambda * (x * derivative[i] + 2basis[i]) *
+                        (x * derivative[j] + 2basis[j]) +
+                        2mu * (x^2 * derivative[i] * derivative[j] +
+                               2basis[i] * basis[j]) -
+                        rho * ka^2 * x^2 * basis[i] * basis[j])
+                end
+            end
+            for (j, column) in enumerate(indices), (i, row) in enumerate(indices)
+
+                push!(rows, row)
+                push!(cols, column)
+                push!(values, local_matrix[i, j])
+            end
+        end
+    end
+    matrix = sparse(rows, cols, values, length(nodes), length(nodes))
+    # Exact exterior monopole DtN at x=1: p_scat'=(i*ka-1)*p_scat.
+    # Normal acceleration gives p_total'=ka^2*u, and traction is -p_total.
+    radiation = im * ka - 1
+    incident = js(0, ka)
+    incident_derivative = ka * jsd(0, ka)
+    matrix[end, end] += ka^2 / radiation
+    rhs = zeros(ComplexF64, length(nodes))
+    rhs[end] = -(incident - incident_derivative / radiation)
+    reports = _SolveReports()
+    # Regular radial displacement vanishes at the center. Shared interface
+    # nodes impose normal displacement continuity, with traction balance natural.
+    displacement = vcat(0im,
+        _solve_reported(matrix[2:end, 2:end], rhs[2:end], reports;
+            mode = 0, component = :radial_displacement, n_elements, n_regions))
+    surface_pressure = (ka^2 * displacement[end] - incident_derivative) / radiation
+    amplitude = a * cis(-ka) * surface_pressure
+    report = _summarize_solves(reports; method = :radial,
+        solver_options = (; n_elements, m_max, element_order = 2),
+        formulation = :radial_displacement, closure = :exact_monopole_dtn)
+    return _LayeredRadialFEMData(a .* nodes, a .* displacement, amplitude, report)
+end

@@ -98,7 +98,7 @@ function _farfield_tmatrix(body::Spheroid, boundary::Shelled{<:LayeredMaterial},
     nodes, weights = gauss(polar_order)
     nphi = 2m_max + 1
     phis = [2π * (p - 1) / nphi for p in 1:nphi]
-    bodies, materials = _layered_spheroid_volume_regions(body, boundary)
+    bodies, materials = _layered_volume_regions(body, boundary)
     system = _volume_system_regions(bodies, materials, k;
         closure = :dtn, points_per_wavelength, h, h_body, domain_radius, dtn_order)
     samples = zeros(ComplexF64, polar_order, polar_order, nphi)

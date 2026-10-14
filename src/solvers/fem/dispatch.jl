@@ -20,6 +20,20 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
 - `:meridian`: 2D (ρ,z) meridian FEM with the angular part discretized. `Sphere` supports
   `Rigid` and `PressureRelease` with axial incidence. `Cylinder`/`Spheroid` also support
   `FluidFilled` and general `incidence_angle`.
+  For `Spheroid`, `mode_threads=1` limits concurrent mode factorizations by default.
+  Its default `m_max` follows the equatorial radius with a fluid-interior guard,
+  and is zero at axial incidence. Explicit `m_max` overrides this estimate.
+  Set `retain_fields=false` for far-field-only sweeps to omit stored nodal pressure.
+  This preserves far-field output but disables scattered/total [`pressure`](@ref) queries.
+  Spheroids additionally accept `order=2:8` for higher-order mapped elements with
+  element-interior elimination. The default `order=1` retains the bilinear mesh.
+  Higher-order defaults size `n_r` and `n_theta` from the wavelength, including a
+  fluid interior. Explicit mesh counts are element counts. `adaptive=true` refines
+  individual Fourier modes until their combined mesh-change estimate is below
+  `target_tol` dB in backscatter TS (default `0.01`), with at most
+  `max_refinements=4` increases per mode. Inspect
+  `diagnostics(sol).refinement.converged`. This estimates spatial convergence,
+  independently of `m_max` and `l_max`, and does not bound phase or bistatic error.
 
 - `:volume`: full-3D finite elements on curved order-2 tetrahedra. Covers `Sphere` and `Spheroid`
   with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries,
@@ -151,17 +165,30 @@ end
 function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :meridian, R::Real = 1.2max(body.a, body.b), incidence_angle::Real = π /
                                                                                               2,
-        m_max::Integer = _default_mode_count(k * max(body.a, body.b)), kwargs...)
-    method === :volume &&
+        m_max::Integer = _spheroid_meridian_default_mmax(body, boundary, k, incidence_angle),
+        mode_threads::Integer = 1, retain_fields::Bool = true, order::Integer = 1, kwargs...)
+    if method === :volume
+        mode_threads == 1 && retain_fields && order == 1 || throw(ArgumentError(
+            "mode_threads, retain_fields and order controls require method=:meridian"))
         return _fem_volume_solution(body, boundary, k; incidence_angle, kwargs...)
+    end
     method === :meridian || throw(ArgumentError(
         "fem(::Spheroid, ...) supports method=:meridian or :volume, got $method"))
+    1 <= order <= 8 || throw(ArgumentError("spheroid meridian FEM order must be in 1:8"))
+    if order > 1
+        return _spheroid_high_order_fem(body, boundary, k;
+            R, incidence_angle, m_max, mode_threads, retain_fields, order, kwargs...)
+    end
     reports = _SolveReports()
-    ps, p_modes, dpdn_modes, fields = _spheroid_meridian_fem_modes(
+    traces = _spheroid_meridian_fem_modes(
         boundary, k, body.a, body.b, R, incidence_angle;
-        m_max, solve_reports = reports, retain_fields = true, kwargs...)
-    report = _summarize_solves(reports; method, solver_options = (;
-        R, incidence_angle, m_max, kwargs...))
+        m_max, mode_threads, solve_reports = reports, retain_fields, kwargs...)
+    ps, p_modes, dpdn_modes = traces[1:3]
+    fields = retain_fields ? traces[4] : _MeridianFEMModeField[]
+    report = _summarize_solves(reports;
+        method,
+        solver_options = (;
+            R, incidence_angle, m_max, mode_threads, retain_fields, kwargs...))
     data = _SpheroidMeridianFEMData(
         ps, p_modes, dpdn_modes, fields, incidence_angle, report)
     return FEMSolution(body, boundary, k, method, data)
@@ -228,27 +255,42 @@ function fem(body::Spheroid,
     return _fem_volume_solution(body, boundary, k; incidence_angle, kwargs...)
 end
 
-function _layered_spheroid_volume_regions(body::Spheroid,
-        boundary::Shelled{<:LayeredMaterial})
+function _layered_fem_layers(boundary::Shelled)
     boundary.interior isa FluidInterior || throw(ArgumentError(
-        "nested spheroid volume FEM requires a FluidInterior core"))
+        "layered FEM requires a FluidInterior core"))
     layers, ratios = _layered_materials(boundary.material)
-    all(layer -> layer isa Union{FluidLayer, ElasticLayer}, layers) ||
-        throw(ArgumentError("nested spheroid volume FEM requires FluidLayer or ElasticLayer"))
+    all(layer -> layer isa Union{FluidLayer, ElasticLayer, ViscousLayer}, layers) ||
+        throw(ArgumentError("layered FEM requires FluidLayer, ElasticLayer or ViscousLayer"))
     all(
         layer -> !(layer isa ElasticLayer) ||
                  layer.interior_coupling === :generalized, layers) ||
-        throw(ArgumentError("nested spheroid volume FEM requires generalized elastic coupling"))
+        throw(ArgumentError("layered FEM requires generalized elastic coupling"))
+    viscous = filter(layer -> layer isa ViscousLayer, layers)
+    isempty(viscous) ||
+        all(
+            layer -> layer.soundspeed_exterior == first(viscous).soundspeed_exterior, viscous) ||
+        throw(ArgumentError("viscous layers must use the same exterior sound speed"))
+    return layers, ratios
+end
+
+_layered_fem_interface(body::Sphere, ratio) = Sphere(ratio * body.radius)
+function _layered_fem_interface(body::Spheroid, ratio)
+    xi = _confocal_inner_xi(body, ratio)
+    equatorial, polar = _confocal_axes(body.kind, body.q, xi)
+    return Spheroid(polar, equatorial)
+end
+
+function _layered_volume_regions(body::Union{Sphere, Spheroid}, boundary::Shelled)
+    layers, ratios = _layered_fem_layers(boundary)
     material(layer::FluidLayer) = FluidFilled(
         layer.density_contrast, layer.soundspeed_contrast)
     material(layer::ElasticLayer) = SolidElastic(layer.density_contrast,
         layer.speed_longitudinal_contrast, layer.speed_transversal_contrast)
+    material(layer::ViscousLayer) = layer
     interfaces = vcat(ratios[2:end], boundary.radius_ratio)
-    bodies = Spheroid[body]
+    bodies = [body]
     for ratio in interfaces
-        xi = _confocal_inner_xi(body, ratio)
-        equatorial, polar = _confocal_axes(body.kind, body.q, xi)
-        push!(bodies, Spheroid(polar, equatorial))
+        push!(bodies, _layered_fem_interface(body, ratio))
     end
     materials = vcat([material(layer) for layer in layers],
         FluidFilled(boundary.interior.density_contrast,
@@ -257,18 +299,27 @@ function _layered_spheroid_volume_regions(body::Spheroid,
 end
 
 """
-    fem(body::Spheroid, boundary::Shelled{<:LayeredMaterial}, k;
+    fem(body::Union{Sphere,Spheroid}, boundary::Shelled{<:Union{LayeredMaterial,ViscousLayer}}, k;
         method=:volume, kwargs...)
 
-Full-3D volume FEM for a confocal spheroid containing concentric `FluidLayer`
-and `ElasticLayer` materials around a `FluidInterior`. Nested layer ratios and
-the core ratio scale the equatorial semi-axis; all interfaces share the outer
-spheroid's focal distance. Material contrasts refer to the exterior fluid.
+FEM for concentric spherical or confocal spheroidal `FluidLayer`, `ElasticLayer`
+and `ViscousLayer` materials around a `FluidInterior`. For spheres, `method=:radial`
+uses quadratic displacement elements with `n_elements=256` per region, including
+the core, and supports only `m_max=0`. It retains complex monopole scattering.
+Point-field queries require `method=:volume`, which solves the full 3D coupled
+field and also supports spheroids. Nested layer ratios scale each enclosing
+radius or equatorial semi-axis. The core ratio refers to the outer body, and
+spheroidal interfaces share its focal distance. Contrasts refer to the exterior.
 """
-function fem(body::Spheroid, boundary::Shelled{<:LayeredMaterial},
+function fem(body::Union{Sphere, Spheroid},
+        boundary::Shelled{<:Union{LayeredMaterial, ViscousLayer}},
         k::Real; method::Symbol = :volume, kwargs...)
+    if method === :radial && body isa Sphere
+        data = _layered_sphere_displacement_fem(body, boundary, k; kwargs...)
+        return FEMSolution(body, boundary, k, method, data)
+    end
     method === :volume || throw(ArgumentError(
-        "fem(::Spheroid, ::Shelled{<:LayeredMaterial}, ...) only supports method=:volume"))
-    bodies, materials = _layered_spheroid_volume_regions(body, boundary)
+        "layered FEM supports method=:volume, or method=:radial for a spherical monopole"))
+    bodies, materials = _layered_volume_regions(body, boundary)
     return fem(bodies, materials, k; method, kwargs...)
 end

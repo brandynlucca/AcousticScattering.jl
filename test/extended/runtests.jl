@@ -55,6 +55,8 @@ end
 if EXTENDED_GROUP == "All" || startswith(EXTENDED_GROUP, "fem-")
     selected_file("fem/sphere/radial.jl") &&
         @time @safetestset "FEM sphere radial" include("fem/sphere/radial.jl")
+    selected_file("fem/sphere/layers.jl") &&
+        @time @safetestset "FEM sphere layers" include("fem/sphere/layers.jl")
     selected_file("fem/sphere/meridian.jl") &&
         @time @safetestset "FEM sphere meridian" include("fem/sphere/meridian.jl")
     selected_file("fem/sphere/coupled.jl") &&

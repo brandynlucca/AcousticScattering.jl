@@ -308,6 +308,13 @@ _region_speed(material::ViscousLayer) = material.soundspeed_contrast
 function _region_fluid(material::FluidFilled, k)
     (material.density_contrast, k / material.soundspeed_contrast)
 end
+function _region_fluid(material::ViscousLayer, k)
+    iszero(material.kinematic_viscosity_shear) || return nothing
+    speed_squared = material.soundspeed_contrast^2 -
+                    im * (k / material.soundspeed_exterior) *
+                    material.kinematic_viscosity_compressional
+    return material.density_contrast, k / sqrt(complex(speed_squared))
+end
 _region_fluid(material::SpatialFluid, k) = _SpatialFluidCoefficients(material, Float64(k))
 _region_fluid(material, k) = nothing
 
@@ -441,7 +448,11 @@ function _volume_system_regions(bodies, materials, k::Real;
         inside = [i for i in 1:n if level(i, x) < 1]
         isempty(inside) ? 0 : inside[argmax(depth[inside])]
     end
-    is_solid = [m isa Union{SolidElastic, ViscoelasticSolid, ViscousLayer}
+    # With zero shear viscosity the layer is acoustic, possibly with bulk loss.
+    # Keeping a displacement field would impose tangential continuity against
+    # the wall even though an inviscid interface permits slip.
+    is_solid = [m isa Union{SolidElastic, ViscoelasticSolid} ||
+                    (m isa ViscousLayer && !iszero(m.kinematic_viscosity_shear))
                 for m in materials]
     classify(x) = (i = innermost(x);
         i == 0 ? (_REGION_FLUID, 0) : (is_solid[i] ? _REGION_SOLID : _REGION_INTERIOR, i))

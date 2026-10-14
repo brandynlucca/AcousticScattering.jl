@@ -3,7 +3,7 @@ module AcousticScattering
 using LinearAlgebra: I, dot, mul!, Diagonal, norm, cond, diag, diagind, pinv, det,
                      SingularException, svdvals, cross, lu, svd
 using LinearAlgebra: LinearAlgebra
-using SparseArrays: sparse, spzeros, SparseMatrixCSC
+using SparseArrays: SparseArrays, sparse, spzeros, SparseMatrixCSC
 using SpecialFunctions: besselj, bessely, besselh
 using SpheroidalWaves: SpheroidalWaves
 using GenericLinearAlgebra: GenericLinearAlgebra

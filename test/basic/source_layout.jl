@@ -31,6 +31,8 @@ include(joinpath(@__DIR__, "..", "..", ".github", "scripts", "select_extended.jl
     @test isempty(affected_files("experimental/tank/signal_chain.jl"))
     @test affected_files("test/extended/tmatrix/spheroid_farfield_samples.txt") ==
           ["tmatrix/spheroid_farfield.jl"]
+    @test affected_files("test/helpers/layered_fem.jl") ==
+          ["fem/sphere/layers.jl", "fem/spheroid/layers.jl"]
     # Keep every selected file exactly once while respecting the three-OS matrix.
     batches = matrix_batches(EXTENDED_FILES)
     @test length(batches)*3 <= 256

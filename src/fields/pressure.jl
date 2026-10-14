@@ -71,6 +71,7 @@ function _check_pressure_solution(solution)
                 Union{BEMSolution{_RegionBEMData}, FEMSolution{_VolumeFEMData},
                     FEMSolution{_CylinderMeridianFEMData},
                     FEMSolution{_SpheroidMeridianFEMData},
+                    FEMSolution{_SpheroidHighOrderFEMData},
                     FEMSolution{_ShellFEMSurfaceData}} ||
                 (boundary_geometry && boundary_data &&
                  (solution.boundary isa Union{Rigid, PressureRelease, FluidFilled} ||
@@ -170,6 +171,8 @@ function _pressure_point(
     β = solution.data.incidence_angle
     incident = cis(solution.k * (point[1]*cos(β) + point[2]*sin(β)))
     field === :incident && return incident
+    isempty(solution.data.fields) && throw(ArgumentError(
+        "pressure requires a meridian FEM solution computed with retain_fields=true"))
     region = _boundary_pressure_region(solution, point, field)
     r = norm(point)
     μ = iszero(r) ? 1.0 : clamp(point[1]/r, -1.0, 1.0)
@@ -189,7 +192,8 @@ function _pressure_point(
             _meridian_rect_value(mode.radial_exterior, mode.angles,
                 mode.exterior, s, θ)
         else
-            sum(Bl*hs(l, solution.k*r)*legendre_p(l, m, μ)
+            angular = _meridian_legendre_values!(zeros(length(mode.outgoing)), m, μ)
+            sum(Bl*hs(l, solution.k*r)*angular[offset]
             for (offset, Bl) in enumerate(mode.outgoing)
             for l in (m+offset-1,))
         end
@@ -202,6 +206,52 @@ function _meridian_inner_radius(mode::_MeridianFEMModeField, θ)
     j = clamp(searchsortedlast(mode.angles, θ), 1, length(mode.angles)-1)
     t = (θ-mode.angles[j])/(mode.angles[j + 1]-mode.angles[j])
     return (1-t)*mode.inner_radius[j] + t*mode.inner_radius[j + 1]
+end
+
+function _spheroid_hp_value(radii, angles, values, s, theta, order)
+    i=order*clamp((searchsortedlast(radii, s)-1)÷order, 0, (length(radii)-1)÷order-1)+1
+    j=order*clamp((searchsortedlast(angles, theta)-1)÷order, 0, (length(angles)-1)÷order-1)+1
+    u=2clamp((s-radii[i])/(radii[i + order]-radii[i]), 0.0, 1.0)-1
+    v=2clamp((theta-angles[j])/(angles[j + order]-angles[j]), 0.0, 1.0)-1
+    Nu, _=_spheroid_hp_basis(order, u)
+    Nv, _=_spheroid_hp_basis(order, v)
+    return sum(Nu[a]*Nv[b]*values[i + a - 1, j + b - 1]
+    for a in 1:(order + 1), b in 1:(order + 1))
+end
+
+function _pressure_point(solution::FEMSolution{_SpheroidHighOrderFEMData}, point, field)
+    all(isfinite, point) || throw(ArgumentError("point coordinates must be finite"))
+    data=solution.data
+    beta=data.incidence_angle
+    incident=cis(solution.k*(point[1]*cos(beta)+point[2]*sin(beta)))
+    field===:incident && return incident
+    isempty(data.fields) && throw(ArgumentError(
+        "pressure requires a meridian FEM solution computed with retain_fields=true"))
+    region=_boundary_pressure_region(solution, point, field)
+    r=norm(point)
+    mu=iszero(r) ? 1.0 : clamp(point[1]/r, -1.0, 1.0)
+    theta=acos(mu)
+    phi=atan(point[3], point[2])
+    value=0.0im
+    for (index, mode) in enumerate(data.fields)
+        m=index-1
+        iszero(r) && m>0 && continue
+        sample_theta=last(mode.angles)<=Float64(pi)/2 ? min(theta, pi-theta) : theta
+        inner=_spheroid_r_inner(sample_theta, solution.body.a, solution.body.b)
+        component=if region===:interior
+            _spheroid_hp_value(mode.radial_interior, mode.angles, mode.interior,
+                r/inner, sample_theta, data.order)
+        elseif r<=mode.outer_radius
+            _spheroid_hp_value(mode.radial_exterior, mode.angles, mode.exterior,
+                (r-inner)/(mode.outer_radius-inner), sample_theta, data.order)
+        else
+            Bl=data.outgoing[index]
+            angular=_meridian_legendre_values!(zeros(length(Bl)), m, mu)
+            sum(Bl[j]*hs(m+j-1, solution.k*r)*angular[j] for j in eachindex(Bl))
+        end
+        value+=cos(m*phi)*component
+    end
+    return region===:exterior && field===:total ? incident+value : value
 end
 
 function _pressure_point(solution::FEMSolution{_ShellFEMSurfaceData}, point, field)

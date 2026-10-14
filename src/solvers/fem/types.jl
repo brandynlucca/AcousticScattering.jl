@@ -36,6 +36,16 @@ struct _RadialFEMData
     diagnostics::NamedTuple
 end
 
+# Monopole displacement weak form for concentric material layers. Radii and
+# displacement scaled by rho_ext*c_ext^2/p_inc are in meters. Point-field
+# evaluation is not implemented for this data type.
+struct _LayeredRadialFEMData
+    radii::Vector{Float64}
+    displacement::Vector{ComplexF64}
+    amplitude::ComplexF64
+    diagnostics::NamedTuple
+end
+
 # A `fem` result on a `Shell` body: exterior (and, for a fluid-filled interior, interior) surface
 # pressure/normal-derivative data plus the shell's own mechanical state, mirroring
 # `solve_shell_fluid_coupled`/`solve_shell_fluid_filled_coupled`/
@@ -55,7 +65,8 @@ struct _ShellFEMSurfaceData
 end
 
 # Scattered nodal pressure on one exterior meridian mesh and optionally its
-# coupled interior mesh. The outgoing coefficients continue it beyond r=R.
+# coupled interior mesh. The outgoing coefficients use associated Legendre
+# functions orthonormal on [-1, 1] to continue the field beyond r=R.
 struct _MeridianFEMModeField
     angles::Vector{Float64}
     radial_exterior::Vector{Float64}
@@ -88,6 +99,33 @@ struct _SpheroidMeridianFEMData
     dpdn_modes::Vector{Vector{ComplexF64}}
     fields::Vector{_MeridianFEMModeField}
     incidence_angle::Float64
+    diagnostics::NamedTuple
+end
+
+# Frequency-independent element operators for mapped spheroid FEM.
+struct _SpheroidFEMElement
+    ids::Vector{Int}
+    S::Matrix{Float64}
+    A::Matrix{Float64}
+    M::Matrix{Float64}
+    inside::Bool
+end
+
+# Higher-order fields store scattered exterior and total interior pressure.
+struct _SpheroidHighOrderFEMModeField
+    angles::Vector{Float64}
+    radial_exterior::Vector{Float64}
+    radial_interior::Vector{Float64}
+    outer_radius::Float64
+    exterior::Matrix{ComplexF64}
+    interior::Union{Nothing, Matrix{ComplexF64}}
+end
+
+struct _SpheroidHighOrderFEMData
+    outgoing::Vector{Vector{ComplexF64}}
+    fields::Vector{_SpheroidHighOrderFEMModeField}
+    incidence_angle::Float64
+    order::Int
     diagnostics::NamedTuple
 end
 

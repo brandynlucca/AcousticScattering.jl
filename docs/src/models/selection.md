@@ -213,7 +213,10 @@ Start with the least costly method that supports both your physics and your desi
       <td><a href="../modal/#modal-theory">Sphere</a></td>
       <td><a href="../tmatrix/#tmatrix-theory">Prolate spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Projected transition through aspect ratio 1.25 and ka 1.5; FEM-generated angular transition through aspect ratio 1.5 and ka 1.8, with a fluid core.">ℹ️</span></td>
       <td></td>
-      <td><a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM for confocal layers with a fluid core; refine mesh and exterior closure near resonances.">ℹ️</span></td>
+      <td>
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Radial displacement FEM for the monopole, or full 3D volume FEM with a fluid core.">ℹ️</span><br>
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D volume FEM for confocal layers with a fluid core. Refine mesh and exterior closure near resonances.">ℹ️</span>
+      </td>
       <td></td>
       <td></td>
       <td></td>
@@ -225,7 +228,10 @@ Start with the least costly method that supports both your physics and your desi
       </td>
       <td></td>
       <td></td>
-      <td></td>
+      <td>
+        <a href="../fem/#fem-theory">Sphere</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Independent radial displacement FEM for the monopole, or full 3D coupled volume FEM with viscous, elastic and fluid layers.">ℹ️</span><br>
+        <a href="../fem/#fem-theory">Spheroid</a>&nbsp;<span class="hint" tabindex="0" data-tooltip="Full 3D coupled volume FEM for confocal prolate or oblate viscous/elastic layers with a fluid core. Refine wall and viscous shear scales and radiation closure.">ℹ️</span>
+      </td>
       <td></td>
       <td></td>
       <td></td>

@@ -4,6 +4,12 @@ function scattering_amplitude(sol::FEMSolution{_RadialFEMData}; kwargs...)
     return _radial_fem_amplitude(sol.data.modes, sol.k)
 end
 
+function scattering_amplitude(sol::FEMSolution{_LayeredRadialFEMData}; kwargs...)
+    isempty(kwargs) || throw(ArgumentError(
+        "Layered radial FEM returns the monopole amplitude without observation keywords."))
+    return sol.data.amplitude
+end
+
 function scattering_amplitude(sol::FEMSolution{_SphereMeridianFEMData}; kwargs...)
     isempty(kwargs) || throw(ArgumentError(
         "Sphere meridian FEM supports backscatter without observation keywords."))
@@ -54,4 +60,9 @@ end
 function scattering_amplitude(sol::FEMSolution{_CylinderRadialFEMData})
     d = sol.data
     return _elastic_cylinder_radial_fem_amplitude(d.modes, sol.k, d.length, d.aspect_angle)
+end
+
+function scattering_amplitude(sol::FEMSolution{_SpheroidHighOrderFEMData};
+        angle::Real = pi-sol.data.incidence_angle, azimuth::Real = pi)
+    return _spheroid_hp_amplitude(sol.data.outgoing, sol.k, angle, azimuth)
 end

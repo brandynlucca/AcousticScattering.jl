@@ -8,6 +8,77 @@ end
 
 # Shared meridian assembly and boundary-dispatched acoustic solves.
 
+# Associated Legendre functions orthonormal on [-1, 1], including the
+# Condon-Shortley phase. Normalize the recurrence itself: multiplying the raw
+# functions by factorial ratios afterwards overflows at large Fourier orders.
+function _meridian_legendre_values!(values, m::Integer, x::Real)
+    p = inv(sqrt(2.0))
+    s = sqrt(max(0.0, (1 - x) * (1 + x)))
+    for j in 1:m
+        p *= -sqrt((2j + 1) / (2j)) * s
+    end
+    values[1] = p
+    length(values) == 1 && return values
+    values[2] = sqrt(2m + 3) * x * p
+    for offset in 3:length(values)
+        l = m + offset - 1
+        a = sqrt((4l^2 - 1) / (l^2 - m^2))
+        b = sqrt((2l + 1) * ((l - 1)^2 - m^2) / ((2l - 3) * (l^2 - m^2)))
+        values[offset] = a * x * values[offset - 1] - b * values[offset - 2]
+    end
+    return values
+end
+
+function _meridian_dtn_basis(angles, m, l_max)
+    nl = l_max - m + 1
+    Peval = Matrix{Float64}(undef, nl, length(angles))
+    Q = zeros(Float64, nl, length(angles))
+    values = Vector{Float64}(undef, nl)
+    for (j, angle) in enumerate(angles)
+        _meridian_legendre_values!(view(Peval, :, j), m, cos(angle))
+    end
+    gq = ((-sqrt(3 / 5), 5 / 9), (0.0, 8 / 9), (sqrt(3 / 5), 5 / 9))
+    for e in 1:(length(angles) - 1)
+        left, right = angles[e], angles[e + 1]
+        for (xi, w) in gq
+            angle = (left + right) / 2 + (right - left) * xi / 2
+            _meridian_legendre_values!(values, m, cos(angle))
+            weight = w * (right - left) / 2 * sin(angle)
+            for l in 1:nl
+                Q[l, e] += weight * (1 - xi) / 2 * values[l]
+                Q[l, e + 1] += weight * (1 + xi) / 2 * values[l]
+            end
+        end
+    end
+    return Peval, Q
+end
+
+# Eliminate all prescribed values in one CSC traversal. Repeated sparse row
+# assignments scan the entire matrix and leave explicit zeros for sparse LU.
+function _meridian_fem_dirichlet!(K, b, nodes, values)
+    fixed = falses(length(b))
+    prescribed = zeros(eltype(b), length(b))
+    for (node, value) in zip(nodes, values)
+        fixed[node] = true
+        prescribed[node] = value
+    end
+    rows, entries = SparseArrays.rowvals(K), SparseArrays.nonzeros(K)
+    for j in axes(K, 2)
+        for q in SparseArrays.nzrange(K, j)
+            i = rows[q]
+            if fixed[j]
+                fixed[i] || (b[i] -= entries[q] * prescribed[j])
+                entries[q] = i == j ? one(eltype(K)) : zero(eltype(K))
+            elseif fixed[i]
+                entries[q] = zero(eltype(K))
+            end
+        end
+        fixed[j] && (b[j] = prescribed[j])
+    end
+    SparseArrays.dropzeros!(K)
+    return K, b
+end
+
 function _dtn_fem_solve(K, b, m::Integer, l_max::Integer, kR::Real;
         solve_reports = nothing, kwargs...)
     try
@@ -15,10 +86,8 @@ function _dtn_fem_solve(K, b, m::Integer, l_max::Integer, kR::Real;
     catch e
         e isa SingularException || rethrow()
         error("meridian FEM linear system is singular at Fourier mode m=$m, l_max=$l_max, " *
-              "k*R=$(round(kR, digits=3)): this is the expected double-precision breakdown of " *
-              "the spherical Hankel recursion once l_max exceeds roughly 4-5x k*R (verified " *
-              "directly: hs/hsd's real and imaginary parts differ by 100+ orders of magnitude " *
-              "there), not a fixable solve, reduce l_max/m_max.")
+              "k*R=$(round(kR, digits=3)). Check mesh quality, boundary conditions and " *
+              "finite DtN coefficients before changing the angular truncation.")
     end
 end
 
@@ -167,7 +236,8 @@ function _meridian_fem_mode_trace(
         boundary::Union{Rigid, PressureRelease}, m::Integer, k::Real, β::Real,
         θ::Vector{Float64}, r_inner::Vector{Float64}, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
-        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing)
+        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
+        retain_fields::Bool = true)
     nr1 = n_r + 1
 
     nt1 = size(θ, 1)
@@ -189,6 +259,10 @@ function _meridian_fem_mode_trace(
     Is = Int[]
     Js = Int[]
     Vs = ComplexF64[]
+    entries = 16 * n_r * n_theta + nt1^2
+    sizehint!(Is, entries)
+    sizehint!(Js, entries)
+    sizehint!(Vs, entries)
     b = zeros(ComplexF64, N)
     m2 = Float64(m)^2
 
@@ -196,15 +270,8 @@ function _meridian_fem_mode_trace(
 
     # Outer boundary (r=R): associated-Legendre DtN (reduces exactly to the
     # m=0 case's plain-Legendre DtN above at m=0).
-    nl = l_max - m + 1
-    Peval = Matrix{Float64}(undef, nl, nt1)
-    Q = Matrix{ComplexF64}(undef, nl, nt1)
-    for (idx, l) in enumerate(m:l_max)
-        Q[idx, :] = _theta_hat_integral(θ, θq -> legendre_p(l, m, cos(θq)))
-        Peval[idx, :] = [legendre_p(l, m, cos(θq)) for θq in θ]
-    end
-    dtn_diag = [(2l + 1) / 2 * _legendre_norm_ratio(l, m) *
-                (k * hsd_cache[l + 1] / hs_cache[l + 1]) for l in m:l_max]
+    Peval, Q = _meridian_dtn_basis(θ, m, l_max)
+    dtn_diag = [k * hsd_cache[l + 1] / hs_cache[l + 1] for l in m:l_max]
     K_DtN = R^2 .* (Q' * (dtn_diag .* Q))
     idxR = [gidx(nr1, j) for j in 1:nt1]
     for jl in 1:nt1, il in 1:nt1
@@ -220,6 +287,8 @@ function _meridian_fem_mode_trace(
     idxa = [gidx(1, j) for j in 1:nt1]
     ρb = [ρmat[1, j] for j in 1:nt1]
     zb = [zmat[1, j] for j in 1:nt1]
+    fixed = Int[]
+    prescribed = ComplexF64[]
     if boundary isa Rigid
         v = zeros(ComplexF64, nt1)
         gq = ((-1 / sqrt(3), 1.0), (1 / sqrt(3), 1.0))
@@ -243,51 +312,41 @@ function _meridian_fem_mode_trace(
         end
         b[idxa] .+= v
     else
-        p_bc = ComplexF64[-_p_inc_mode(m, k, β, ρb[j], zb[j]) for j in 1:nt1]
-        for (row, gi) in enumerate(idxa)
-            b .-= K[:, gi] .* p_bc[row]
-        end
-        for gi in idxa
-            K[:, gi] .= 0
-            K[gi, :] .= 0
-        end
-        for (row, gi) in enumerate(idxa)
-            K[gi, gi] = 1
-            b[gi] = p_bc[row]
-        end
+        append!(fixed, idxa)
+        append!(prescribed, (-_p_inc_mode(m, k, β, ρb[j], zb[j]) for j in 1:nt1))
     end
 
     # Axis regularity (m >= 1): p_m ≡ 0 at ρ=0 on both rays, applied last so it wins at shared nodes.
     if m >= 1
         for i in 1:nr1, j in (1, nt1)
 
-            gi = gidx(i, j)
-            K[:, gi] .= 0
-            K[gi, :] .= 0
-            K[gi, gi] = 1
-            b[gi] = 0
+            push!(fixed, gidx(i, j))
+            push!(prescribed, 0)
         end
     end
+    _meridian_fem_dirichlet!(K, b, fixed, prescribed)
 
     p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
 
     pR = p[idxR]
-    Bl = ComplexF64[(2l + 1) / 2 * _legendre_norm_ratio(l, m) * dot(Q[idx, :], pR) /
+    Bl = ComplexF64[dot(view(Q, idx, :), pR) /
                     hs_cache[l + 1]
                     for (idx, l) in enumerate(m:l_max)]
     dpdnR = ComplexF64[sum(Bl[idx] * k * hsd_cache[l + 1] * Peval[idx, j]
                        for (idx, l) in enumerate(m:l_max))
                        for j in 1:nt1]
 
-    field = _MeridianFEMModeField(θ, s_grid, r_inner, Float64(R),
-        permutedims(reshape(p, nt1, nr1)), nothing, nothing, Bl)
+    field = retain_fields ?
+            _MeridianFEMModeField(θ, s_grid, r_inner, Float64(R),
+        permutedims(reshape(p, nt1, nr1)), nothing, nothing, Bl) : nothing
     return θ, pR, dpdnR, field
 end
 
 function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β::Real,
         θ::Vector{Float64}, r_inner::Vector{Float64}, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
-        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing)
+        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
+        retain_fields::Bool = true)
     g, h = boundary.density_contrast, boundary.soundspeed_contrast
     k_int = k / h
 
@@ -331,6 +390,10 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
     Is = Int[]
     Js = Int[]
     Vs = ComplexF64[]
+    entries = 32 * n_r * n_theta + nt1^2
+    sizehint!(Is, entries)
+    sizehint!(Js, entries)
+    sizehint!(Vs, entries)
     b = zeros(ComplexF64, N)
 
     _meridian_fem_bulk!(
@@ -346,15 +409,8 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
     b[idx_iface] .+= _meridian_fem_interface_forcing(ρ_iface, z_iface, 1 - 1 / g, m, k, β)
 
     # Outer boundary (r=R): associated-Legendre DtN, as in the Rigid/PressureRelease case above.
-    nl = l_max - m + 1
-    Peval = Matrix{Float64}(undef, nl, nt1)
-    Q = Matrix{ComplexF64}(undef, nl, nt1)
-    for (idx, l) in enumerate(m:l_max)
-        Q[idx, :] = _theta_hat_integral(θ, θq -> legendre_p(l, m, cos(θq)))
-        Peval[idx, :] = [legendre_p(l, m, cos(θq)) for θq in θ]
-    end
-    dtn_diag = [(2l + 1) / 2 * _legendre_norm_ratio(l, m) *
-                (k * hsd_cache[l + 1] / hs_cache[l + 1]) for l in m:l_max]
+    Peval, Q = _meridian_dtn_basis(θ, m, l_max)
+    dtn_diag = [k * hsd_cache[l + 1] / hs_cache[l + 1] for l in m:l_max]
     K_DtN = R^2 .* (Q' * (dtn_diag .* Q))
     idxR = [gidx_ext(nr1_ext, j) for j in 1:nt1]
     for jl in 1:nt1, il in 1:nt1
@@ -368,38 +424,36 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
 
     # Axis regularity (m ≥ 1): p_m ≡ 0 at ρ=0, in both the interior and
     # exterior meshes (the shared origin DOF included).
+    fixed = Int[]
     if m >= 1
         for i in 1:nr1_int, j in (1, nt1)
 
-            gi = gidx_int(i, j)
-            K[:, gi] .= 0
-            K[gi, :] .= 0
-            K[gi, gi] = 1
-            b[gi] = 0
+            push!(fixed, gidx_int(i, j))
         end
         for i in 1:nr1_ext, j in (1, nt1)
 
-            gi = gidx_ext(i, j)
-            K[:, gi] .= 0
-            K[gi, :] .= 0
-            K[gi, gi] = 1
-            b[gi] = 0
+            push!(fixed, gidx_ext(i, j))
         end
     end
+    _meridian_fem_dirichlet!(K, b, fixed, zeros(ComplexF64, length(fixed)))
 
     p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
 
     pR = p[idxR]
-    Bl = ComplexF64[(2l + 1) / 2 * _legendre_norm_ratio(l, m) * dot(Q[idx, :], pR) /
+    Bl = ComplexF64[dot(view(Q, idx, :), pR) /
                     hs_cache[l + 1]
                     for (idx, l) in enumerate(m:l_max)]
     dpdnR = ComplexF64[sum(Bl[idx] * k * hsd_cache[l + 1] * Peval[idx, j]
                        for (idx, l) in enumerate(m:l_max))
                        for j in 1:nt1]
 
-    exterior = ComplexF64[p[gidx_ext(i, j)] for i in 1:nr1_ext, j in 1:nt1]
-    interior = ComplexF64[p[gidx_int(i, j)] for i in 1:nr1_int, j in 1:nt1]
-    field = _MeridianFEMModeField(θ, s_ext, r_inner, Float64(R), exterior,
-        s_int, interior, Bl)
+    field = if retain_fields
+        exterior = ComplexF64[p[gidx_ext(i, j)] for i in 1:nr1_ext, j in 1:nt1]
+        interior = ComplexF64[p[gidx_int(i, j)] for i in 1:nr1_int, j in 1:nt1]
+        _MeridianFEMModeField(θ, s_ext, r_inner, Float64(R), exterior,
+            s_int, interior, Bl)
+    else
+        nothing
+    end
     return θ, pR, dpdnR, field
 end

@@ -58,7 +58,7 @@ For supported radial spheres, `pressure(solution, points)` samples complex acous
 
 Volume FEM solutions also support `pressure`, at any point inside the meshed domain that is not part of a solid region. `field=:total`/`:scattered` apply outside the outermost body and `field=:total`/`:interior` inside an enclosed fluid region, both using the region's own scattered-relative-to-background unknown internally.
 
-For a confocal spheroid with a fluid core, `fem` accepts nested `LayeredMaterial` entries containing `FluidLayer` and `ElasticLayer`. Each layer ratio scales the enclosing equatorial semi-axis; the core ratio scales the outer equatorial semi-axis. The resulting surfaces share the outer spheroid's focal distance. This path uses full-3D coupled volume FEM and exterior-relative density and wave-speed contrasts:
+For a sphere or confocal spheroid with a fluid core, `fem` accepts nested `LayeredMaterial` entries containing `FluidLayer`, `ElasticLayer` and `ViscousLayer`. Each layer ratio scales the enclosing radius or equatorial semi-axis. The core ratio scales the outer body. Spheroidal interfaces share the outer body's focal distance. `method=:volume` uses full-3D coupled FEM and exterior-relative density and wave-speed contrasts:
 
 ```julia
 body = Spheroid(1.2, 1.0)
@@ -68,6 +68,36 @@ solution = fem(body, layers, 1.2; method=:volume, closure=:dtn)
 ```
 
 This composition requires `interior_coupling=:generalized` for elastic layers and a `FluidInterior` core. A [bounded mixed-layer spheroidal T-matrix](@ref tmatrix-theory) provides a separate far-field route for low-order prolate cases. For multiple mixed layers near a resonance or beyond its bounds, refine the volume mesh and exterior closure before interpreting the result.
+
+## Viscous and elastic layers with a fluid interior
+
+A layered material configuration is independent of the scattering method. For example, a viscous outer layer, elastic wall and fluid core can be solved on a sphere, prolate spheroid or oblate spheroid:
+
+```julia
+flesh = ViscousLayer(1500.0, 1.1, 1.05, 1000.0, 300.0)
+wall = ElasticLayer(1.3, 1.7, 0.6)
+boundary = Shelled(LayeredMaterial(flesh, wall, 0.7),
+    FluidInterior(0.2, 0.7), 0.4)
+solution = fem(Spheroid(1.2, 1.0), boundary, 1.0;
+    method=:volume, incidence_angle=0.4, closure=:dtn)
+scattering_amplitude(solution; angle=1.3, azimuth=0.0)
+```
+
+These inputs define a synthetic numerical example, with dimensions in meters and exterior wavenumber in rad/m. `ViscousLayer` describes a viscous fluid, distinct from a solid with hysteretic damping. Given dynamic bulk viscosity $\eta$ and shear viscosity $\mu_v$ in Pa s and layer density $\rho$ in kg/m³, its compressional input is $(\eta+4\mu_v/3)/\rho$ and its shear input is $\mu_v/\rho$, both in m²/s. With the `exp(-iωt)` convention, the longitudinal modulus is $\rho c^2-i\omega(\eta+4\mu_v/3)$ and the shear modulus is $-i\omega\mu_v$.
+
+Full displacement and traction are continuous at a viscous/elastic interface. At an inviscid fluid interface, normal displacement and traction couple to acoustic pressure, with zero tangential traction. The volume solve retains the complete angular field. Its mesh estimate uses the viscous layer's compressional speed. Refine `h` and `h_body` to resolve the wall and any excited viscous shear scale, $\delta=\sqrt{2\nu_s/\omega}$, where $\nu_s=\mu_v/\rho$. Converge the radiation closure separately. Acoustic BEM alone does not model these elastic and viscous shear fields.
+
+When shear viscosity is exactly zero, volume FEM uses an acoustic pressure field with the specified bulk loss, allowing tangential slip at the wall. Nonzero shear viscosity uses a displacement field. All viscous layers in one configuration must specify the same exterior sound speed.
+
+The general layered-shell entry point defaults to full volume FEM. For a spherical stack, explicitly selecting `method=:radial` provides an independent quadratic displacement FEM for the monopole:
+
+```julia
+monopole = fem(Sphere(1.0), boundary, 1.0;
+    method=:radial, n_elements=256, m_max=0)
+scattering_amplitude(monopole)  # complex amplitude in meters
+```
+
+`n_elements` applies to each layer and the fluid core. Normal displacement is continuous across interfaces and traction balance follows from the weak form. An exact outgoing monopole condition closes the exterior at the body surface. Pressure and mechanical point queries require `method=:volume`. Refine `n_elements` near resonances. A spherical monopole comparison validates that component only, and its accuracy as a full scattering approximation depends on the omitted higher modes.
 
 ## Meridian acoustic FEM
 

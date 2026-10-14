@@ -166,16 +166,21 @@ end
     ViscousLayer(soundspeed_exterior, density_contrast, soundspeed_contrast,
                  kinematic_viscosity_compressional, kinematic_viscosity_shear)
 
-A viscous fluid-like shell layer (Feuillade and Nero, 1998), e.g. the flesh surrounding a fish's
-swimbladder. Used as the outer layer of a [`LayeredMaterial`](@ref).
+A viscous fluid shell layer (Feuillade and Nero, 1998), e.g. the flesh surrounding a fish's
+swimbladder. FEM supports it alone in [`Shelled`](@ref) or within a [`LayeredMaterial`](@ref).
+The spherical viscous/elastic modal model uses it as the outer layer.
 
 - `soundspeed_exterior` is the exterior medium's sound speed in m/s.
 - `density_contrast` and `soundspeed_contrast` are lossless reference density/compressional-speed
   contrasts, `ρ2/ρ1`, `c2/c1`, relative to the exterior medium.
-- `kinematic_viscosity_compressional` and `kinematic_viscosity_shear` are the kinematic bulk and
-  shear viscosities in m²/s. Set both to `0.0` for the lossless (purely elastic) limit.
+- `kinematic_viscosity_compressional` is `(bulk + 4shear/3)/density` and
+  `kinematic_viscosity_shear` is `shear/density`, both in m²/s, for dynamic bulk
+  and shear viscosities in Pa s and this layer's density in kg/m³. Set both to
+  `0.0` for the inviscid fluid limit, which has no shear stiffness.
 
-See [Modal series](@ref modal-theory).
+Use spherical `modal` for the supported viscous/elastic monopole model, or
+[`fem`](@ref) for layered spheres and confocal spheroids with a fluid interior.
+The viscous material is distinct from a hysteretically damped [`ViscoelasticSolid`](@ref).
 """
 struct ViscousLayer <: AbstractShellMaterial
     soundspeed_exterior::Float64
@@ -308,6 +313,9 @@ or a [`LayeredMaterial`](@ref)) with either a [`VacuumInterior`](@ref) or a
 enclosing `Shelled`'s interior radius. Spherical `modal` supports arbitrary finite
 compositions of `FluidLayer` and `ElasticLayer` with a fluid or vacuum core.
 Mixed stacks require `ElasticLayer(interior_coupling = :generalized)`.
+For a fluid core, FEM also accepts viscous layers in spherical and confocal
+spheroidal stacks. `method=:volume` solves the complete coupled field, while
+spherical `method=:radial` supports only the monopole for these stacks.
 
 The one-argument-triple form `Shelled(poisson, density, youngs_modulus)` instead builds an
 `ElasticFEMLayer` with no `interior`/`radius_ratio`, for use with

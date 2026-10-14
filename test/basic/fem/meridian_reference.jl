@@ -1,4 +1,105 @@
-using AcousticScattering, Test
+using AcousticScattering, Test, SparseArrays, LinearAlgebra
+
+@testset "Modal mesh-change TS bound" begin
+    AS=AcousticScattering
+    for amplitude in (1.0+0im, 0.4+0.9im, -0.7-0.2im)
+        changes=ComplexF64[0.003 + 0.008im, -0.005 + 0.002im, 0.004 - 0.006im]
+        estimate=AS._spheroid_hp_ts_change([amplitude], changes)
+        for signs in Iterators.product((-1, 1), (-1, 1), (-1, 1))
+            perturbed=amplitude+sum(signs[i]*changes[i] for i in eachindex(changes))
+            actual=abs(20log10(abs(perturbed)/abs(amplitude)))
+            @test actual<=estimate.change_db+1e-13
+        end
+    end
+    phase=AS._spheroid_hp_ts_change([1.0+0im], [0.01im])
+    @test phase.change_db ≈ 10log10(1+0.01^2) atol=1e-14
+    @test AS._spheroid_hp_ts_change([0.0im], [0.0im]).change_db==0.0
+    @test isinf(AS._spheroid_hp_ts_change([0.0im], [0.01im]).change_db)
+end
+
+@testset "Higher-order spheroid condensation and reflection" begin
+    AS = AcousticScattering
+    for boundary in (Rigid(), PressureRelease(), GasFilled(0.00129, 0.23))
+        meshes = [AS._spheroid_hp_geometry(boundary, 0.07, 0.01, 0.084,
+                      3, half ? 6 : 12, 3; condensed, half)
+                  for (condensed, half) in ((false, false), (true, false), (true, true))]
+        for m in 0:2
+            coefficients = [first(AS._spheroid_hp_mode(mesh, boundary, 30.0, m;
+                                l_max = 12)) for mesh in meshes]
+            @test coefficients[2]≈coefficients[1] rtol=2e-9 atol=1e-12
+            @test coefficients[3]≈coefficients[1] rtol=2e-9 atol=1e-12
+        end
+    end
+end
+
+@testset "Higher-order spheroid spherical limit" begin
+    # An independently solved sphere checks wave normalization, the incident
+    # lifting, pressure recovery, rotations and outgoing continuation. The
+    # spheroid constructor excludes exactly equal semiaxes.
+    a = 0.02
+    k = 100.0
+    body = Spheroid(a * (1 + 1e-10), a)
+    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.2, 0.8),
+        GasFilled(0.00129, 0.23))
+        reference = modal(Sphere(a), boundary, k)
+        for beta in (0.0, pi / 3, pi / 2, -pi / 3)
+            @testset "$(typeof(boundary)), incidence=$beta" begin
+                solution = fem(body, boundary, k; order = 6, n_r = 6, n_theta = 24,
+                    m_max = 10, l_max = 16, incidence_angle = beta)
+                @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 2e-5
+                for point in ((0.021, 0.003, 0.001), (-0.021, 0.003, 0.001),
+                    (0.04, -0.03, 0.02))
+                    rotated = (point[1] * cos(beta) + point[2] * sin(beta),
+                        -point[1] * sin(beta) + point[2] * cos(beta), point[3])
+                    @test pressure(solution, point)≈pressure(reference, rotated) rtol=2e-5 atol=1e-8
+                end
+                if boundary isa FluidFilled
+                    for point in ((0.0, 0.0, 0.0), (0.006, 0.003, 0.002))
+                        rotated = (point[1] * cos(beta) + point[2] * sin(beta),
+                            -point[1] * sin(beta) + point[2] * cos(beta), point[3])
+                        @test pressure(solution, point; field = :interior)≈
+                        pressure(reference, rotated; field = :interior) rtol=2e-5 atol=1e-8
+                    end
+                end
+            end
+        end
+    end
+end
+
+@testset "Meridian high-order angular normalization" begin
+    # Independent high-precision evaluation of the unnormalized polynomials.
+    # These orders occur for a 70 by 10 mm spheroid at 100 and 200 kHz.
+    setprecision(BigFloat, 256) do
+        for (m, l_max) in ((0, 12), (3, 14), (97, 113), (175, 206))
+            for x in (-0.7, 0.0, 0.3, 1.0)
+                actual = AcousticScattering._meridian_legendre_values!(
+                    zeros(l_max - m + 1), m, x)
+                expected = [Float64(sqrt(BigFloat(2l + 1) / 2 *
+                                         factorial(big(l - m)) / factorial(big(l + m))) *
+                                    AcousticScattering.legendre_p(l, m, BigFloat(x)))
+                            for l in m:l_max]
+                @test all(isfinite, actual)
+                @test actual≈expected rtol=2e-12 atol=2e-14
+            end
+        end
+    end
+end
+
+@testset "Meridian prescribed-value elimination" begin
+    matrix = ComplexF64[4 1+im 0 2; 1+im 5 3 0; 0 3 6 1; 2 0 1 7]
+    rhs = ComplexF64[1, 2, 3, 4]
+    fixed, free = [1, 4], [2, 3]
+    values = ComplexF64[0.5 + 0.2im, 0]
+    reference = matrix[free, free] \ (rhs[free] - matrix[free, fixed] * values)
+    K, b = sparse(matrix), copy(rhs)
+    # A shared corner is prescribed twice. The last value takes precedence.
+    AcousticScattering._meridian_fem_dirichlet!(K, b, [1, 4, 4], [values[1], 1, 0])
+    solution = K \ b
+    @test solution[free] ≈ reference
+    @test solution[fixed] ≈ values
+    @test issymmetric(K)
+    @test all(!iszero, nonzeros(K))
+end
 
 # Recorded before merging the cylinder/spheroid mode assemblies on 2026-10-02.
 # These detect refactor drift; independent physical checks remain in the extended suite.

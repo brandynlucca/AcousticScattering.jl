@@ -852,7 +852,8 @@ end
 const _BistaticAngleAzimuthSolution = Union{
     BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
     FEMSolution{_ShellFEMSurfaceData}, FEMSolution{_CylinderMeridianFEMData},
-    FEMSolution{_SpheroidMeridianFEMData}, FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
+    FEMSolution{_SpheroidMeridianFEMData}, FEMSolution{_SpheroidHighOrderFEMData},
+    FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
 const _BistaticDirectionSolution = Union{BEMSolution{_FullBEMSurfaceData},
     BEMSolution{_RegionBEMData}, MFSSolution{_FullMFSSurfaceData}}
 

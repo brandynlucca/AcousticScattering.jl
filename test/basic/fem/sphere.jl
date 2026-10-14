@@ -1,6 +1,45 @@
 using AcousticScattering
 using Test
 
+@testset "Layered displacement FEM" begin
+    body, k = Sphere(1.0), 1.0
+    wall = ElasticLayer(1.3, 1.7, 0.6)
+    core = FluidInterior(0.2, 0.7)
+    flesh = ViscousLayer(1500.0, 1.1, 1.05, 1000.0, 300.0)
+    boundary = Shelled(LayeredMaterial(flesh, wall, 0.7), core, 0.4)
+    solution = fem(body, boundary, k; method = :radial, n_elements = 64)
+    reference = modal(body, boundary, k)
+    @test solution isa FEMSolution
+    @test solution.method === :radial
+    @test scattering_amplitude(solution) ≈ scattering_amplitude(reference) rtol = 1e-4
+    @test target_strength(solution) ≈ target_strength(reference) atol = 0.001
+    @test diagnostics(solution).formulation === :radial_displacement
+    @test diagnostics(solution).closure === :exact_monopole_dtn
+    @test diagnostics(solution).relative_residual < 1e-8
+    @test_throws ArgumentError fem(body, boundary, k; method = :radial, m_max = 1)
+    @test_throws ArgumentError fem(body, boundary, k; method = :radial, n_elements = 1)
+    @test_throws ArgumentError fem(body, boundary, 0.0)
+    @test_throws ArgumentError fem(body, boundary, Inf)
+    @test_throws ArgumentError fem(body, boundary, k; method = :meridian)
+    @test_throws ArgumentError fem(body, Shelled(boundary.material, VacuumInterior(), 0.4), k)
+    @test_throws ArgumentError scattering_amplitude(solution; angle = 0.0)
+    @test_throws ArgumentError pressure(solution, (2.0, 0.0, 0.0))
+    inconsistent = Shelled(
+        LayeredMaterial(flesh,
+            ViscousLayer(1400.0, 1.1, 1.05, 1000.0, 300.0), 0.7),
+        core, 0.4)
+    @test_throws ArgumentError fem(body, inconsistent, k)
+    @test_throws ArgumentError fem(body, inconsistent, k; method = :volume)
+
+    # Scaling length by s requires nu -> s*nu to preserve omega*nu/c^2.
+    scale = 0.01
+    scaled_flesh = ViscousLayer(1500.0, 1.1, 1.05, scale * 1000, scale * 300)
+    scaled = fem(Sphere(scale),
+        Shelled(LayeredMaterial(scaled_flesh, wall, 0.7), core, 0.4), k / scale;
+        method = :radial, n_elements = 64)
+    @test scattering_amplitude(scaled) ≈ scale * scattering_amplitude(solution) rtol = 1e-10
+end
+
 @testset "Sphere" begin
     body = Sphere(0.01)
     k = 2pi * 12000.0 / 1477.4

@@ -10,6 +10,8 @@ function affected_files(path::AbstractString)
         return EXTENDED_FILES
     elseif path == "test/extended/tmatrix/spheroid_farfield_samples.txt"
         return ["tmatrix/spheroid_farfield.jl"]
+    elseif path == "test/helpers/layered_fem.jl"
+        return ["fem/sphere/layers.jl", "fem/spheroid/layers.jl"]
     elseif startswith(path, "test/extended/")
         file = path[(length("test/extended/") + 1):end]
         return file in EXTENDED_FILES ? [file] : String[]
