@@ -36,6 +36,20 @@
     font-style: normal;
 }
 
+/* Markdown image links keep Documenter's relative paths correct for pretty URLs. */
+#documenter .geometry-gallery figure > p {
+    margin: 0;
+    background: white;
+}
+
+#documenter .geometry-gallery figure > p > a {
+    display: block;
+}
+
+#documenter .geometry-gallery figure > p > a:hover img {
+    opacity: 0.9;
+}
+
 #documenter .scattering-gallery figcaption h2 {
     margin: 0 0 0.5rem;
     font-size: 1.1rem;
