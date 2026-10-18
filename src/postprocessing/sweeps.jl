@@ -51,13 +51,21 @@ end
     bistatic_map(solution, thetas, phis)
 
 Sample target strength on a polar/azimuthal observation grid in radians without
-re-solving. Supported for axisymmetric and full-3D BEM/MFS, coupled-region BEM, shell FEM, volume
+re-solving. Supported for retained plane-wave spheroid modal solutions,
+axisymmetric and full-3D BEM/MFS, coupled-region BEM, shell FEM, volume
 FEM and [`free_surface`](@ref) solutions. See [`bistatic_sweep`](@ref) for the angle convention,
 which differs between the axisymmetric/full-BEM and volume FEM/free-surface families.
 """
 function bistatic_map(sol, thetas::AbstractVector{<:Real}, phis::AbstractVector{<:Real})
     ts = [target_strength(_bistatic_amplitudes(sol, t, p)) for t in thetas, p in phis]
     return BistaticMap(Float64.(thetas), Float64.(phis), ts)
+end
+
+function bistatic_map(sol::ModalSolution, thetas::AbstractVector{<:Real}, phis::AbstractVector{<:Real})
+    values = _spheroid_modal_amplitudes(sol, repeat(Float64.(thetas), length(phis)),
+        repeat(Float64.(phis); inner = length(thetas)))
+    return BistaticMap(Float64.(thetas), Float64.(phis),
+        reshape(target_strength.(values), length(thetas), length(phis)))
 end
 
 """
@@ -341,68 +349,22 @@ function _validate_incidence_sweep(angles, incidence_azimuth)
     isfinite(incidence_azimuth) || throw(ArgumentError("incidence azimuth must be finite"))
 end
 
-function _fluid_spheroid_modal_angle_sweep(body::Spheroid, boundary::FluidFilled,
-        k::Real, angles::AbstractVector{<:Real};
-        incidence_azimuth::Real = 0.0,
-        m_max::Integer = _default_spheroid_orders(k, body),
-        n_max::Integer = _default_spheroid_orders(k, body),
-        n_quad::Integer = 64, precision::Symbol = :double)
-    _validate_incidence_sweep(angles, incidence_azimuth)
-    m_max >= 0 && n_max >= 0 || throw(ArgumentError("modal orders must be nonnegative"))
-    n_quad >= 2 || throw(ArgumentError("n_quad must be at least 2"))
-    samples = Float64.(angles)
-    eta_i = cos.(samples)
-    eta_s = cos.(pi .- samples)
-    amplitudes = zeros(ComplexF64, length(samples))
-    c = k * body.q
-    c_int = c / boundary.soundspeed_contrast
-    nodes, weights = gauss(n_quad)
-    half = (n_quad ÷ 2 + 1):n_quad
-    nodes = nodes[half]
-    weights = 2 .* weights[half]
-    isodd(n_quad) && (weights[1] /= 2)
-
-    for m in 0:min(m_max, n_max)
-        active = [i
-                  for i in eachindex(samples)
-                  if m == 0 || !(abs(eta_i[i]) == 1 || abs(eta_s[i]) == 1)]
-        isempty(active) && continue
-        count = length(active)
-        exterior = _spheroid_wavefunctions(m, n_max, c, body.xi0,
-            [eta_i[active]; eta_s[active]; nodes]; spheroid = body.kind, precision)
-        interior = _spheroid_wavefunctions(m, n_max, c_int, body.xi0,
-            nodes; spheroid = body.kind, precision, radial_kind = 1)
-        degrees = m:n_max
-        Sint = collect(eachcol(interior.angular))
-        R3e = [(; value = (complex(exterior.r1[j], exterior.r2[j]),),
-                   derivative = (complex(exterior.dr1[j], exterior.dr2[j]),))
-               for j in eachindex(degrees)]
-        R1i = [(; value = (interior.r1[j],), derivative = (interior.dr1[j],))
-               for j in eachindex(degrees)]
-        surface = @view exterior.angular[(2 * count + 1):end, :]
-        azimuth_term = cos(m * (incidence_azimuth - (incidence_azimuth + pi)))
-        for (local_i, sample_i) in enumerate(active)
-            Sext = [[exterior.angular[local_i, j]; surface[:, j]]
-                    for j in eachindex(degrees)]
-            A = if precision === :quad
-                setprecision(BigFloat, 256) do
-                    _solve_fluid_coupling(BigFloat, boundary.density_contrast,
-                        degrees, Sext, Sint, weights, R3e, R1i)
-                end
-            else
-                _solve_fluid_coupling(Float64, boundary.density_contrast,
-                    degrees, Sext, Sint, weights, R3e, R1i)
-            end
-            for j in eachindex(degrees)
-                amplitudes[sample_i] += neumann_factor(m) *
-                                        exterior.angular[count + local_i, j] * A[j] *
-                                        azimuth_term
-            end
-        end
+function _fluid_spheroid_modal_angle_sweep(body::Spheroid,
+        boundary::Union{Rigid, PressureRelease, FluidFilled},
+        k::Real, angles::AbstractVector{<:Real}; incidence_azimuth::Real = 0.0,
+        precision::Symbol = :double, kwargs...)
+    return _with_spheroid_precision(precision) do
+        _validate_incidence_sweep(angles, incidence_azimuth)
+        samples = Float64.(angles)
+        eta = _spheroid_direction_cosine.(samples)
+        modes, receivers = _spheroid_modal_modes(body, boundary, k,
+            eta, -eta; precision, kwargs...)
+        amplitudes = ComplexF64[-2im / k * sum(neumann_factor(m) * (-1)^m *
+                                    sum(receivers[m + 1][i, :] .* modes[m + 1][:, i])
+                                for m in 0:(length(modes) - 1)) for i in eachindex(samples)]
+        return IncidenceAngleSweep(samples, target_strength.(amplitudes), amplitudes,
+            ["Scattered field"])
     end
-    amplitudes .*= -2im / k
-    return IncidenceAngleSweep(samples, target_strength.(amplitudes), amplitudes,
-        ["Scattered field"])
 end
 
 """
@@ -837,17 +799,17 @@ polar incidence angles in radians. Returns a sweep result.
 `incidence_angle_sweep(::Cylinder, ::Union{Rigid,PressureRelease,Impedance}, ...)`. It accepts
 `n`, `m_max` and `rtol` instead of the volume-FEM keywords.
 
-`method=:modal` supports a full-coupling `FluidFilled` spheroid. It evaluates each
-azimuthal order's spheroidal basis once across all angles while retaining the
-existing coupling solve for each incident direction. Fix `m_max`, `n_max`, `n_quad`,
-and `precision` within a sweep.
+`method=:modal` supports rigid, pressure-release and fluid-filled spheroids.
+It batches angular functions and reuses each full-fluid coupling factorization
+across incident directions. Fix the modal orders, overlap controls and precision
+within a sweep.
 """
 function incidence_angle_sweep(body::Union{Sphere, Spheroid},
         boundary::AbstractBoundaryCondition, k::Real, angles::AbstractVector{<:Real};
         method::Symbol = :volume, kwargs...)
     if method === :modal
-        body isa Spheroid && boundary isa FluidFilled && boundary.coupling === :full ||
-            throw(ArgumentError("method=:modal currently requires a full-coupling FluidFilled spheroid"))
+        body isa Spheroid && boundary isa Union{Rigid, PressureRelease, FluidFilled} ||
+            throw(ArgumentError("method=:modal requires a rigid, pressure-release or fluid-filled spheroid"))
         return _fluid_spheroid_modal_angle_sweep(body, boundary, k, angles; kwargs...)
     end
     if method === :axisymmetric
@@ -930,6 +892,9 @@ end
 function _bistatic_amplitudes(sol::_BistaticAngleAzimuthSolution, angle, azimuth)
     scattering_amplitude(sol; angle, azimuth)
 end
+function _bistatic_amplitudes(sol::ModalSolution, angle, azimuth)
+    scattering_amplitude(sol; angle, azimuth)
+end
 function _bistatic_amplitudes(sol::Union{_BistaticDirectionSolution, ComponentComparison}, angle, azimuth)
     _sample_amplitudes(sol; direction = _bem3d_incidence_direction(angle, azimuth))
 end
@@ -937,9 +902,12 @@ end
 """
     bistatic_sweep(solution, angles; azimuth=0)
 
-Sample an observation cut from retained BEM, MFS, meridian/shell FEM or volume FEM surface/field data,
+Sample an observation cut from retained plane-wave spheroid modal coefficients,
+BEM, MFS, meridian/shell FEM or volume FEM surface/field data,
 including full-3D, coupled-region, [`free_surface`](@ref) solutions or [`components`](@ref)
-comparisons. No re-solves. For axisymmetric BEM/MFS, meridian/shell FEM and full/coupled-region BEM, angles
+comparisons. No re-solves. Spheroid modal solutions use polar angles in `[0,pi]`
+from the symmetry axis and azimuth around that axis. For axisymmetric BEM/MFS,
+meridian/shell FEM and full/coupled-region BEM, angles
 are radians from +x toward the azimuthal direction, with π/2 along +y and 3π/2 along -y at azimuth
 zero. Volume FEM and `free_surface` results instead use their own `scattering_amplitude` convention,
 radians from +z with azimuth measured in the xy-plane from +x. Retain both target strength and
@@ -958,4 +926,10 @@ function bistatic_sweep(
     incidence_angle, incidence_azimuth = _bistatic_incidence(sol)
     return BistaticSweep(Float64.(angles), Float64(azimuth), target_strength.(amplitudes),
         incidence_angle, incidence_azimuth, amplitudes, _sample_labels(sol))
+end
+
+function bistatic_sweep(sol::ModalSolution, angles::AbstractVector{<:Real}; azimuth::Real = 0.0)
+    amplitudes = _spheroid_modal_amplitudes(sol, angles, fill(azimuth, length(angles)))
+    return BistaticSweep(Float64.(angles), Float64(azimuth), target_strength.(amplitudes),
+        sol.data.incidence_angle, sol.data.incidence_azimuth, amplitudes, _sample_labels(sol))
 end

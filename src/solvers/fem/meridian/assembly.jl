@@ -131,7 +131,7 @@ end
 function _meridian_fem_bulk!(Is::Vector{Int}, Js::Vector{Int}, Vs::Vector{ComplexF64},
         ρmat::Matrix{Float64}, zmat::Matrix{Float64},
         n_r::Integer, n_theta::Integer, gidx::F,
-        k_region::Real, weight::Real, m2::Real) where {F}
+        k_region::Real, weight::Real, m2::Real; angular_values = nothing) where {F}
     gq1 = ((-1 / sqrt(3), 1.0), (1 / sqrt(3), 1.0))
     gq2 = [(x, y, wx * wy) for (x, wx) in gq1, (y, wy) in gq1]
     for ei in 1:n_r, ej in 1:n_theta
@@ -141,6 +141,7 @@ function _meridian_fem_bulk!(Is::Vector{Int}, Js::Vector{Int}, Vs::Vector{Comple
         zc = (zmat[ei, ej], zmat[ei + 1, ej], zmat[ei + 1, ej + 1], zmat[ei, ej + 1])
 
         Kloc = zeros(ComplexF64, 4, 4)
+        Wloc = angular_values === nothing ? nothing : zeros(Float64, 4, 4)
         for (xi, eta, w) in gq2
             Ns = ((1 - xi) * (1 - eta) / 4, (1 + xi) * (1 - eta) / 4,
                 (1 + xi) * (1 + eta) / 4, (1 - xi) * (1 + eta) / 4)
@@ -167,6 +168,9 @@ function _meridian_fem_bulk!(Is::Vector{Int}, Js::Vector{Int}, Vs::Vector{Comple
                                     +
                                     (m2 / ρq) * Ns[il] * Ns[jl]
                                 )
+                if Wloc !== nothing
+                    Wloc[il, jl] += weight * w * abs(detJ) / ρq * Ns[il] * Ns[jl]
+                end
             end
         end
         for jl in 1:4, il in 1:4
@@ -174,8 +178,97 @@ function _meridian_fem_bulk!(Is::Vector{Int}, Js::Vector{Int}, Vs::Vector{Comple
             push!(Is, nodes[il])
             push!(Js, nodes[jl])
             push!(Vs, Kloc[il, jl])
+            angular_values === nothing || push!(angular_values, Wloc[il, jl])
         end
     end
+end
+
+# At fixed geometry, material and frequency, only m^2 multiplies the angular
+# bulk operator. Preserve the exterior boundary sparsity in both components so
+# every mode copies values without rebuilding sparse triplets or quadrature.
+function _meridian_fem_mode_setup(boundary, k, θ, r_inner, R, n_r, n_theta;
+        dtn_form::Symbol = :assembled)
+    nt1, nr1 = length(θ), n_r + 1
+    fluid = boundary isa FluidFilled
+    interface_base = 1 + (n_r - 1) * nt1
+    N = fluid ? 1 + 2n_r * nt1 : nr1 * nt1
+    gidx_ext(i, j) = fluid ? interface_base + (i - 1) * nt1 + j : (i - 1) * nt1 + j
+    gidx_int(i, j) = i == 1 ? 1 : 1 + (i - 2) * nt1 + j
+    s_grid = _graded_radial_s(n_r)
+    s_int = fluid ? _graded_radial_s_interior(n_r) : Float64[]
+    ρmat, zmat = zeros(nr1, nt1), zeros(nr1, nt1)
+    ρmat_int = fluid ? zeros(nr1, nt1) : zeros(0, 0)
+    zmat_int = similar(ρmat_int)
+    for j in 1:nt1, i in 1:nr1
+
+        r = r_inner[j] + s_grid[i] * (R - r_inner[j])
+        ρmat[i, j], zmat[i, j] = r * sin(θ[j]), r * cos(θ[j])
+        if fluid
+            r_int = s_int[i] * r_inner[j]
+            ρmat_int[i, j], zmat_int[i, j] = r_int * sin(θ[j]), r_int * cos(θ[j])
+        end
+    end
+    Is, Js, Vs, angular = Int[], Int[], ComplexF64[], Float64[]
+    entries = 16 * (fluid ? 2 : 1) * n_r * n_theta + (dtn_form === :assembled ? nt1^2 : 0)
+    for values in (Is, Js, Vs, angular)
+        sizehint!(values, entries)
+    end
+    if fluid
+        _meridian_fem_bulk!(Is, Js, Vs, ρmat_int, zmat_int, n_r, n_theta, gidx_int,
+            k / boundary.soundspeed_contrast, 1 / boundary.density_contrast, 0.0;
+            angular_values = angular)
+    end
+    _meridian_fem_bulk!(Is, Js, Vs, ρmat, zmat, n_r, n_theta, gidx_ext, k, 1.0, 0.0;
+        angular_values = angular)
+    idxR = [gidx_ext(nr1, j) for j in 1:nt1]
+    if dtn_form === :assembled
+        for j in idxR, i in idxR
+
+            push!(Is, i)
+            push!(Js, j)
+            push!(Vs, 0.0im)
+            push!(angular, 0.0)
+        end
+    end
+    matrix = sparse(Is, Js, Vs, N, N)
+    angular_matrix = sparse(Is, Js, angular, N, N)
+    return (; matrix, angular = SparseArrays.nonzeros(angular_matrix), idxR,
+        ρmat, zmat, ρmat_int, zmat_int, s_grid, s_int)
+end
+
+function _meridian_fem_mode_matrix(setup, m, dtn)
+    matrix = copy(setup.matrix)
+    rows, values = SparseArrays.rowvals(matrix), SparseArrays.nonzeros(matrix)
+    m2 = Float64(m)^2
+    @. values += m2 * setup.angular
+    dtn === nothing && return matrix
+    first_boundary = first(setup.idxR)
+    for (j, column) in enumerate(setup.idxR)
+        for q in SparseArrays.nzrange(matrix, column)
+            row = rows[q] - first_boundary + 1
+            row > 0 && (values[q] -= dtn[row, j])
+        end
+    end
+    return matrix
+end
+
+# Eliminating the auxiliary modal unknown gives K - R^2 Q' D Q exactly.
+# Keeping Q rectangular avoids the dense boundary block without truncating its
+# rank or changing the outgoing condition. Dirichlet elimination follows this
+# augmentation so prescribed axis values also remove their modal couplings.
+function _meridian_fem_boundary_system(K, rhs, outer, Q, d, R, dtn_form;
+        symmetry_factor = 1)
+    dtn_form === :assembled && return K, rhs
+    dtn_form === :augmented ||
+        throw(ArgumentError("dtn_form must be :assembled or :augmented"))
+    all(z -> isfinite(z) && !iszero(z), d) ||
+        throw(ArgumentError("augmented DtN requires finite nonzero outgoing eigenvalues"))
+    n, nl, nt = size(K, 1), length(d), length(outer)
+    U = sparse(repeat(outer, nl), repeat(1:nl; inner = nt),
+        vec(R .* transpose(Q)), n, nl)
+    inverse_d = SparseArrays.spdiagm(0 => inv.(symmetry_factor .* d))
+    augmented = [K U; transpose(U) inverse_d]
+    return augmented, vcat(rhs, zeros(ComplexF64, nl))
 end
 
 """
@@ -237,51 +330,59 @@ function _meridian_fem_mode_trace(
         θ::Vector{Float64}, r_inner::Vector{Float64}, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
         hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
-        retain_fields::Bool = true)
+        retain_fields::Bool = true, setup = nothing, mode_workers::Integer = 1,
+        dtn_form::Symbol = :assembled)
     nr1 = n_r + 1
 
     nt1 = size(θ, 1)
     N = nr1 * nt1
     gidx(i, j) = (i - 1) * nt1 + j
 
-    s_grid = _graded_radial_s(n_r)
+    s_grid = setup === nothing ? _graded_radial_s(n_r) : setup.s_grid
 
-    ρmat = Matrix{Float64}(undef, nr1, nt1)
-    zmat = Matrix{Float64}(undef, nr1, nt1)
-    for j in 1:nt1, i in 1:nr1
+    ρmat = setup === nothing ? Matrix{Float64}(undef, nr1, nt1) : setup.ρmat
+    zmat = setup === nothing ? Matrix{Float64}(undef, nr1, nt1) : setup.zmat
+    if setup === nothing
+        for j in 1:nt1, i in 1:nr1
 
-        s = s_grid[i]
-        rij = r_inner[j] + s * (R - r_inner[j])
-        ρmat[i, j] = rij * sin(θ[j])
-        zmat[i, j] = rij * cos(θ[j])
+            s = s_grid[i]
+            rij = r_inner[j] + s * (R - r_inner[j])
+            ρmat[i, j] = rij * sin(θ[j])
+            zmat[i, j] = rij * cos(θ[j])
+        end
     end
 
     Is = Int[]
     Js = Int[]
     Vs = ComplexF64[]
-    entries = 16 * n_r * n_theta + nt1^2
-    sizehint!(Is, entries)
-    sizehint!(Js, entries)
-    sizehint!(Vs, entries)
     b = zeros(ComplexF64, N)
     m2 = Float64(m)^2
 
-    _meridian_fem_bulk!(Is, Js, Vs, ρmat, zmat, n_r, n_theta, gidx, k, 1.0, m2)
+    if setup === nothing
+        entries = 16 * n_r * n_theta + (dtn_form === :assembled ? nt1^2 : 0)
+        sizehint!(Is, entries)
+        sizehint!(Js, entries)
+        sizehint!(Vs, entries)
+        _meridian_fem_bulk!(Is, Js, Vs, ρmat, zmat, n_r, n_theta, gidx, k, 1.0, m2)
+    end
 
     # Outer boundary (r=R): associated-Legendre DtN (reduces exactly to the
     # m=0 case's plain-Legendre DtN above at m=0).
     Peval, Q = _meridian_dtn_basis(θ, m, l_max)
     dtn_diag = [k * hsd_cache[l + 1] / hs_cache[l + 1] for l in m:l_max]
-    K_DtN = R^2 .* (Q' * (dtn_diag .* Q))
+    K_DtN = dtn_form === :assembled ? R^2 .* (Q' * (dtn_diag .* Q)) : nothing
     idxR = [gidx(nr1, j) for j in 1:nt1]
-    for jl in 1:nt1, il in 1:nt1
+    if setup === nothing && dtn_form === :assembled
+        for jl in 1:nt1, il in 1:nt1
 
-        push!(Is, idxR[il])
-        push!(Js, idxR[jl])
-        push!(Vs, -K_DtN[il, jl])
+            push!(Is, idxR[il])
+            push!(Js, idxR[jl])
+            push!(Vs, -K_DtN[il, jl])
+        end
     end
 
-    K = sparse(Is, Js, Vs, N, N)
+    K = setup === nothing ? sparse(Is, Js, Vs, N, N) :
+        _meridian_fem_mode_matrix(setup, m, K_DtN)
 
     # Inner boundary: line-integral treatment, mode-m incident field via _dpdn_inc_mode/_p_inc_mode.
     idxa = [gidx(1, j) for j in 1:nt1]
@@ -324,9 +425,12 @@ function _meridian_fem_mode_trace(
             push!(prescribed, 0)
         end
     end
+    K, b = _meridian_fem_boundary_system(K, b, idxR, Q, dtn_diag, R, dtn_form)
     _meridian_fem_dirichlet!(K, b, fixed, prescribed)
 
-    p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
+    values = _dtn_fem_solve(K, b, m, l_max, k * R;
+        solve_reports, n_r, n_theta, mode_workers, dtn_form)
+    p = dtn_form === :assembled ? values : values[1:N]
 
     pR = p[idxR]
     Bl = ComplexF64[dot(view(Q, idx, :), pR) /
@@ -346,7 +450,8 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
         θ::Vector{Float64}, r_inner::Vector{Float64}, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
         hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
-        retain_fields::Bool = true)
+        retain_fields::Bool = true, setup = nothing, mode_workers::Integer = 1,
+        dtn_form::Symbol = :assembled)
     g, h = boundary.density_contrast, boundary.soundspeed_contrast
     k_int = k / h
 
@@ -366,39 +471,46 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
                      (i == nr1_int ? interface_base + j : 1 + (i - 2) * nt1 + j)
     gidx_ext(i, j) = i == 1 ? interface_base + j : interface_base + nt1 + (i - 2) * nt1 + j
 
-    s_int = _graded_radial_s_interior(n_r)
-    s_ext = _graded_radial_s(n_r)
+    s_int = setup === nothing ? _graded_radial_s_interior(n_r) : setup.s_int
+    s_ext = setup === nothing ? _graded_radial_s(n_r) : setup.s_grid
 
-    ρmat_int = Matrix{Float64}(undef, nr1_int, nt1)
-    zmat_int = Matrix{Float64}(undef, nr1_int, nt1)
-    for j in 1:nt1, i in 1:nr1_int
+    ρmat_int = setup === nothing ? Matrix{Float64}(undef, nr1_int, nt1) : setup.ρmat_int
+    zmat_int = setup === nothing ? Matrix{Float64}(undef, nr1_int, nt1) : setup.zmat_int
+    if setup === nothing
+        for j in 1:nt1, i in 1:nr1_int
 
-        rij = s_int[i] * r_inner[j]
-        ρmat_int[i, j] = rij * sin(θ[j])
-        zmat_int[i, j] = rij * cos(θ[j])
+            rij = s_int[i] * r_inner[j]
+            ρmat_int[i, j] = rij * sin(θ[j])
+            zmat_int[i, j] = rij * cos(θ[j])
+        end
     end
 
-    ρmat_ext = Matrix{Float64}(undef, nr1_ext, nt1)
-    zmat_ext = Matrix{Float64}(undef, nr1_ext, nt1)
-    for j in 1:nt1, i in 1:nr1_ext
+    ρmat_ext = setup === nothing ? Matrix{Float64}(undef, nr1_ext, nt1) : setup.ρmat
+    zmat_ext = setup === nothing ? Matrix{Float64}(undef, nr1_ext, nt1) : setup.zmat
+    if setup === nothing
+        for j in 1:nt1, i in 1:nr1_ext
 
-        rij = r_inner[j] + s_ext[i] * (R - r_inner[j])
-        ρmat_ext[i, j] = rij * sin(θ[j])
-        zmat_ext[i, j] = rij * cos(θ[j])
+            rij = r_inner[j] + s_ext[i] * (R - r_inner[j])
+            ρmat_ext[i, j] = rij * sin(θ[j])
+            zmat_ext[i, j] = rij * cos(θ[j])
+        end
     end
 
     Is = Int[]
     Js = Int[]
     Vs = ComplexF64[]
-    entries = 32 * n_r * n_theta + nt1^2
-    sizehint!(Is, entries)
-    sizehint!(Js, entries)
-    sizehint!(Vs, entries)
     b = zeros(ComplexF64, N)
 
-    _meridian_fem_bulk!(
-        Is, Js, Vs, ρmat_int, zmat_int, n_r, n_theta, gidx_int, k_int, 1 / g, m2)
-    _meridian_fem_bulk!(Is, Js, Vs, ρmat_ext, zmat_ext, n_r, n_theta, gidx_ext, k, 1.0, m2)
+    if setup === nothing
+        entries = 32 * n_r * n_theta + (dtn_form === :assembled ? nt1^2 : 0)
+        sizehint!(Is, entries)
+        sizehint!(Js, entries)
+        sizehint!(Vs, entries)
+        _meridian_fem_bulk!(
+            Is, Js, Vs, ρmat_int, zmat_int, n_r, n_theta, gidx_int, k_int, 1 / g, m2)
+        _meridian_fem_bulk!(
+            Is, Js, Vs, ρmat_ext, zmat_ext, n_r, n_theta, gidx_ext, k, 1.0, m2)
+    end
     _meridian_fem_interior_source!(
         b, ρmat_int, zmat_int, n_r, n_theta, gidx_int, (k_int^2 - k^2) / g, m, k, β)
 
@@ -411,16 +523,19 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
     # Outer boundary (r=R): associated-Legendre DtN, as in the Rigid/PressureRelease case above.
     Peval, Q = _meridian_dtn_basis(θ, m, l_max)
     dtn_diag = [k * hsd_cache[l + 1] / hs_cache[l + 1] for l in m:l_max]
-    K_DtN = R^2 .* (Q' * (dtn_diag .* Q))
+    K_DtN = dtn_form === :assembled ? R^2 .* (Q' * (dtn_diag .* Q)) : nothing
     idxR = [gidx_ext(nr1_ext, j) for j in 1:nt1]
-    for jl in 1:nt1, il in 1:nt1
+    if setup === nothing && dtn_form === :assembled
+        for jl in 1:nt1, il in 1:nt1
 
-        push!(Is, idxR[il])
-        push!(Js, idxR[jl])
-        push!(Vs, -K_DtN[il, jl])
+            push!(Is, idxR[il])
+            push!(Js, idxR[jl])
+            push!(Vs, -K_DtN[il, jl])
+        end
     end
 
-    K = sparse(Is, Js, Vs, N, N)
+    K = setup === nothing ? sparse(Is, Js, Vs, N, N) :
+        _meridian_fem_mode_matrix(setup, m, K_DtN)
 
     # Axis regularity (m ≥ 1): p_m ≡ 0 at ρ=0, in both the interior and
     # exterior meshes (the shared origin DOF included).
@@ -435,9 +550,12 @@ function _meridian_fem_mode_trace(boundary::FluidFilled, m::Integer, k::Real, β
             push!(fixed, gidx_ext(i, j))
         end
     end
+    K, b = _meridian_fem_boundary_system(K, b, idxR, Q, dtn_diag, R, dtn_form)
     _meridian_fem_dirichlet!(K, b, fixed, zeros(ComplexF64, length(fixed)))
 
-    p = _dtn_fem_solve(K, b, m, l_max, k * R; solve_reports, n_r, n_theta)
+    values = _dtn_fem_solve(K, b, m, l_max, k * R;
+        solve_reports, n_r, n_theta, mode_workers, dtn_form)
+    p = dtn_form === :assembled ? values : values[1:N]
 
     pR = p[idxR]
     Bl = ComplexF64[dot(view(Q, idx, :), pR) /

@@ -311,7 +311,8 @@ end
 
 Plot a view of an already-solved `sol`. `kind=:bistatic_polar`/`:bistatic_cartesian` need
 `angles` [rad] (and optional `azimuth`, default `0.0`); `kind=:bistatic_map` needs `thetas`/`phis`
-[rad] — supported for axisymmetric [`bem`](@ref)/[`mfs`](@ref), shell [`fem`](@ref), full 3D and
+[rad]. Supported for retained plane-wave spheroid [`modal`](@ref) solutions,
+axisymmetric [`bem`](@ref)/[`mfs`](@ref), shell [`fem`](@ref), full 3D and
 coupled-region [`bem`](@ref) (`kind=:bistatic_map` only for the last two), and volume
 [`fem`](@ref)/[`free_surface`](@ref) (see [`bistatic_sweep`](@ref) for its differing angle
 convention). `kind=:mesh` shows the solved body's geometry (falling back to `mesh(sol.body;

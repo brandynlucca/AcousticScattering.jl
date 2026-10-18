@@ -138,6 +138,15 @@ let
                     m_max = m_max, n_max = n_max, precision = :quad))
                 @test ts ≈ ts_ref atol = 0.01
             end
+
+            # Full-coupling reference with TS independently checked against
+            # acousticTS binary128. The m_max=n_max=74 complex reference
+            # agrees to 1.6e-8 relative error.
+            high_gas = AS.modal(body_ws, bc_gas, 2pi * 70_000.0 / c_med;
+                incidence_angle = pi / 2, m_max = 19, n_max = 72,
+                n_quad = 256, precision = :quad)
+            high_reference = -0.03320200949963919 - 0.012262360040551798im
+            @test AS.scattering_amplitude(high_gas) ≈ high_reference rtol = 1e-10
         end
 
         @testset "fluid spheroid modal incidence reuse" begin
@@ -157,7 +166,7 @@ let
                 @test sweep.target_strength ≈ AS.target_strength.(fresh) atol = 1e-8
             end
             @test_throws ArgumentError AS.incidence_angle_sweep(
-                body, AS.Rigid(), 2pi * 12_000 / 1477.3, angles; method = :modal)
+                AS.Sphere(0.01), AS.Rigid(), 2pi * 12_000 / 1477.3, angles; method = :modal)
         end
 
         @testset "Rigid/PressureRelease: precision keyword now actually reaches the modal coefficient" begin

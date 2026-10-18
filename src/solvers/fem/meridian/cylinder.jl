@@ -15,7 +15,10 @@ excessive node count. See Kellogg (1974), "Singularities in interface problems,"
 the treatment of interface singularities.
 """
 function _graded_theta_grid(n_theta::Integer, θ_cap::Real; p::Real = 2.5)
-    n1 = max(1, round(Int, n_theta * θ_cap / π))
+    n_theta >= 3 || throw(ArgumentError("n_theta must be at least three"))
+    # Reserve a side element even when flat cylinders allocate almost every
+    # angular interval to their caps.
+    n1 = clamp(round(Int, n_theta * θ_cap / π), 1, (n_theta - 1) ÷ 2)
     n3 = n1
     n2 = max(1, n_theta - n1 - n3)
 
@@ -55,6 +58,30 @@ function _cylinder_r_inner(θ::Real, radius::Real, length::Real)
         return radius / sin(θ)
     end
 end
+
+function _cylinder_hp_profile(theta, radius, length)
+    r = _cylinder_r_inner(theta, radius, length)
+    cap_angle = atan(radius / (length / 2))
+    derivative = theta <= cap_angle || theta >= pi - cap_angle ?
+                 r * tan(theta) : -r * cos(theta) / sin(theta)
+    return r, derivative
+end
+
+function _meridian_hp_geometry(body::Cylinder, boundary, R, nr, nt, order; half)
+    half && throw(ArgumentError("cylinder higher-order geometry uses the full meridian"))
+    edges = _graded_theta_grid(nt, atan(body.radius / (body.length / 2)))
+    return _spheroid_hp_geometry(boundary, body.length / 2, body.radius, R, nr, nt, order;
+        condensed = true, half = false, graded = true, angular_edges = edges,
+        profile = theta -> _cylinder_hp_profile(theta, body.radius, body.length))
+end
+
+function _meridian_hp_dimensions(body::Cylinder)
+    (body.length / 2, body.radius, hypot(body.length / 2, body.radius))
+end
+function _meridian_hp_radius(body::Cylinder, theta)
+    _cylinder_r_inner(theta, body.radius, body.length)
+end
+_meridian_hp_half(body::Cylinder, nt, beta) = false
 
 """
     cylinder_meridian_fem_target_strength(boundary, k, radius, length, R; n_r=30, n_theta=60, l_max=default)
@@ -219,8 +246,15 @@ end
 
 # Mode m's r=R nodal trace (θ, p, ∂p/∂n), generalizing the axial (m=0) solve above.
 
+function _cylinder_fem_mode_workers(ndof, n_modes, mode_threads)
+    # Apply the same conservative mesh-size cap as higher-order spheroid FEM.
+    # Sparse LU fill varies with geometry, so this is not a process-memory bound.
+    memory_workers = max(1, floor(Int, 4 * (50_000 / ndof)^1.5))
+    return min(mode_threads, Threads.nthreads(), n_modes, memory_workers)
+end
+
 """
-    _cylinder_meridian_fem_modes(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default, solve_reports=nothing)
+    _cylinder_meridian_fem_modes(boundary, k, radius, length, R, incidence_angle; m_max, n_r=30, n_theta=60, l_max=default, solve_reports=nothing, retain_fields=false, mode_threads=1)
 
 Panels and per-Fourier-mode complex surface pressure/normal-derivative traces
 (`ps, p_modes, dpdn_modes`) of a finite cylinder's oblique 2D `(ρ,z)` meridian FEM solve, shared by
@@ -234,20 +268,41 @@ function _cylinder_meridian_fem_modes(
         radius::Real, length::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
         l_max::Integer = max(_default_mode_count(k * R), m_max),
-        solve_reports = nothing, retain_fields::Bool = false)
+        solve_reports = nothing, retain_fields::Bool = false, mode_threads::Integer = 1,
+        dtn_form::Symbol = :assembled)
+    m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
+    l_max >= m_max || throw(ArgumentError("l_max must be at least m_max"))
+    n_r >= 1 || throw(ArgumentError("n_r must be positive"))
+    n_theta >= 3 || throw(ArgumentError("n_theta must be at least three"))
+    mode_threads >= 1 || throw(ArgumentError("mode_threads must be positive"))
     β = incidence_angle
-    θ = Float64[]
+    θ = _graded_theta_grid(n_theta, atan(radius / (length / 2)))
+    r_inner = [_cylinder_r_inner(t, radius, length) for t in θ]
+    setup = _meridian_fem_mode_setup(boundary, k, θ, r_inner, R, n_r, n_theta; dtn_form)
     p_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
     dpdn_modes = Vector{Vector{ComplexF64}}(undef, m_max + 1)
-    fields = Vector{_MeridianFEMModeField}(undef, m_max + 1)
+    fields = Vector{_MeridianFEMModeField}(undef, retain_fields ? m_max + 1 : 0)
     hs_cache, hsd_cache = _spherical_hankel_cache(l_max, k * R)
-    for m in 0:m_max
-        θ, pR, dpdnR, field = _cylinder_fem_mode_trace(
-            boundary, m, k, β, radius, length, R, n_r, n_theta, l_max, hs_cache, hsd_cache;
-            solve_reports)
+    workers = _cylinder_fem_mode_workers(size(setup.matrix, 1), m_max + 1, mode_threads)
+    function solve_mode(m)
+        _, pR, dpdnR, field = _meridian_fem_mode_trace(
+            boundary, m, k, β, θ, r_inner, R, n_r, n_theta, l_max, hs_cache, hsd_cache;
+            solve_reports, retain_fields, setup, mode_workers = workers, dtn_form)
         p_modes[m + 1] = pR
         dpdn_modes[m + 1] = dpdnR
-        fields[m + 1] = field
+        retain_fields && (fields[m + 1] = field)
+        return nothing
+    end
+    if workers == 1
+        for m in 0:m_max
+            solve_mode(m)
+        end
+    else
+        @sync for worker in 1:workers
+            Threads.@spawn for m in (worker - 1):workers:m_max
+                solve_mode(m)
+            end
+        end
     end
 
     mesh_R = MeridianMesh(R .* sin.(θ), R .* cos.(θ))
@@ -303,9 +358,10 @@ end
 function _cylinder_fem_mode_trace(boundary::Union{Rigid, PressureRelease, FluidFilled},
         m::Integer, k::Real, β::Real, radius::Real, length::Real, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
-        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing)
+        hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
+        retain_fields::Bool = true)
     θ = _graded_theta_grid(n_theta, atan(radius / (length / 2)))
     r_inner = [_cylinder_r_inner(t, radius, length) for t in θ]
     return _meridian_fem_mode_trace(boundary, m, k, β, θ, r_inner, R,
-        n_r, n_theta, l_max, hs_cache, hsd_cache; solve_reports)
+        n_r, n_theta, l_max, hs_cache, hsd_cache; solve_reports, retain_fields)
 end

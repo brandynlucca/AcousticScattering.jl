@@ -237,7 +237,7 @@ function _pressure_point(solution::FEMSolution{_SpheroidHighOrderFEMData}, point
         m=index-1
         iszero(r) && m>0 && continue
         sample_theta=last(mode.angles)<=Float64(pi)/2 ? min(theta, pi-theta) : theta
-        inner=_spheroid_r_inner(sample_theta, solution.body.a, solution.body.b)
+        inner=_meridian_hp_radius(solution.body, sample_theta)
         component=if region===:interior
             _spheroid_hp_value(mode.radial_interior, mode.angles, mode.interior,
                 r/inner, sample_theta, data.order)

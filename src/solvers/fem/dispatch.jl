@@ -20,12 +20,12 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
 - `:meridian`: 2D (ρ,z) meridian FEM with the angular part discretized. `Sphere` supports
   `Rigid` and `PressureRelease` with axial incidence. `Cylinder`/`Spheroid` also support
   `FluidFilled` and general `incidence_angle`.
-  For `Spheroid`, `mode_threads=1` limits concurrent mode factorizations by default.
-  Its default `m_max` follows the equatorial radius with a fluid-interior guard,
+  For cylinders and spheroids, `mode_threads=1` keeps mode factorizations serial by default.
+  A spheroid's default `m_max` follows the equatorial radius with a fluid-interior guard,
   and is zero at axial incidence. Explicit `m_max` overrides this estimate.
   Set `retain_fields=false` for far-field-only sweeps to omit stored nodal pressure.
   This preserves far-field output but disables scattered/total [`pressure`](@ref) queries.
-  Spheroids additionally accept `order=2:8` for higher-order mapped elements with
+  Cylinders and spheroids accept `order=2:8` for higher-order mapped elements with
   element-interior elimination. The default `order=1` retains the bilinear mesh.
   Higher-order defaults size `n_r` and `n_theta` from the wavelength, including a
   fluid interior. Explicit mesh counts are element counts. `adaptive=true` refines
@@ -34,6 +34,8 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
   `max_refinements=4` increases per mode. Inspect
   `diagnostics(sol).refinement.converged`. This estimates spatial convergence,
   independently of `m_max` and `l_max`, and does not bound phase or bistatic error.
+  `dtn_form=:augmented` keeps the outgoing modal boundary map rectangular instead
+  of expanding its dense boundary block. The default remains `:assembled`.
 
 - `:volume`: full-3D finite elements on curved order-2 tetrahedra. Covers `Sphere` and `Spheroid`
   with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries,
@@ -130,17 +132,33 @@ end
 
 function fem(body::Cylinder, boundary::Union{Rigid, PressureRelease, FluidFilled}, k::Real;
         method::Symbol = :meridian, R::Real = 1.2body.radius, incidence_angle::Real = π / 2,
-        m_max::Integer = _default_mode_count(k * body.radius), kwargs...)
+        m_max::Integer = _default_mode_count(k * body.radius),
+        mode_threads::Integer = 1, retain_fields::Bool = true, order::Integer = 1,
+        dtn_form::Symbol = :assembled, kwargs...)
     _isbent(body) && throw(ArgumentError(
         "fem(::Cylinder, ...) has no bent-cylinder implementation in this package yet"))
     method === :meridian ||
         throw(ArgumentError("fem(::Cylinder, ::Union{Rigid,PressureRelease,FluidFilled}, ...) only supports method=:meridian"))
+    1 <= order <= 8 || throw(ArgumentError("cylinder meridian FEM order must be in 1:8"))
+    dtn_form in (:assembled, :augmented) ||
+        throw(ArgumentError("dtn_form must be :assembled or :augmented"))
+    if order > 1
+        return _spheroid_high_order_fem(body, boundary, k;
+            R, incidence_angle, m_max, mode_threads,
+            retain_fields, order, dtn_form, kwargs...)
+    end
     reports = _SolveReports()
-    ps, p_modes, dpdn_modes, fields = _cylinder_meridian_fem_modes(
+    traces = _cylinder_meridian_fem_modes(
         boundary, k, body.radius, body.length, R, incidence_angle;
-        m_max, solve_reports = reports, retain_fields = true, kwargs...)
-    report = _summarize_solves(reports; method, solver_options = (;
-        R, incidence_angle, m_max, kwargs...))
+        m_max, mode_threads, solve_reports = reports, retain_fields, dtn_form, kwargs...)
+    ps, p_modes, dpdn_modes = traces[1:3]
+    fields = retain_fields ? traces[4] : _MeridianFEMModeField[]
+    sort!(reports.systems; by = r -> r.mode)
+    report = _summarize_solves(reports;
+        method,
+        solver_options = (;
+            R, incidence_angle, m_max, mode_threads,
+            retain_fields, order, dtn_form, kwargs...))
     data = _CylinderMeridianFEMData(
         ps, p_modes, dpdn_modes, fields, incidence_angle, report)
     return FEMSolution(body, boundary, k, method, data)
@@ -166,29 +184,34 @@ function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled
         method::Symbol = :meridian, R::Real = 1.2max(body.a, body.b), incidence_angle::Real = π /
                                                                                               2,
         m_max::Integer = _spheroid_meridian_default_mmax(body, boundary, k, incidence_angle),
-        mode_threads::Integer = 1, retain_fields::Bool = true, order::Integer = 1, kwargs...)
+        mode_threads::Integer = 1, retain_fields::Bool = true, order::Integer = 1,
+        dtn_form::Symbol = :assembled, kwargs...)
     if method === :volume
-        mode_threads == 1 && retain_fields && order == 1 || throw(ArgumentError(
-            "mode_threads, retain_fields and order controls require method=:meridian"))
+        mode_threads == 1 && retain_fields && order == 1 && dtn_form === :assembled ||
+            throw(ArgumentError(
+                "mode_threads, retain_fields, order and dtn_form controls require method=:meridian"))
         return _fem_volume_solution(body, boundary, k; incidence_angle, kwargs...)
     end
     method === :meridian || throw(ArgumentError(
         "fem(::Spheroid, ...) supports method=:meridian or :volume, got $method"))
     1 <= order <= 8 || throw(ArgumentError("spheroid meridian FEM order must be in 1:8"))
+    dtn_form in (:assembled, :augmented) ||
+        throw(ArgumentError("dtn_form must be :assembled or :augmented"))
     if order > 1
         return _spheroid_high_order_fem(body, boundary, k;
-            R, incidence_angle, m_max, mode_threads, retain_fields, order, kwargs...)
+            R, incidence_angle, m_max, mode_threads,
+            retain_fields, order, dtn_form, kwargs...)
     end
     reports = _SolveReports()
     traces = _spheroid_meridian_fem_modes(
         boundary, k, body.a, body.b, R, incidence_angle;
-        m_max, mode_threads, solve_reports = reports, retain_fields, kwargs...)
+        m_max, mode_threads, solve_reports = reports, retain_fields, dtn_form, kwargs...)
     ps, p_modes, dpdn_modes = traces[1:3]
     fields = retain_fields ? traces[4] : _MeridianFEMModeField[]
     report = _summarize_solves(reports;
         method,
         solver_options = (;
-            R, incidence_angle, m_max, mode_threads, retain_fields, kwargs...))
+            R, incidence_angle, m_max, mode_threads, retain_fields, dtn_form, kwargs...))
     data = _SpheroidMeridianFEMData(
         ps, p_modes, dpdn_modes, fields, incidence_angle, report)
     return FEMSolution(body, boundary, k, method, data)

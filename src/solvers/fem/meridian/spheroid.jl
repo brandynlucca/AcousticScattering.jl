@@ -40,7 +40,8 @@ function _spheroid_meridian_fem_modes(
         a::Real, b::Real, R::Real, incidence_angle::Real;
         m_max::Integer, n_r::Integer = 30, n_theta::Integer = 60,
         l_max::Integer = max(_default_mode_count(k * R), m_max),
-        mode_threads::Integer = 1, solve_reports = nothing, retain_fields::Bool = false)
+        mode_threads::Integer = 1, solve_reports = nothing, retain_fields::Bool = false,
+        dtn_form::Symbol = :assembled)
     m_max >= 0 || throw(ArgumentError("m_max must be nonnegative"))
     l_max >= m_max || throw(ArgumentError("l_max must be at least m_max"))
     n_r >= 1 || throw(ArgumentError("n_r must be positive"))
@@ -54,7 +55,7 @@ function _spheroid_meridian_fem_modes(
     function solve_mode(m)
         _, pR, dpdnR, field = _spheroid_fem_mode_trace(
             boundary, m, k, incidence_angle, a, b, R, n_r, n_theta, l_max,
-            hs_cache, hsd_cache; solve_reports, retain_fields)
+            hs_cache, hsd_cache; solve_reports, retain_fields, dtn_form)
         p_modes[m + 1] = pR
         dpdn_modes[m + 1] = dpdnR
         retain_fields && (fields[m + 1] = field)
@@ -87,11 +88,11 @@ function _spheroid_fem_mode_trace(boundary::Union{Rigid, PressureRelease, FluidF
         m::Integer, k::Real, incidence_angle::Real, a::Real, b::Real, R::Real,
         n_r::Integer, n_theta::Integer, l_max::Integer,
         hs_cache::Vector{ComplexF64}, hsd_cache::Vector{ComplexF64}; solve_reports = nothing,
-        retain_fields::Bool = true)
+        retain_fields::Bool = true, dtn_form::Symbol = :assembled)
     angles = collect(range(0.0, pi; length = n_theta + 1))
     r_inner = [_spheroid_r_inner(t, a, b) for t in angles]
     return _meridian_fem_mode_trace(boundary, m, k, incidence_angle, angles, r_inner, R,
-        n_r, n_theta, l_max, hs_cache, hsd_cache; solve_reports, retain_fields)
+        n_r, n_theta, l_max, hs_cache, hsd_cache; solve_reports, retain_fields, dtn_form)
 end
 
 # Higher-order mapped spheroid elements and element-interior condensation.
@@ -125,8 +126,14 @@ function _spheroid_hp_grid(edges, p)
          for e in 1:(length(edges) - 1)]...,
         last(edges))
 end
+function _spheroid_hp_profile(t, a, b)
+    st, ct = sincos(t)
+    r = 1 / sqrt(ct^2 / a^2 + st^2 / b^2)
+    return r, r^3 * st * ct * (1 / a^2 - 1 / b^2)
+end
 function _spheroid_hp_geometry(
-        boundary, a, b, R, nr, nt, p; condensed = true, half = false, graded = true)
+        boundary, a, b, R, nr, nt, p; condensed = true, half = false, graded = true,
+        profile = t -> _spheroid_hp_profile(t, a, b), angular_edges = nothing)
     fluid=boundary isa FluidFilled
     g=fluid ? boundary.density_contrast : 1.0
     h=fluid ? boundary.soundspeed_contrast : 1.0
@@ -138,8 +145,10 @@ function _spheroid_hp_geometry(
     ndof=base+nrn*ntn
     iface=[extidx(1, j) for j in 1:ntn]
     outer=[extidx(nrn, j) for j in 1:ntn]
-    angular_edges=collect(range(0.0, half ? pi/2 : pi; length = nt+1))
-    if graded
+    custom_edges = angular_edges !== nothing
+    angular_edges = custom_edges ? angular_edges :
+                    collect(range(0.0, half ? pi/2 : pi; length = nt+1))
+    if graded && !custom_edges
         angular_edges=Base.map(angular_edges) do target
             left, right=0.0, half ? pi/2 : pi
             for iteration in 1:55
@@ -204,8 +213,7 @@ function _spheroid_hp_geometry(
                 s=(edges[ei]+edges[ei + 1])/2+hs*q[is]/2
                 t=(angular_edges[ej]+angular_edges[ej + 1])/2+ht*q[jt]/2
                 st, ct=sincos(t)
-                ri=1/sqrt(ct^2/a^2+st^2/b^2)
-                dri=ri^3*st*ct*(1/a^2-1/b^2)
+                ri, dri = profile(t)
                 r=inside ? s*ri : ri+s*(R-ri)
                 rs=inside ? ri : R-ri
                 rt=inside ? s*dri : (1-s)*dri
@@ -264,7 +272,7 @@ function _spheroid_hp_geometry(
         return (; S = nothing, A = nothing, M = nothing,
             lift = nothing, cells, lb, li, map, kept,
             iface, outer, fixed, ndof = length(kept), theta, angular_edges,
-            extedges, intedges, nr, nt, p, a, b, R, fluid, condensed, half)
+            extedges, intedges, nr, nt, p, a, b, R, fluid, condensed, half, profile)
     end
     S, A, M=last(matrices)
     lift=if fluid
@@ -277,7 +285,7 @@ function _spheroid_hp_geometry(
         nothing
     end
     return (; S, A, M, lift, iface, outer, fixed, ndof, theta, angular_edges,
-        extedges, intedges, nr, nt, p, a, b, R, fluid, condensed, half)
+        extedges, intedges, nr, nt, p, a, b, R, fluid, condensed, half, profile)
 end
 function _spheroid_hp_dtn(mesh, m, lmax)
     (; nt, p, theta, angular_edges)=mesh
@@ -304,15 +312,16 @@ function _spheroid_hp_dtn(mesh, m, lmax)
     return Q
 end
 function _spheroid_hp_mode(mesh, boundary, k, m, beta = pi/2;
-        l_max = max(_default_mode_count(k*mesh.R), m), retain_fields = false, solve_reports = nothing)
+        l_max = max(_default_mode_count(k*mesh.R), m), retain_fields = false,
+        solve_reports = nothing, dtn_form::Symbol = :assembled, mode_workers::Integer = 1)
     (; S, A, M, iface, outer, theta, p, a, b, R, ndof, angular_edges, nt)=mesh
     lmax=l_max
     hs, hsd=_spherical_hankel_cache(lmax, k*R)
     Q=_spheroid_hp_dtn(mesh, m, lmax)
     d=[k*hsd[l + 1]/hs[l + 1] for l in m:lmax]
     rhs=zeros(ComplexF64, ndof)
-    incident=[_p_inc_mode(m, k, beta, _spheroid_r_inner(t, a, b)*sin(t),
-                  _spheroid_r_inner(t, a, b)*cos(t)) for t in theta]
+    incident=[_p_inc_mode(m, k, beta, first(mesh.profile(t))*sin(t),
+                  first(mesh.profile(t))*cos(t)) for t in theta]
     K=if mesh.condensed
         lb, li=mesh.lb, mesh.li
         Is=Int[]
@@ -349,9 +358,11 @@ function _spheroid_hp_mode(mesh, boundary, k, m, beta = pi/2;
     else
         ComplexF64.(S+m^2*A-k^2*M)
     end
-    dtn=(mesh.half ? 2 : 1)*R^2*(Q'*(d .* Q))
-    K+=sparse(repeat(outer, length(outer)),
-        repeat(outer; inner = length(outer)), vec(-dtn), ndof, ndof)
+    if dtn_form === :assembled
+        dtn=(mesh.half ? 2 : 1)*R^2*(Q'*(d .* Q))
+        K+=sparse(repeat(outer, length(outer)),
+            repeat(outer; inner = length(outer)), vec(-dtn), ndof, ndof)
+    end
     if mesh.fluid && !mesh.condensed
         Ls, La, Lm=mesh.lift
         rhs .-= (Ls+m^2*La-k^2*Lm)*incident
@@ -363,8 +374,7 @@ function _spheroid_hp_mode(mesh, boundary, k, m, beta = pi/2;
             t=(angular_edges[e]+angular_edges[e + 1])/2+(angular_edges[e + 1]-angular_edges[e])*q[i]/2
             N, _=_spheroid_hp_basis(p, q[i])
             st, ct=sincos(t)
-            ri=_spheroid_r_inner(t, a, b)
-            dri=ri^3*st*ct*(1/a^2-1/b^2)
+            ri, dri = mesh.profile(t)
             rt=dri*st+ri*ct
             zt=dri*ct-ri*st
             speed=hypot(rt, zt)
@@ -380,10 +390,13 @@ function _spheroid_hp_mode(mesh, boundary, k, m, beta = pi/2;
         append!(fixed, iface)
         append!(values, -incident)
     end
+    K, rhs = _meridian_fem_boundary_system(K, rhs, outer, Q, d, R, dtn_form;
+        symmetry_factor = mesh.half ? 2 : 1)
     _meridian_fem_dirichlet!(K, rhs, fixed, values)
-    field=_dtn_fem_solve(K, rhs, m, lmax, k*R; solve_reports,
+    solved=_dtn_fem_solve(K, rhs, m, lmax, k*R; solve_reports,
         n_r = mesh.nr, n_theta = mesh.half ? 2mesh.nt : mesh.nt, order = p,
-        condensed = mesh.condensed, equatorial_symmetry = mesh.half)
+        condensed = mesh.condensed, equatorial_symmetry = mesh.half, dtn_form, mode_workers)
+    field = dtn_form === :assembled ? solved : solved[1:ndof]
     Bl=(mesh.half ? 2 : 1)*(Q*field[outer]) ./ hs[(m + 1):end]
     retained=retain_fields ? _spheroid_hp_recover(mesh, field, incident, k, m) : nothing
     return Bl, retained
@@ -433,19 +446,20 @@ end
 
 function _spheroid_hp_modes(mesh, boundary, k, incidence_angle, m_max;
         l_max, mode_threads, retain_fields, solve_reports, modes = 0:m_max,
+        dtn_form::Symbol = :assembled,
         outgoing = Vector{Vector{ComplexF64}}(undef, m_max+1),
         fields = Vector{_SpheroidHighOrderFEMModeField}(undef, retain_fields ? m_max+1 : 0))
-    function solve_mode(m)
-        coefficients, field=_spheroid_hp_mode(mesh, boundary, k, m, incidence_angle;
-            l_max, retain_fields, solve_reports)
-        outgoing[m + 1]=coefficients
-        retain_fields && (fields[m + 1]=field)
-        return nothing
-    end
     # Fine adaptive meshes can otherwise hold several large sparse LU factors
     # at once. mode_threads is an upper bound, including on refined meshes.
     memory_workers=max(1, floor(Int, 4*(50_000/mesh.ndof)^1.5))
     workers=min(mode_threads, Threads.nthreads(), length(modes), memory_workers)
+    function solve_mode(m)
+        coefficients, field=_spheroid_hp_mode(mesh, boundary, k, m, incidence_angle;
+            l_max, retain_fields, solve_reports, dtn_form, mode_workers = workers)
+        outgoing[m + 1]=coefficients
+        retain_fields && (fields[m + 1]=field)
+        return nothing
+    end
     if workers==1
         for m in modes
             solve_mode(m)
@@ -483,9 +497,20 @@ function _spheroid_hp_ts_change(contributions, changes)
     return (; change_db = max(lower, upper), weights = radial .+ b .* transverse, scale)
 end
 
+function _meridian_hp_geometry(body::Spheroid, boundary, R, nr, nt, order; half)
+    return _spheroid_hp_geometry(boundary, body.a, body.b, R, nr, nt, order;
+        condensed = true, half, graded = true)
+end
+
+_meridian_hp_dimensions(body::Spheroid) = (body.a, body.b, max(body.a, body.b))
+_meridian_hp_radius(body::Spheroid, theta) = _spheroid_r_inner(theta, body.a, body.b)
+function _meridian_hp_half(body::Spheroid, nt, beta)
+    iseven(nt) && abs(float(beta)) == oftype(float(beta), pi) / 2
+end
+
 function _spheroid_hp_adaptive_modes(body, boundary, k, nr, nt, order, half;
         R, incidence_angle, m_max, l_max, mode_threads, retain_fields,
-        target_tol, max_refinements, solve_reports)
+        target_tol, max_refinements, solve_reports, dtn_form::Symbol = :assembled)
     n_modes=m_max+1
     nrs=[nr]
     nts=[nt]
@@ -525,13 +550,13 @@ function _spheroid_hp_adaptive_modes(body, boundary, k, nr, nt, order, half;
         for next_level in sort!(unique(levels[selected] .+ 1))
             indices=filter(index->levels[index]+1==next_level, selected)
             if cached_level!=next_level
-                cached_mesh=_spheroid_hp_geometry(boundary, body.a, body.b, R,
+                cached_mesh=_meridian_hp_geometry(body, boundary, R,
                     nrs[next_level + 1], half ? nts[next_level + 1]÷2 : nts[next_level + 1], order;
-                    condensed = true, half, graded = true)
+                    half)
                 cached_level=next_level
             end
             _spheroid_hp_modes(cached_mesh, boundary, k, incidence_angle, m_max;
-                l_max, mode_threads, retain_fields, solve_reports,
+                l_max, mode_threads, retain_fields, solve_reports, dtn_form,
                 modes = indices .- 1, outgoing, fields)
             for index in indices
                 value=_spheroid_hp_mode_amplitude(
@@ -553,7 +578,7 @@ function _spheroid_hp_adaptive_modes(body, boundary, k, nr, nt, order, half;
         (; estimator = :modal_ts_mesh_change, amplitude_change,
             mode_n_r, mode_n_theta, mode_refinements = levels))
     converged ||
-        @warn "spheroid FEM did not reach target_tol=$target_tol dB within $max_refinements refinements per mode, returning the latest solves"
+        @warn "meridian FEM did not reach target_tol=$target_tol dB within $max_refinements refinements per mode, returning the latest solves"
     return outgoing, fields, maximum(mode_n_r), maximum(mode_n_theta)
 end
 
@@ -561,14 +586,18 @@ function _spheroid_high_order_fem(body, boundary, k;
         R, incidence_angle, m_max, mode_threads, retain_fields, order,
         n_r::Union{Nothing, Integer} = nothing, n_theta::Union{Nothing, Integer} = nothing,
         l_max::Integer = max(_default_mode_count(k*R), m_max),
-        adaptive::Bool = false, target_tol::Real = 0.01, max_refinements::Integer = 4)
+        adaptive::Bool = false, target_tol::Real = 0.01, max_refinements::Integer = 4,
+        dtn_form::Symbol = :assembled)
     isfinite(k) && k>0 || throw(ArgumentError("wavenumber must be finite and positive"))
     m_max>=0 || throw(ArgumentError("m_max must be nonnegative"))
     l_max>=m_max || throw(ArgumentError("l_max must be at least m_max"))
     mode_threads>=1 || throw(ArgumentError("mode_threads must be positive"))
+    dtn_form in (:assembled, :augmented) ||
+        throw(ArgumentError("dtn_form must be :assembled or :augmented"))
     isfinite(incidence_angle) || throw(ArgumentError("incidence_angle must be finite"))
     isfinite(R) || throw(ArgumentError("R must be finite"))
-    R>max(body.a, body.b) || throw(ArgumentError("R must exceed both spheroid semi-axes"))
+    a, b, extent = _meridian_hp_dimensions(body)
+    R>extent || throw(ArgumentError("R must enclose the body"))
     isfinite(target_tol) && target_tol>0 ||
         throw(ArgumentError("target_tol must be finite and positive"))
     max_refinements>=1 || throw(ArgumentError("max_refinements must be positive"))
@@ -576,34 +605,33 @@ function _spheroid_high_order_fem(body, boundary, k;
         isfinite(boundary.density_contrast) && boundary.density_contrast>0 &&
         isfinite(boundary.soundspeed_contrast) && boundary.soundspeed_contrast>0 ||
             throw(ArgumentError("fluid density and sound-speed contrasts must be finite and positive"))
-        k*max(body.a, body.b)/boundary.soundspeed_contrast
+        k*extent/boundary.soundspeed_contrast
     else
         0.0
     end
-    exterior_wave=2k*(R-min(body.a, body.b))
+    exterior_wave=2k*(R-min(a, b))
     nr=n_r===nothing ? max(4, ceil(Int, max(internal_wave, exterior_wave)/(1.8order))) :
        Int(n_r)
     nt=n_theta===nothing ? 4nr : Int(n_theta)
     nr>=1 || throw(ArgumentError("n_r must be positive"))
-    nt>=2 || throw(ArgumentError("n_theta must be at least two"))
-    half=iseven(nt) && abs(float(incidence_angle))==oftype(float(incidence_angle), pi)/2
+    minimum_theta = body isa Cylinder ? 3 : 2
+    nt>=minimum_theta || throw(ArgumentError("n_theta must be at least $minimum_theta"))
+    half=_meridian_hp_half(body, nt, incidence_angle)
     reports=_SolveReports()
     if adaptive
         outgoing, fields, nr, nt=_spheroid_hp_adaptive_modes(
             body, boundary, k, nr, nt, order, half;
             R, incidence_angle, m_max, l_max, mode_threads,
-            retain_fields, target_tol, max_refinements,
+            retain_fields, target_tol, max_refinements, dtn_form,
             solve_reports = reports)
     else
-        mesh=_spheroid_hp_geometry(
-            boundary, body.a, body.b, R, nr, half ? nt÷2 : nt, order;
-            condensed = true, half, graded = true)
+        mesh=_meridian_hp_geometry(body, boundary, R, nr, half ? nt÷2 : nt, order; half)
         outgoing, fields=_spheroid_hp_modes(mesh, boundary, k, incidence_angle, m_max;
-            l_max, mode_threads, retain_fields, solve_reports = reports)
+            l_max, mode_threads, retain_fields, solve_reports = reports, dtn_form)
     end
     report=_summarize_solves(reports; method = :meridian,
         solver_options = (; R, incidence_angle, m_max, mode_threads, retain_fields, order,
-            n_r = nr, n_theta = nt, l_max, adaptive, target_tol, max_refinements),
+            n_r = nr, n_theta = nt, l_max, adaptive, target_tol, max_refinements, dtn_form),
         equatorial_symmetry = half)
     data=_SpheroidHighOrderFEMData(
         outgoing, fields, Float64(incidence_angle), Int(order), report)
