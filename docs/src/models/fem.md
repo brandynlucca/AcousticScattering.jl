@@ -105,7 +105,24 @@ Meridian FEM discretizes radial/axial dependence and uses azimuthal Fourier mode
 
 Increase mesh resolution and angular/modal orders separately. Oblique cylinder/spheroid incidence requires the corresponding Fourier content. These methods do not model bend curvature.
 
-`pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries; straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use bilinear interpolation in its radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
+For cylinder and spheroid meridian FEM, `retain_fields=false` reduces solution storage when only scattering amplitudes, target strengths or bistatic patterns are needed. The default retains the nodal fields for `pressure` queries. Incident pressure remains available with either setting.
+
+Cylinder meridian modes run serially by default. `mode_threads` permits concurrent mode solves, limited by the available Julia threads and a conservative mesh-size estimate. Fine meshes can still run serially because simultaneous sparse factorizations increase memory use. This estimate does not impose a hard process-memory limit. `diagnostics(solution).systems` records the actual `mode_workers` count for each mode.
+
+Cylinders and spheroids accept `order=2:8` for higher-order mapped elements. The default remains `order=1`. For a cylinder, element boundaries follow the flat caps and side and meet at both rims. Set an enclosing radius `R > hypot(body.length/2, body.radius)` in meters. `n_r` and `n_theta` count elements, rather than interpolation nodes. With `order>1`, `adaptive=true` refines individual modes until their combined backscatter mesh-change estimate is below `target_tol` dB. Check `diagnostics(solution).refinement.converged` and refine `m_max` and `l_max` independently. This estimate does not bound phase or bistatic error.
+
+`dtn_form=:augmented` retains the rectangular outgoing modal boundary map and adds auxiliary modal unknowns to the sparse system. It is algebraically equivalent to the default `:assembled` boundary map at fixed `l_max`. This can reduce storage for a fine angular mesh, but sparse factorization cost still depends on its fill pattern. Compare both options on the intended mesh.
+
+```julia
+body = Cylinder(0.01, 0.07)
+solution = fem(body, Rigid(), 100.0;
+    R = 1.2hypot(body.length / 2, body.radius), order = 4,
+    adaptive = true, target_tol = 0.01,
+    retain_fields = false, dtn_form = :augmented)
+diagnostics(solution).refinement.converged
+```
+
+`pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries. Straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use interpolation at the selected element order in radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
 
 ## Elastic and coupled shell FEM
 
