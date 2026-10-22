@@ -1,3 +1,12 @@
+function scattering_amplitude(sol::BEMSolution{<:_CurvedSpheroidBEMData};
+        angle::Real = pi-sol.data.incidence_angle, azimuth::Real = pi)
+    isfinite(angle) && isfinite(azimuth) ||
+        throw(ArgumentError("observation angles must be finite"))
+    return sum(_spheroid_curved_amplitude(field, sol.k, m-1, angle, azimuth;
+                   quadrature_extra = sol.data.diagnostics.solver_options.quadrature_extra)
+    for (m, field) in enumerate(sol.data.modes))
+end
+
 function scattering_amplitude(
         sol::BEMSolution{_FullBEMSurfaceData}; direction::Union{Nothing, AbstractVector} = nothing)
     d = sol.data

@@ -853,9 +853,11 @@ function incidence_angle_sweep(bodies::AbstractVector{<:AbstractBody},
 end
 
 const _BistaticAngleAzimuthSolution = Union{
-    BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_AxisymmetricSurfaceData},
+    BEMSolution{_AxisymmetricSurfaceData}, BEMSolution{<:_CurvedSpheroidBEMData},
+    MFSSolution{_AxisymmetricSurfaceData},
     FEMSolution{_ShellFEMSurfaceData}, FEMSolution{_CylinderMeridianFEMData},
     FEMSolution{_SpheroidMeridianFEMData}, FEMSolution{_SpheroidHighOrderFEMData},
+    CoupledSolution{_SpheroidFEMBEMData},
     FEMSolution{_VolumeFEMData}, FreeSurfaceSolution}
 const _BistaticDirectionSolution = Union{BEMSolution{_FullBEMSurfaceData},
     BEMSolution{_RegionBEMData}, MFSSolution{_FullMFSSurfaceData}}

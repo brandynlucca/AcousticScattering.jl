@@ -67,11 +67,12 @@ function _cylinder_hp_profile(theta, radius, length)
     return r, derivative
 end
 
-function _meridian_hp_geometry(body::Cylinder, boundary, R, nr, nt, order; half)
+function _meridian_hp_geometry(body::Cylinder, boundary, R, nr, nt, order; half,
+        quadrature_extra::Integer = 0)
     half && throw(ArgumentError("cylinder higher-order geometry uses the full meridian"))
     edges = _graded_theta_grid(nt, atan(body.radius / (body.length / 2)))
     return _spheroid_hp_geometry(boundary, body.length / 2, body.radius, R, nr, nt, order;
-        condensed = true, half = false, graded = true, angular_edges = edges,
+        condensed = true, half = false, graded = true, angular_edges = edges, quadrature_extra,
         profile = theta -> _cylinder_hp_profile(theta, body.radius, body.length))
 end
 

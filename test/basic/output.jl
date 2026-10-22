@@ -69,7 +69,7 @@ let
             :IncidentField, :PlaneWave, :SphericalWave,
             :BesselBeam, :incident_pressure, :incident_gradient, :incident_coefficient,
             :AbstractSolution, :ModalSolution, :TMatrixSolution,
-            :KirchhoffSolution, :FEMSolution,
+            :KirchhoffSolution, :FEMSolution, :CoupledSolution, :Coupling, :coupled,
             :BEMSolution, :MFSSolution, :FMSolution, :FreeSurfaceSolution, :modal, :tmatrix,
             :kirchhoff, :fem, :bem, :mfs, :fourier, :free_surface,
             :target_strength, :scattering_amplitude, :pressure, :diagnostics,

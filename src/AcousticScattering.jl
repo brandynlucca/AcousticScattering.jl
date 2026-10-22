@@ -30,9 +30,10 @@ export RevolvedBody, LoftedBody, Ellipsoid, Superellipsoid, Torus,
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
 export incident_pressure, incident_gradient, incident_coefficient
 export AbstractSolution, ModalSolution, TMatrixSolution,
-       KirchhoffSolution, FEMSolution,
+       KirchhoffSolution, FEMSolution, CoupledSolution,
        BEMSolution,
        MFSSolution, FMSolution, FreeSurfaceSolution
+export Coupling, coupled
 export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier,
        free_surface
 export target_strength, scattering_amplitude, pressure, diagnostics

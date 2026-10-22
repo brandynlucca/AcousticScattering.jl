@@ -53,6 +53,8 @@ function pressure(solution::AbstractSolution, points; field::Symbol = :total, re
 end
 
 function _check_pressure_solution(solution)
+    solution isa CoupledSolution{_SpheroidFEMBEMData} && throw(ArgumentError(
+        "this coupled solution retains far-field surface traces only and does not support pressure queries"))
     spherical = solution.body isa Sphere &&
                 ((solution isa ModalSolution && solution.data isa _SphereModalData) ||
                  solution isa FEMSolution{_RadialFEMData} ||
@@ -63,7 +65,8 @@ function _check_pressure_solution(solution)
                         (solution.body isa Cylinder && (full || !_isbent(solution.body))) ||
                         (full && solution.body isa Union{_SurfaceGeometry, _GeneratedBody})
     boundary_data = solution isa Union{BEMSolution{_FullBEMSurfaceData},
-        BEMSolution{_AxisymmetricSurfaceData}, MFSSolution{_FullMFSSurfaceData}} ||
+        BEMSolution{_AxisymmetricSurfaceData}, BEMSolution{<:_CurvedSpheroidBEMData},
+        MFSSolution{_FullMFSSurfaceData}} ||
                     (solution isa MFSSolution{_AxisymmetricSurfaceData} &&
                      solution.data.source_modes !== nothing)
     supported = spherical ||
@@ -110,7 +113,8 @@ end
 
 function _incident_pressure(solution::Union{BEMSolution, MFSSolution}, point)
     data = solution.data
-    azimuth = data isa _AxisymmetricSurfaceData ? 0.0 : data.incidence_azimuth
+    azimuth = data isa Union{_AxisymmetricSurfaceData, _CurvedSpheroidBEMData} ? 0.0 :
+              data.incidence_azimuth
     direction = _bem3d_incidence_direction(data.incidence_angle, azimuth)
     return cis(solution.k * dot(direction, point))
 end
@@ -685,4 +689,49 @@ function _pressure_values(solution::FEMSolution{_VolumeFEMData}, points, field)
         end
     end
     return values
+end
+
+function _pressure_point(solution::BEMSolution{<:_CurvedSpheroidBEMData}, point, field)
+    all(isfinite, point) || throw(ArgumentError("point coordinates must be finite"))
+    incident = _incident_pressure(solution, point)
+    field===:incident && return incident
+    region = _boundary_pressure_region(solution, point, field)
+    inside = region===:interior
+    k = inside ? solution.k/solution.boundary.soundspeed_contrast : solution.k
+    rho, z, phi = hypot(point[2], point[3]), point[1], atan(point[3], point[2])
+    value = 0.0im
+    for (index, trace) in enumerate(solution.data.modes)
+        m, be = index-1, trace.boundary
+        workspace = _bem_quadrature_workspace(m:m, Val(1))
+        for e in 1:be.elements
+            left, right = be.edges[e:(e + 1)]
+            function integrand(chi)
+                basis = _spheroid_curved_basis(be.nodes, (2chi-left-right)/(right-left))
+                indices = (e-1)*be.degree .+ (1:be.degree)
+                p, q = sum(basis .* trace.pressure[indices]),
+                sum(basis .* trace.derivative[indices])
+                sr, sz = be.b*sin(chi), be.a*cos(chi)
+                speed = hypot(be.a*sin(chi), be.b*cos(chi))
+                nr, nz = be.a*sin(chi)/speed, be.b*cos(chi)/speed
+                total = 0.0im
+                for reflection in (be.half ? (-1, 1) : (1,))
+                    source_z, normal_z = reflection*sz, reflection*nz
+                    projection = nr*(rho-sr)+normal_z*(z-source_z)
+                    kv = _azimuthal_KV_modes(k, rho, z, sr, source_z, nr, projection,
+                        m:m, false, nothing, 1e-9, Val(1), workspace)
+                    if inside
+                        beta = solution.data.incidence_angle
+                        pi = _p_inc_mode(m, solution.k, beta, sr, source_z)
+                        qi = _dpdn_inc_mode(m, solution.k, beta, sr, source_z, nr, normal_z)
+                        total += kv[2]*solution.boundary.density_contrast*(q+qi)-kv[1]*(p+pi)
+                    else
+                        total += kv[1]*p-kv[2]*q
+                    end
+                end
+                return total*sr*speed*cos(m*phi)
+            end
+            value += quadgk(integrand, left, right; rtol = 1e-8, atol = 1e-12)[1]
+        end
+    end
+    return !inside && field===:total ? value+incident : value
 end

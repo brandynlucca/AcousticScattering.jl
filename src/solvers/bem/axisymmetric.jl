@@ -1355,3 +1355,337 @@ function solve_oblique(
 
     return p_scat_modes, dpdn_scat_modes, ps
 end
+
+function _spheroid_curved_basis(nodes, x)
+    n = length(nodes)
+    return [prod((x-nodes[j])/(nodes[i]-nodes[j]) for j in 1:n if j != i) for i in 1:n]
+end
+
+function _spheroid_curved_boundary(a, b, elements, degree; half = true)
+    nodes, weights = _spheroid_hp_rule(degree)
+    edges = collect(range(0.0, half ? pi/2 : pi; length = elements+1))
+    chi = vcat([(edges[e]+edges[e + 1])/2 .+ (edges[e + 1]-edges[e])/2 .* nodes
+                for e in 1:elements]...)
+    rho, z = b .* sin.(chi), a .* cos.(chi)
+    speed = hypot.(a .* sin.(chi), b .* cos.(chi))
+    return (; a, b, elements, degree, half, nodes, weights, edges, chi, rho, z,
+        nrho = a .* sin.(chi) ./ speed, nz = b .* cos.(chi) ./ speed)
+end
+
+function _spheroid_curved_operators(
+        boundary, k, modes, ::Val{N}, ::Val{P}; rtol = 1e-8,
+        chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0) where {N, P}
+    a, b = boundary.a, boundary.b
+    count, n = length(modes), length(boundary.chi)
+    chief_angles = [(j-0.5)*last(boundary.edges)/chief_points for j in 1:chief_points]
+    target_chi = vcat(boundary.chi, chief_angles)
+    target_rho = vcat(boundary.rho, [0.72b*sin(t) for t in chief_angles])
+    target_z = vcat(boundary.z, [0.72a*cos(t) for t in chief_angles])
+    Ks = [zeros(ComplexF64, n+chief_points, n) for m in modes]
+    Vs = [zeros(ComplexF64, n+chief_points, n) for m in modes]
+    split && !boundary.half &&
+        throw(ArgumentError("parity splitting requires a half boundary"))
+    oddKs = split ? [zero(K) for K in Ks] : nothing
+    oddVs = split ? [zero(V) for V in Vs] : nothing
+    order = _azimuthal_fixed_order(last(modes), k, b, b)+2quadrature_extra
+    angles, weights = _azimuthal_fixed_rule(order)
+    table = [_cos_multiples(phi, first(modes), count, Val(N)) for phi in angles]
+    half_sines = sin.(angles ./ 2)
+    ruleq, rulew = _spheroid_hp_rule(max(P+6, ceil(Int, k*a*last(boundary.edges)/boundary.elements)+P)+quadrature_extra)
+    # Smooth-cell basis and geometric weights are independent of the target.
+    fixed_basis = [_spheroid_curved_basis(boundary.nodes, x) for x in ruleq]
+    fixed_sources = [[(boundary.edges[e]+boundary.edges[e + 1])/2 +
+                      (boundary.edges[e + 1]-boundary.edges[e])*x/2 for x in ruleq]
+                     for e in 1:boundary.elements]
+    fixed_weights = [[fixed_basis[q]*(b * sin(x) * hypot(a*sin(x), b*cos(x)) * rulew[q] *
+                                      (boundary.edges[e + 1]-boundary.edges[e])/2)
+                      for (q, x) in enumerate(fixed_sources[e])]
+                     for e in 1:boundary.elements]
+    _foreach_row(n+chief_points, () -> _bem_quadrature_workspace(modes, Val(N))) do i,
+    workspace
+        target = target_chi[i]
+        rho, z = target_rho[i], target_z[i]
+        function kernel(source)
+            sr, sz = b*sin(source), a*cos(source)
+            speed = hypot(a*sin(source), b*cos(source))
+            normal = a*sin(source)/speed
+            projection = i<=n ? -2a*b*sin((target-source)/2)^2/speed :
+                         normal*(rho-sr)+b*cos(source)/speed*(z-sz)
+            if hypot(rho-sr, z-sz) >= 0.5sqrt(rho*sr)
+                geometry = _ring_geometry(rho, z, sr, sz, normal, projection)
+                total = zero(SVector{2N, ComplexF64})
+                for q in eachindex(angles)
+                    kv = _ring_KV_precomputed(k, geometry, half_sines[q])*weights[q]
+                    total += vcat(kv[1]*table[q], kv[2]*table[q])
+                end
+                return total
+            end
+            return _azimuthal_KV_modes(k, rho, z, sr, sz, normal,
+                projection, modes, false, nothing, rtol, Val(N), workspace)
+        end
+        for e in 1:boundary.elements
+            left, right = boundary.edges[e], boundary.edges[e + 1]
+            parts = Vector{Vector{ComplexF64}}()
+            for reflection in 0:(boundary.half ? 1 : 0)
+                reflected_target = reflection==0 ? target : pi-target
+                function integrand(source)
+                    local_coordinate = (2source-left-right)/(right-left)
+                    basis = _spheroid_curved_basis(boundary.nodes, local_coordinate)
+                    jac = b*sin(source)*hypot(a*sin(source), b*cos(source))
+                    kv = kernel(reflection==0 ? source : pi-source)*jac
+                    result = Vector{ComplexF64}(undef, 2N*P)
+                    for j in eachindex(result)
+                        result[j] = kv[mod1(j, 2N)]*basis[cld(j, 2N)]
+                    end
+                    return result
+                end
+                values = if i<=n && reflection==0 && left<target<right
+                    l = quadgk(t -> integrand(target-(target-left)*t^3)*3(target-left)*t^2,
+                        0.0, 1.0; rtol, atol = 1e-13, maxevals = 10000)[1]
+                    r = quadgk(
+                        t -> integrand(target+(right-target)*t^3)*3(right-target)*t^2,
+                        0.0, 1.0; rtol, atol = 1e-13, maxevals = 10000)[1]
+                    l+r
+                elseif min(abs(reflected_target-left), abs(reflected_target-right))<right-left ||
+                       left<reflected_target<right
+                    quadgk(integrand, left, right; rtol, atol = 1e-13, maxevals = 10000)[1]
+                else
+                    value = zeros(ComplexF64, 2N*P)
+                    for q in eachindex(ruleq)
+                        source = fixed_sources[e][q]
+                        kv = kernel(reflection==0 ? source : pi-source)
+                        basis = fixed_weights[e][q]
+                        for j in 1:P, c in 1:2N
+
+                            value[(j - 1) * 2N + c] += kv[c]*basis[j]
+                        end
+                    end
+                    value
+                end
+                push!(parts, values)
+            end
+            for j in 1:P, c in 1:count
+
+                ix, iv = (j-1)*2N+c, (j-1)*2N+N+c
+                reflectedK = boundary.half ? parts[2][ix] : 0.0im
+                reflectedV = boundary.half ? parts[2][iv] : 0.0im
+                Ks[c][i, (e - 1) * P + j] = parts[1][ix]+reflectedK
+                Vs[c][i, (e - 1) * P + j] = parts[1][iv]+reflectedV
+                if split
+                    oddKs[c][i, (e - 1) * P + j] = parts[1][ix]-reflectedK
+                    oddVs[c][i, (e - 1) * P + j] = parts[1][iv]-reflectedV
+                end
+            end
+        end
+    end
+    return split ? (Ks, Vs, oddKs, oddVs) : (Ks, Vs)
+end
+
+function _spheroid_curved_amplitude(field, k, m, theta, phi; quadrature_extra::Integer = 0)
+    boundary = field.boundary
+    pressure, derivative = field.pressure, field.derivative
+    q, w = _spheroid_hp_rule(boundary.degree+10+quadrature_extra)
+    total = 0.0im
+    for e in 1:boundary.elements, j in eachindex(q)
+
+        left, right = boundary.edges[e:(e + 1)]
+        chi = (left+right)/2+(right-left)*q[j]/2
+        basis = _spheroid_curved_basis(boundary.nodes, q[j])
+        indices = (e-1)*boundary.degree .+ (1:boundary.degree)
+        rho, z = boundary.b*sin(chi), boundary.a*cos(chi)
+        speed = hypot(boundary.a*sin(chi), boundary.b*cos(chi))
+        nr, nz = boundary.a*sin(chi)/speed, boundary.b*cos(chi)/speed
+        u = k*rho*sin(theta)
+        p, dp = sum(basis .* pressure[indices]), sum(basis .* derivative[indices])
+        J = besselj(m, u)
+        dJ = m==0 ? -besselj(1, u) : (besselj(m-1, u)-besselj(m+1, u))/2
+        for reflection in (boundary.half ? (-1, 1) : (1,))
+            value = ((dp+im*k*cos(theta)*reflection*nz*p)*J-k*sin(theta)*nr*p*dJ)*cis(-k*reflection*z*cos(theta))
+            total += (-im)^m*cos(m*phi)*value*rho*speed*w[j]*(right-left)/2
+        end
+    end
+    return -total/2
+end
+
+function _spheroid_curved_bem_mode(
+        be, bc, K, V, interior, k, m, beta, parity, reports, workers)
+    n = length(be.chi)
+    D = -K
+    for j in 1:n
+        D[j, j] += 0.5
+    end
+    incident = [_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
+    derivative = [_dpdn_inc_mode(m, k, beta, r, z, nr, nz)
+                  for (r, z, nr, nz) in zip(be.rho, be.z, be.nrho, be.nz)]
+    if parity != 0
+        for j in 1:n
+            incident[j] = (incident[j]+parity*_p_inc_mode(m, k, beta, be.rho[j], -be.z[j]))/2
+            derivative[j] = (derivative[j]+parity*_dpdn_inc_mode(m, k, beta,
+                be.rho[j], -be.z[j], be.nrho[j], -be.nz[j]))/2
+        end
+    end
+    if bc isa Rigid
+        qs = -derivative
+        matrix, rhs = D, -V*qs
+        ps = LinearAlgebra.qr(matrix)\rhs
+        solution = ps
+    elseif bc isa PressureRelease
+        ps = -incident
+        matrix, rhs = V, -D*ps
+        qs = LinearAlgebra.qr(matrix)\rhs
+        solution = qs
+    else
+        Ki, Vi = interior
+        J = copy(Ki)
+        for j in 1:n
+            J[j, j] += 0.5
+        end
+        # Subtract the background Green identity before discretization. The
+        # incident forcing then vanishes exactly when the two media match.
+        forcing = -(Ki-K[1:n, :])*incident+(bc.density_contrast*Vi-V[1:n, :])*derivative
+        matrix = [D V; J -bc.density_contrast*Vi]
+        rhs = vcat(zeros(ComplexF64, size(D, 1)), forcing)
+        solution = LinearAlgebra.qr(matrix)\rhs
+        ps, qs = solution[1:n], solution[(n + 1):end]
+    end
+    representation_residual = _residual_report(D*ps+V*qs, incident).relative_residual
+    _record_solve!(
+        reports, matrix, solution, rhs; mode = m, component = :curved_bem, parity,
+        mode_workers = workers, representation_residual, n_boundary = be.elements,
+        chief_points = size(V, 1)-n)
+    return _SpheroidSurfaceMode(be, ps, qs)
+end
+
+function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
+        incidence_angle, mode_threads, rtol, chief_points, reports, quadrature_extra::Integer = 0)
+    half = incidence_angle==pi/2 && iseven(nb)
+    split = !half && iseven(nb) && iseven(chief_points)
+    reduced = half || split
+    be = _spheroid_curved_boundary(
+        body.a, body.b, reduced ? div(nb, 2) : nb, degree+1; half = reduced)
+    full = split ? _spheroid_curved_boundary(body.a, body.b, nb, degree+1; half = false) :
+           be
+    groups = UnitRange{Int}[]
+    for m in modes
+        if isempty(groups) || m-first(last(groups))>=16
+            push!(groups, m:m)
+        else
+            groups[end] = first(last(groups)):m
+        end
+    end
+    for span in groups
+        selected = filter(m->m in span, modes)
+        exterior = _spheroid_curved_operators(be, k, span, Val(16), Val(degree+1);
+            rtol, split, quadrature_extra,
+            chief_points = split ? div(chief_points, 2) : chief_points)
+        interior = bc isa FluidFilled ?
+                   _spheroid_curved_operators(be,
+            k/bc.soundspeed_contrast, span, Val(16), Val(degree+1); rtol, split, quadrature_extra) :
+                   nothing
+        workers = min(mode_threads, Threads.nthreads(), length(selected))
+        @sync for worker in 1:workers
+            Threads.@spawn for index in worker:workers:length(selected)
+                m = selected[index]
+                j = m-first(span)+1
+                traces = map(split ? (1, -1) : (0,)) do parity
+                    offset = parity==-1 ? 2 : 0
+                    inner = interior===nothing ? nothing :
+                            (interior[offset + 1][j], interior[offset + 2][j])
+                    _spheroid_curved_bem_mode(
+                        be, bc, exterior[offset + 1][j], exterior[offset + 2][j],
+                        inner, k, m, incidence_angle, parity, reports, workers)
+                end
+                if split
+                    even, odd = traces
+                    fields[m + 1] = _SpheroidSurfaceMode(full,
+                        vcat(even.pressure+odd.pressure, reverse(even.pressure-odd.pressure)),
+                        vcat(even.derivative+odd.derivative, reverse(even.derivative-odd.derivative)))
+                else
+                    fields[m + 1] = only(traces)
+                end
+            end
+        end
+    end
+    return fields
+end
+
+function _spheroid_curved_bem(body, bc, k; incidence_angle, m_max,
+        boundary_order::Integer = 7, n::Union{Nothing, Integer} = nothing,
+        mode_threads::Integer = 1, rtol::Real = 1e-6, chief_points::Integer = 8,
+        quadrature_extra::Integer = 0,
+        adaptive::Bool = n===nothing, target_tol::Real = 0.01, max_refinements::Integer = 4)
+    isfinite(k) && k>0 && isfinite(incidence_angle) ||
+        throw(ArgumentError("positive finite k and finite incidence_angle are required"))
+    1<=boundary_order<=8 && m_max>=0 && mode_threads>=1 && chief_points>=1 ||
+        throw(ArgumentError("invalid curved BEM order, Fourier limit, thread count or CHIEF count"))
+    isfinite(rtol) && 0<rtol<1 && isfinite(target_tol) && target_tol>0 &&
+    max_refinements>=1 && quadrature_extra>=0 ||
+        throw(ArgumentError("invalid curved BEM quadrature or refinement controls"))
+    if bc isa FluidFilled
+        all(x->isfinite(x) && x>0, (bc.density_contrast, bc.soundspeed_contrast)) ||
+            throw(ArgumentError("fluid contrasts must be finite and positive"))
+    end
+    wave = bc isa FluidFilled ? max(k, k/bc.soundspeed_contrast) : k
+    nb = n===nothing ? max(32, 2ceil(Int, wave*body.a/(1.8*(boundary_order+1)))) : Int(n)
+    nb>=2 || throw(ArgumentError("n must be at least two"))
+    meshes = [nb]
+    for _ in 1:max_refinements
+        push!(meshes, 2ceil(Int, 2last(meshes)/3))
+    end
+    fields = Vector{_SpheroidSurfaceMode}(undef, m_max+1)
+    contributions = zeros(ComplexF64, m_max+1)
+    changes = fill(ComplexF64(Inf), m_max+1)
+    levels = fill(-1, m_max+1)
+    history = NamedTuple[]
+    reports = _SolveReports()
+    threshold_fraction = -expm1(-target_tol*log(10)/20)
+    while true
+        estimate = _spheroid_hp_ts_change(contributions, changes)
+        adaptive && estimate.change_db<=target_tol && break
+        available = findall(l->l<(adaptive ? max_refinements : 0), levels)
+        isempty(available) && break
+        selected = filter(i->estimate.weights[i]>threshold_fraction*estimate.scale/length(fields), available)
+        if isempty(selected)
+            exhausted = [levels[i]==max_refinements ? changes[i] : 0.0im
+                         for i in eachindex(changes)]
+            _spheroid_hp_ts_change(contributions, exhausted).change_db>target_tol && break
+            index = available[argmax(estimate.weights[available])]
+            iszero(estimate.weights[index]) && break
+            selected = [index]
+        end
+        for level in sort!(unique(levels[selected] .+ 1))
+            indices = filter(i->levels[i]+1==level, selected)
+            nb = meshes[level + 1]
+            _spheroid_curved_bem_level(
+                body, bc, k, nb, boundary_order, indices .- 1, fields;
+                incidence_angle, mode_threads, rtol, chief_points, reports, quadrature_extra)
+            for i in indices
+                value = _spheroid_curved_amplitude(
+                    fields[i], k, i-1, pi-incidence_angle, pi; quadrature_extra)
+                changes[i] = levels[i]<0 ? ComplexF64(Inf) : value-contributions[i]
+                contributions[i], levels[i] = value, level
+            end
+            push!(history,
+                (; n_boundary = nb, modes = indices .- 1,
+                    change_db = _spheroid_hp_ts_change(contributions, changes).change_db))
+        end
+    end
+    change_db = _spheroid_hp_ts_change(contributions, changes).change_db
+    if adaptive
+        _record_refinement!(reports, change_db<=target_tol, change_db,
+            target_tol, maximum(meshes[levels .+ 1]))
+        reports.refinement = merge(reports.refinement,
+            (; estimator = :fourier_ts_mesh_change,
+                history, mode_refinements = levels, mode_n_boundary = meshes[levels .+ 1]))
+        change_db<=target_tol || @warn "Curved BEM did not reach target_tol=$target_tol dB"
+    end
+    report = _summarize_solves(reports; method = :axisymmetric,
+        surface_geometry = :curved,
+        solver_options = (;
+            incidence_angle, m_max, boundary_order, n = maximum(meshes[levels .+ 1]),
+            mode_threads, rtol, chief_points, quadrature_extra, adaptive, target_tol, max_refinements),
+        representation_residual = maximum(r.representation_residual
+        for r in reports.systems))
+    return BEMSolution(body, bc, Float64(k), :axisymmetric,
+        _CurvedSpheroidBEMData(fields, Float64(incidence_angle), report))
+end

@@ -1,5 +1,47 @@
 using AcousticScattering, Test, SparseArrays, LinearAlgebra
 
+@testset "Explicit interface coupling and quadrature refinement" begin
+    body, bc, k = Spheroid(0.02, 0.015), FluidFilled(1.2, 0.85), 100.0
+    pairing = Coupling(interior = :fem, exterior = :bem)
+    @test_throws UndefKeywordError coupled(body, bc, k)
+    @test_throws ArgumentError fem(body, bc, k; method = :fem_bem)
+    @test_throws ArgumentError coupled(body, bc, k; coupling = pairing, method = :fem_bem)
+    @test_throws ArgumentError coupled(body, bc, k;
+        coupling = Coupling(interior = :bem, exterior = :fem))
+    @test_throws ArgumentError coupled(
+        body, bc, k; coupling = pairing, quadrature_extra = -1)
+    @test_throws ArgumentError fem(body, bc, k; order = 4, quadrature_extra = -1)
+    @test_throws ArgumentError bem(body, Rigid(), k; quadrature_extra = -1)
+    controls = (; incidence_angle = 0.6, m_max = 5, adaptive = false, mode_threads = 2)
+    values = ComplexF64[]
+    for extra in (0, 4, 8)
+        sol = coupled(body, bc, k; coupling = pairing, controls...,
+            order = 4, boundary_order = 5, n_r = 3, n_theta = 24,
+            n_boundary = 16, rtol = 1e-9, quadrature_extra = extra)
+        @test sol isa CoupledSolution
+        @test sol.coupling === pairing
+        @test diagnostics(sol).discretization === :coupled
+        @test diagnostics(sol).solver_options.quadrature_extra == extra
+        observations = [0.0, 0.7, pi/2]
+        sweep = bistatic_sweep(sol, observations; azimuth = 0.4)
+        @test sweep.amplitudes == [scattering_amplitude(sol; angle, azimuth = 0.4)
+               for angle in observations]
+        push!(values, scattering_amplitude(sol))
+    end
+    @test isapprox(values[2], values[3]; rtol = 1e-7, atol = 1e-11)
+    reference = fem(body, bc, k; controls..., order = 6, n_r = 8,
+        n_theta = 32, l_max = 14, retain_fields = false, quadrature_extra = 6)
+    @test isapprox(values[3], scattering_amplitude(reference); rtol = 3e-6, atol = 1e-11)
+    for boundary in (Rigid(), PressureRelease())
+        a = bem(body, boundary, k; controls..., n = 16, boundary_order = 5,
+            rtol = 1e-9, quadrature_extra = 4)
+        b = bem(body, boundary, k; controls..., n = 16, boundary_order = 5,
+            rtol = 1e-10, quadrature_extra = 8)
+        @test isapprox(scattering_amplitude(a), scattering_amplitude(b); rtol = 1e-7)
+        @test diagnostics(b).solver_options.quadrature_extra == 8
+    end
+end
+
 @testset "Modal mesh-change TS bound" begin
     AS=AcousticScattering
     for amplitude in (1.0+0im, 0.4+0.9im, -0.7-0.2im)
@@ -28,6 +70,24 @@ end
                                 l_max = 12)) for mesh in meshes]
             @test coefficients[2]≈coefficients[1] rtol=2e-9 atol=1e-12
             @test coefficients[3]≈coefficients[1] rtol=2e-9 atol=1e-12
+        end
+    end
+end
+
+@testset "Higher-order fluid condensation at oblique incidence" begin
+    AS = AcousticScattering
+    # Uncondensed equations independently check the reused Schur buffers and
+    # incident lifting across cells both on and away from the fluid interface.
+    for order in (2, 4, 6), boundary in (FluidFilled(1.2, 0.8), GasFilled(0.00129, 0.23))
+
+        meshes = [AS._spheroid_hp_geometry(boundary, 0.02, 0.015, 0.03,
+                      3, 12, order; condensed) for condensed in (false, true)]
+        for m in (0, 2)
+            direct, condensed = [AS._spheroid_hp_mode(mesh, boundary, 40.0, m, pi / 3;
+                                     l_max = 10, retain_fields = true) for mesh in meshes]
+            @test condensed[1]≈direct[1] rtol=2e-9 atol=1e-12
+            @test condensed[2].exterior≈direct[2].exterior rtol=2e-9 atol=1e-11
+            @test condensed[2].interior≈direct[2].interior rtol=2e-9 atol=1e-11
         end
     end
 end
@@ -163,5 +223,220 @@ const MERIDIAN_REFACTOR_AMPLITUDES = [
             append!(actual, pressure(sol, [(0.025, 0.0, 0.0), (0.0, 0.025, 0.0)]))
             @test actual≈MERIDIAN_REFACTOR_AMPLITUDES[3(shape - 1) + bc] rtol=1e-10 atol=1e-12
         end
+    end
+end
+
+@testset "Prolate FEM-BEM radiation and transmission" begin
+    AS = AcousticScattering
+    # Exact outgoing monopole and Cartesian dipole check the jump, outward
+    # derivative, Fourier normalization, reflection and far-field phase.
+    for half in (true, false)
+        be = AS._spheroid_curved_boundary(0.02, 0.015, half ? 8 : 16, 6; half)
+        k = 100.0
+        Ks, Vs = AS._spheroid_curved_operators(be, k, 0:1, Val(16), Val(6);
+            rtol = 1e-8, chief_points = 8)
+        r = hypot.(be.rho, be.z)
+        G = exp.(im*k .* r) ./ r
+        nr = (be.nrho .* be.rho+be.nz .* be.z) ./ r
+        pressures = [G, (im*k .- inv.(r)) .* G .* be.rho ./ r]
+        derivatives = [(im*k .- inv.(r)) .* G .* nr,
+            (-k^2 .- 3im*k ./ r .+ 3 ./ r .^ 2) .* G .* be.rho ./ r .* nr .+
+            (im*k .- inv.(r)) .* G .* be.nrho ./ r]
+        for m in 0:1
+            D = -Ks[m + 1]
+            for i in eachindex(r)
+                D[i, i] += 0.5
+            end
+            @test norm(D*pressures[m + 1]+Vs[m + 1]*derivatives[m + 1])/norm(pressures[m + 1]) <
+                  2e-6
+            field = AS._SpheroidSurfaceMode(be, pressures[m + 1], derivatives[m + 1])
+            for (theta, phi) in ((0.7, 0.4), (-0.7, 0.4), (1.3, 2.1))
+                exact = m==0 ? 1.0+0im : im*k*sin(theta)*cos(phi)
+                @test isapprox(AS._spheroid_curved_amplitude(field, k, m, theta, phi),
+                    exact; rtol = 1e-8, atol = 1e-9)
+            end
+        end
+    end
+    body, bc, k = Spheroid(0.02, 0.015), FluidFilled(1.2, 0.85), 100.0
+    for beta in (pi/2, 0.0, 0.6)
+        coupled_solution = coupled(
+            body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
+            incidence_angle = beta, m_max = 6,
+            n_r = 3, n_theta = 24, n_boundary = 16, order = 4, adaptive = false,
+            rtol = 1e-8, mode_threads = 2)
+        reference = fem(body, bc, k; order = 6, incidence_angle = beta, m_max = 6,
+            n_r = 8, n_theta = 32, l_max = 14, retain_fields = false)
+        for (theta, phi) in ((pi-beta, pi), (0.4, 0.7), (-0.4, 0.7))
+            @test isapprox(
+                scattering_amplitude(coupled_solution; angle = theta, azimuth = phi),
+                scattering_amplitude(reference; angle = theta, azimuth = phi); rtol = 2e-6, atol = 1e-11)
+        end
+        report = diagnostics(coupled_solution)
+        @test report.discretization===:coupled
+        @test report.relative_residual < 1e-10
+        @test report.representation_residual < 1e-7
+        @test report.equatorial_symmetry == (beta==pi/2)
+        @test report.equatorial_decomposition == (beta==pi/2 ? :even : :even_odd)
+        @test report.solver_options.retain_fields===false
+        @test length(report.systems)==(beta==pi/2 ? 7 : 14)
+        if beta != pi/2
+            # Compare the decomposition against the unreduced equations with
+            # the same partitions, modes, quadrature and CHIEF locations.
+            full = AS._spheroid_fembem_level(body, bc, k, 3, 24, 16, 4, 5;
+                half = false, incidence_angle = beta, m_max = 6, mode_threads = 2,
+                rtol = 1e-8, chief_points = 8, reports = AS._SolveReports(),
+                split_symmetry = false)
+            for (theta, phi) in ((pi-beta, pi), (0.4, 0.7), (2.3, 1.2))
+                expected = sum(AS._spheroid_curved_amplitude(
+                                   field, k, m-1, theta, phi)
+                for (m, field) in enumerate(full))
+                @test isapprox(
+                    scattering_amplitude(coupled_solution; angle = theta, azimuth = phi),
+                    expected; rtol = 1e-8, atol = 1e-11)
+            end
+            @test Set(system.parity for system in report.systems)==Set((-1, 1))
+        end
+        @test_throws ArgumentError pressure(coupled_solution, (0.03, 0.0, 0.0))
+        @test_throws ArgumentError scattering_amplitude(coupled_solution; angle = NaN)
+        if beta == 0.6
+            # Updating disjoint modes preserves the other traces and agrees
+            # with assembling the complete Fourier range on the same mesh.
+            subset = copy(coupled_solution.data.modes)
+            AS._spheroid_fembem_level(body, bc, k, 3, 24, 16, 4, 5;
+                half = false, incidence_angle = beta, m_max = 6, mode_threads = 2,
+                rtol = 1e-8, chief_points = 8, reports = AS._SolveReports(),
+                modes = [1, 4], fields = subset)
+            for m in 0:6
+                if m in (1, 4)
+                    @test isapprox(
+                        subset[m + 1].pressure, coupled_solution.data.modes[m + 1].pressure;
+                        rtol = 1e-8, atol = 1e-11)
+                else
+                    @test subset[m + 1] === coupled_solution.data.modes[m + 1]
+                end
+            end
+        end
+    end
+    for controls in ((; n_theta = 25, n_boundary = 16, chief_points = 8),
+        (; n_theta = 24, n_boundary = 15, chief_points = 8),
+        (; n_theta = 24, n_boundary = 16, chief_points = 7))
+        unreduced = coupled(
+            body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
+            incidence_angle = 0.6,
+            n_r = 3, order = 4, m_max = 4, adaptive = false, controls...)
+        @test diagnostics(unreduced).equatorial_decomposition===:none
+        @test length(diagnostics(unreduced).systems)==5
+        @test isfinite(target_strength(unreduced))
+    end
+    # Equal fluids have no scattered field, including near the spherical limit.
+    for a in (0.02, 0.01500015)
+        transparent = coupled(Spheroid(a, 0.015), FluidFilled(1.0, 1.0), 100.0;
+            coupling = Coupling(interior = :fem, exterior = :bem),
+            n_r = 4, n_theta = 24, n_boundary = 16, order = 5,
+            m_max = 5, adaptive = false, incidence_angle = 0.6, rtol = 1e-8)
+        @test abs(scattering_amplitude(transparent)) < 1e-8
+    end
+    # Near a spherical exterior Dirichlet irregular frequency, auxiliary
+    # interior constraints retain agreement with the exact fluid sphere.
+    near_sphere = coupled(Spheroid(1.00000001, 1.0), bc, pi;
+        coupling = Coupling(interior = :fem, exterior = :bem),
+        order = 6, n_r = 6, n_theta = 32, n_boundary = 24,
+        m_max = 10, rtol = 1e-8, adaptive = false, mode_threads = 2)
+    exact_sphere = modal(Sphere(1.0), bc, Float64(pi))
+    @test isapprox(scattering_amplitude(near_sphere),
+        scattering_amplitude(exact_sphere); rtol = 1e-6)
+    @test diagnostics(near_sphere).representation_residual < 1e-8
+    # A joint FE/BE refinement supplies a reported TS change without a modal answer.
+    refined = coupled(body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
+        n_r = 2, n_theta = 12, n_boundary = 8,
+        order = 4, m_max = 6, target_tol = 1e-7, rtol = 1e-8, mode_threads = 2)
+    refinement = diagnostics(refined).refinement
+    @test refinement.converged
+    @test length(refinement.history)>=2
+    @test refinement.change_db<=1e-7
+    @test last(refinement.history).n_boundary > first(refinement.history).n_boundary
+    @test last(refinement.history).n_r > first(refinement.history).n_r
+    @test last(refinement.history).n_theta > first(refinement.history).n_theta
+    @test length(refinement.mode_refinements) == 7
+    @test all(1 .<= refinement.mode_refinements .<= 4)
+    @test length(unique(refinement.mode_refinements)) > 1
+    uniform = coupled(body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
+        order = 4, m_max = 6,
+        n_r = maximum(refinement.mode_n_r), n_theta = maximum(refinement.mode_n_theta),
+        n_boundary = maximum(refinement.mode_n_boundary), adaptive = false,
+        rtol = 1e-8, mode_threads = 2)
+    @test abs(target_strength(uniform)-target_strength(refined)) < 0.01
+    limited = @test_logs (:warn, r"FEM-BEM did not reach target_tol") coupled(
+        body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
+        order = 3, n_r = 2, n_theta = 8, n_boundary = 6, m_max = 2,
+        target_tol = 1e-20, max_refinements = 1)
+    @test !diagnostics(limited).refinement.converged
+    @test abs(target_strength(refined)-target_strength(fem(body, bc, k;
+        order = 6, n_r = 8, n_theta = 32, m_max = 6, l_max = 14, retain_fields = false))) <
+          0.01
+    @test_throws ArgumentError coupled(
+        Spheroid(0.015, 0.02), bc, k; coupling = Coupling(interior = :fem, exterior = :bem))
+    @test_throws ArgumentError coupled(body, Rigid(), k; coupling = Coupling(interior = :fem, exterior = :bem))
+    for controls in ((; order = 1), (; boundary_order = 0), (; chief_points = 0), (;
+        rtol = 0.0),
+        (; n_r = 0), (; n_theta = 1), (; n_boundary = 1), (; m_max = -1), (;
+        mode_threads = 0),
+        (; retain_fields = true), (; dtn_form = :augmented), (; R = 0.05))
+        @test_throws ArgumentError coupled(
+            body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem), controls...)
+    end
+end
+
+@testset "Tensor FEM-BEM elimination" begin
+    AS = AcousticScattering
+    body = Spheroid(0.02, 0.015)
+    # Compare independent elimination orders of the same discrete weak form,
+    # including density-only and speed-only scattering and unreduced domains.
+    for (bc, beta, split) in ((FluidFilled(1.2, 0.85), 0.6, true),
+        (FluidFilled(1.2, 1.0), 0.6, true), (FluidFilled(1.0, 0.85), 0.6, true),
+        (FluidFilled(0.0012, 0.23), 0.6, true),
+        (FluidFilled(1.2, 0.85), pi/2, true), (FluidFilled(1.2, 0.85), 0.0, false))
+        options = (;
+            half = beta==pi/2, incidence_angle = beta, m_max = 4, mode_threads = 2,
+            rtol = 1e-8, chief_points = 8, split_symmetry = split)
+        original = AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+            options..., tensor = false, reports = AS._SolveReports())
+        reduced = AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+            options..., tensor = true, reports = AS._SolveReports())
+        for (old, new) in zip(original, reduced)
+            @test isapprox(new.pressure, old.pressure; rtol = 1e-8, atol = 1e-12)
+            @test isapprox(new.derivative, old.derivative; rtol = 1e-8, atol = 1e-10)
+        end
+    end
+    # A singular local interior block must not create an artificial pole.
+    stiffness = [2.0 1.0 0.0; 1.0 0.0 1.0; 0.0 1.0 3.0]
+    factor = (; stiffness, mass = zeros(3, 3), wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    load = ComplexF64[0.2, 0.3im, 0.4]
+    for m in (0, 1)
+        A = ComplexF64.(stiffness)
+        rhs = hcat(ComplexF64[0, 0, 1], load)
+        if m>0
+            A[1, :] .= 0
+            A[:, 1] .= 0
+            A[1, 1] = 1
+            rhs[1, :] .= 0
+        end
+        A[end, end] += 2im
+        actual = AS._spheroid_fembem_radial_response(
+            [factor], 2, m, 1.0, 1.0, 0.0, load, 2.0)
+        @test isapprox(actual, (A \ rhs)[end, :]; rtol = 1e-13)
+    end
+    # Interior spherical Dirichlet and Neumann frequencies remain regular
+    # transmission problems. Both are independent of exterior CHIEF checks.
+    bc = FluidFilled(1.2, 0.85)
+    for interior_ka in (pi, 4.493409457909064)
+        k = interior_ka*bc.soundspeed_contrast
+        numerical = coupled(Spheroid(1.00000001, 1.0), bc, k;
+            coupling = Coupling(interior = :fem, exterior = :bem),
+            order = 6, n_r = 6, n_theta = 32, n_boundary = 24, m_max = 10, rtol = 1e-8,
+            adaptive = false, incidence_angle = 0.6, mode_threads = 2)
+        exact = modal(Sphere(1.0), bc, k)
+        @test isapprox(scattering_amplitude(numerical), scattering_amplitude(exact); rtol = 1e-6)
+        @test diagnostics(numerical).relative_residual<1e-10
     end
 end

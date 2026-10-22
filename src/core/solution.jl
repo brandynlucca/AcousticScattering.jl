@@ -6,7 +6,7 @@
     AbstractSolution
 
 Supertype of results returned by [`modal`](@ref), [`tmatrix`](@ref), [`kirchhoff`](@ref), [`fem`](@ref),
-[`bem`](@ref) and [`mfs`](@ref). Query [`target_strength`](@ref),
+[`bem`](@ref), [`coupled`](@ref) and [`mfs`](@ref). Query [`target_strength`](@ref),
 [`scattering_amplitude`](@ref) and [`diagnostics`](@ref) where available.
 Construct solutions through their solver rather than their internal storage fields.
 

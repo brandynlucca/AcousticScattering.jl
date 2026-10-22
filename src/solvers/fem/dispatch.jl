@@ -36,6 +36,8 @@ Finite-element result, returns a [`FEMSolution`](@ref). Post-process with
   independently of `m_max` and `l_max`, and does not bound phase or bistatic error.
   `dtn_form=:augmented` keeps the outgoing modal boundary map rectangular instead
   of expanding its dense boundary block. The default remains `:assembled`.
+  `quadrature_extra=0` adds integration points for higher-order meridian FEM.
+  Increase it to check integration independently of the mesh and element order.
 
 - `:volume`: full-3D finite elements on curved order-2 tetrahedra. Covers `Sphere` and `Spheroid`
   with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries,
@@ -184,7 +186,8 @@ function fem(body::Spheroid, boundary::Union{Rigid, PressureRelease, FluidFilled
         method::Symbol = :meridian, R::Real = 1.2max(body.a, body.b), incidence_angle::Real = π /
                                                                                               2,
         m_max::Integer = _spheroid_meridian_default_mmax(body, boundary, k, incidence_angle),
-        mode_threads::Integer = 1, retain_fields::Bool = true, order::Integer = 1,
+        mode_threads::Integer = 1, retain_fields::Bool = true,
+        order::Integer = 1,
         dtn_form::Symbol = :assembled, kwargs...)
     if method === :volume
         mode_threads == 1 && retain_fields && order == 1 && dtn_form === :assembled ||
