@@ -469,11 +469,12 @@ const _MODE_CHUNK = 8
 include("ring_kernel.jl")
 
 # Nested integration needs distinct inner and outer segment buffers.
-function _bem_quadrature_workspace(modes, ::Val{N}) where {N}
+function _bem_quadrature_workspace(modes, ::Val{N}; maxlambda = 0.0) where {N}
     return (; breaks = zeros(max(cld(last(modes), 2) + 1, 2)),
         azimuthal = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
         meridian = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
-        modal = _ring_split_workspace(modes, Val(N)))
+        modal = _ring_split_workspace(modes, Val(N)),
+        convolution = _ring_convolution_workspace(modes, maxlambda))
 end
 
 # Fixed azimuthal rules and `cos(mΔφ)` tables for every order the assembly requests, built serially.
@@ -519,6 +520,9 @@ function _azimuthal_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, n�
         accepted, split = _ring_split_KV(k, ρ, z, ρ2, z2, nρ2, projection,
             modes, rtol, width, workspace.modal)
         accepted && return split
+        accepted, convolution = _ring_convolution_KV(k, ρ, z, ρ2, z2, nρ2, projection,
+            modes, rtol, width, workspace.convolution)
+        accepted && return convolution
     end
     val = _azimuthal_peak_quadrature(
         Δφ -> _ring_KV_modes(k, geometry, Δφ, m0, count, width),
@@ -1372,17 +1376,48 @@ function _spheroid_curved_boundary(a, b, elements, degree; half = true)
         nrho = a .* sin.(chi) ./ speed, nz = b .* cos.(chi) ./ speed)
 end
 
-function _spheroid_curved_operators(
+function _spheroid_curved_operators(boundary, k, modes, width::Val{N}, degree::Val{P};
+        rtol = 1e-8, chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0) where {
+        N, P}
+    cache = _numerical_reuse_context()
+    cache===nothing &&
+        return _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, chief_points, split, quadrature_extra)
+    split && !boundary.half &&
+        throw(ArgumentError("parity splitting requires a half boundary"))
+    key = (:curved_operators, boundary.a, boundary.b, boundary.elements, boundary.degree,
+        boundary.half, k, first(modes), last(modes), N, P, rtol, quadrature_extra)
+    # Physical boundary rows are shared even when illumination symmetry changes
+    # the number of CHIEF rows. Both reflection parities share the quadrature.
+    base = _reuse_numerical(cache, key) do
+        _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, split = boundary.half, quadrature_extra)
+    end
+    components = split ? 4 : 2
+    chief_points==0 && return ntuple(j->base[j], components)
+    chief = _reuse_numerical(cache, (:chief, key, chief_points)) do
+        _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, chief_points, split = boundary.half, quadrature_extra, chief_only = true)
+    end
+    return ntuple(components) do j
+        [vcat(base[j][m], chief[j][m]) for m in eachindex(base[j])]
+    end
+end
+
+function _spheroid_curved_operators_uncached(
         boundary, k, modes, ::Val{N}, ::Val{P}; rtol = 1e-8,
-        chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0) where {N, P}
+        chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0,
+        chief_only::Bool = false) where {N, P}
     a, b = boundary.a, boundary.b
     count, n = length(modes), length(boundary.chi)
     chief_angles = [(j-0.5)*last(boundary.edges)/chief_points for j in 1:chief_points]
-    target_chi = vcat(boundary.chi, chief_angles)
-    target_rho = vcat(boundary.rho, [0.72b*sin(t) for t in chief_angles])
-    target_z = vcat(boundary.z, [0.72a*cos(t) for t in chief_angles])
-    Ks = [zeros(ComplexF64, n+chief_points, n) for m in modes]
-    Vs = [zeros(ComplexF64, n+chief_points, n) for m in modes]
+    target_chi = vcat(chief_only ? Float64[] : boundary.chi, chief_angles)
+    target_rho = vcat(chief_only ? Float64[] : boundary.rho, [0.72b*sin(t)
+                                                              for t in chief_angles])
+    target_z = vcat(chief_only ? Float64[] : boundary.z, [0.72a*cos(t)
+                                                          for t in chief_angles])
+    Ks = [zeros(ComplexF64, length(target_chi), n) for m in modes]
+    Vs = [zeros(ComplexF64, length(target_chi), n) for m in modes]
     split && !boundary.half &&
         throw(ArgumentError("parity splitting requires a half boundary"))
     oddKs = split ? [zero(K) for K in Ks] : nothing
@@ -1401,7 +1436,8 @@ function _spheroid_curved_operators(
                                       (boundary.edges[e + 1]-boundary.edges[e])/2)
                       for (q, x) in enumerate(fixed_sources[e])]
                      for e in 1:boundary.elements]
-    _foreach_row(n+chief_points, () -> _bem_quadrature_workspace(modes, Val(N))) do i,
+    _foreach_row(length(target_chi),
+        () -> _bem_quadrature_workspace(modes, Val(N); maxlambda = abs(k*b))) do i,
     workspace
         target = target_chi[i]
         rho, z = target_rho[i], target_z[i]
@@ -1409,7 +1445,7 @@ function _spheroid_curved_operators(
             sr, sz = b*sin(source), a*cos(source)
             speed = hypot(a*sin(source), b*cos(source))
             normal = a*sin(source)/speed
-            projection = i<=n ? -2a*b*sin((target-source)/2)^2/speed :
+            projection = !chief_only && i<=n ? -2a*b*sin((target-source)/2)^2/speed :
                          normal*(rho-sr)+b*cos(source)/speed*(z-sz)
             if hypot(rho-sr, z-sz) >= 0.5sqrt(rho*sr)
                 geometry = _ring_geometry(rho, z, sr, sz, normal, projection)
@@ -1439,7 +1475,7 @@ function _spheroid_curved_operators(
                     end
                     return result
                 end
-                values = if i<=n && reflection==0 && left<target<right
+                values = if !chief_only && i<=n && reflection==0 && left<target<right
                     l = quadgk(t -> integrand(target-(target-left)*t^3)*3(target-left)*t^2,
                         0.0, 1.0; rtol, atol = 1e-13, maxevals = 10000)[1]
                     r = quadgk(
@@ -1508,7 +1544,8 @@ function _spheroid_curved_amplitude(field, k, m, theta, phi; quadrature_extra::I
 end
 
 function _spheroid_curved_bem_mode(
-        be, bc, K, V, interior, k, m, beta, parity, reports, workers)
+        be, bc, K, V, interior, k, m, beta, parity, reports,
+        workers; reuse = nothing, reuse_key = nothing)
     n = length(be.chi)
     D = -K
     for j in 1:n
@@ -1527,12 +1564,14 @@ function _spheroid_curved_bem_mode(
     if bc isa Rigid
         qs = -derivative
         matrix, rhs = D, -V*qs
-        ps = LinearAlgebra.qr(matrix)\rhs
+        ps = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
         solution = ps
     elseif bc isa PressureRelease
         ps = -incident
         matrix, rhs = V, -D*ps
-        qs = LinearAlgebra.qr(matrix)\rhs
+        qs = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
         solution = qs
     else
         Ki, Vi = interior
@@ -1545,7 +1584,8 @@ function _spheroid_curved_bem_mode(
         forcing = -(Ki-K[1:n, :])*incident+(bc.density_contrast*Vi-V[1:n, :])*derivative
         matrix = [D V; J -bc.density_contrast*Vi]
         rhs = vcat(zeros(ComplexF64, size(D, 1)), forcing)
-        solution = LinearAlgebra.qr(matrix)\rhs
+        solution = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
         ps, qs = solution[1:n], solution[(n + 1):end]
     end
     representation_residual = _residual_report(D*ps+V*qs, incident).relative_residual
@@ -1558,6 +1598,9 @@ end
 
 function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
         incidence_angle, mode_threads, rtol, chief_points, reports, quadrature_extra::Integer = 0)
+    reuse = _numerical_reuse_context()
+    reuse_key = (body.a, body.b, bc, k, nb, degree, rtol, chief_points,
+        quadrature_extra, incidence_angle==pi/2)
     half = incidence_angle==pi/2 && iseven(nb)
     split = !half && iseven(nb) && iseven(chief_points)
     reduced = half || split
@@ -1574,13 +1617,16 @@ function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
         end
     end
     for span in groups
+        span_key = (reuse_key, first(span), last(span))
         selected = filter(m->m in span, modes)
-        exterior = _spheroid_curved_operators(be, k, span, Val(16), Val(degree+1);
+        width = length(span)==1 ? Val(1) :
+                length(span)<=4 ? Val(4) : length(span)<=8 ? Val(8) : Val(16)
+        exterior = _spheroid_curved_operators(be, k, span, width, Val(degree+1);
             rtol, split, quadrature_extra,
             chief_points = split ? div(chief_points, 2) : chief_points)
         interior = bc isa FluidFilled ?
                    _spheroid_curved_operators(be,
-            k/bc.soundspeed_contrast, span, Val(16), Val(degree+1); rtol, split, quadrature_extra) :
+            k/bc.soundspeed_contrast, span, width, Val(degree+1); rtol, split, quadrature_extra) :
                    nothing
         workers = min(mode_threads, Threads.nthreads(), length(selected))
         @sync for worker in 1:workers
@@ -1593,7 +1639,8 @@ function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
                             (interior[offset + 1][j], interior[offset + 2][j])
                     _spheroid_curved_bem_mode(
                         be, bc, exterior[offset + 1][j], exterior[offset + 2][j],
-                        inner, k, m, incidence_angle, parity, reports, workers)
+                        inner, k, m, incidence_angle, parity, reports,
+                        workers; reuse, reuse_key = span_key)
                 end
                 if split
                     even, odd = traces

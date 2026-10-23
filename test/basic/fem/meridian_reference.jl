@@ -1,5 +1,31 @@
 using AcousticScattering, Test, SparseArrays, LinearAlgebra
 
+@testset "Banded angular FEM preserves the generalized eigenproblem" begin
+    AS = AcousticScattering
+    bc = FluidFilled(1.2, 0.85)
+    for p in (2, 5, 8), half in (false, true), m in (0, 3), parity in (0, -1)
+        mesh = AS._spheroid_fembem_confocal(bc, 0.07, 0.01, 3, 8, p;
+            half, assemble_bulk = false, quadrature_extra = 2)
+        k = 600.0
+        n = mesh.nt*p+1
+        A, B = zeros(n, n), zeros(n, n)
+        for (e, t) in enumerate(mesh.angular_factors)
+            ix = (e-1)*p .+ (1:(p + 1))
+            A[ix, ix] += t.stiffness+m^2*t.azimuthal-(k/bc.soundspeed_contrast)^2*t.wave
+            B[ix, ix] += t.mass
+        end
+        free = (m > 0 ? 2 : 1):(parity == -1 || (!half && m > 0) ? n - 1 : n)
+        result = AS._spheroid_fembem_angular(mesh, k, m, parity)
+        E = result.vectors[free, :]
+        eigenvalues = eigvals(Symmetric(A[free, free]), Symmetric(B[free, free]))
+        @test result.values ≈ eigenvalues rtol=1e-12
+        @test transpose(E)*B[free, free]*E ≈ I atol=2e-12
+        residual = A[free, free]*E-B[free, free]*E*Diagonal(result.values)
+        @test norm(residual) <= 2e-13*norm(A)*norm(E)
+        @test all(iszero, result.vectors[setdiff(1:n, free), :])
+    end
+end
+
 @testset "Explicit interface coupling and quadrature refinement" begin
     body, bc, k = Spheroid(0.02, 0.015), FluidFilled(1.2, 0.85), 100.0
     pairing = Coupling(interior = :fem, exterior = :bem)
@@ -57,6 +83,39 @@ end
     @test phase.change_db ≈ 10log10(1+0.01^2) atol=1e-14
     @test AS._spheroid_hp_ts_change([0.0im], [0.0im]).change_db==0.0
     @test isinf(AS._spheroid_hp_ts_change([0.0im], [0.01im]).change_db)
+end
+
+@testset "Independent FEM-BEM refinement directions" begin
+    AS = AcousticScattering
+    @test AS._spheroid_fembem_refinement_limits(3)==(3, 3, 3)
+    @test AS._spheroid_fembem_refinement_limits((radial = 2, angular = 3, boundary = 5))==(
+        2, 3, 5)
+    @test AS._spheroid_fembem_refinement_limits((boundary = 5, radial = 2, angular = 3))==(
+        2, 3, 5)
+    for invalid in (0, -1, 1.5, (2, 3, 4), (radial = 1, angular = 0, boundary = 4),
+        (radial = 2, boundary = 4), (radial = 1, angular = 2, boundary = 3, extra = 4))
+        @test_throws ArgumentError AS._spheroid_fembem_refinement_limits(invalid)
+    end
+    level=(2, 3, 4)
+    # Coordinate checks separate anisotropic errors and expose mixed terms
+    # that could otherwise cancel in a simultaneous mesh change.
+    f(r, t, b) = complex(2.0^-r+0.1*2.0^-t, 0.01*2.0^-b)+0.3im*2.0^(-r-t)
+    samples=Dict((r, t, b)=>f(r, t, b) for r in 1:2 for t in 2:3 for b in 3:4)
+    delta=AS._spheroid_fembem_directional_changes(samples, level)
+    @test delta[1]≈f(2, 3, 4)-f(1, 3, 4)
+    @test delta[2]≈f(2, 3, 4)-f(2, 2, 4)
+    @test delta[3]≈f(2, 3, 4)-f(2, 3, 3)
+    @test sum(delta)≈f(2, 3, 4)-f(1, 2, 3)
+    @test !iszero(delta[4])
+    @test AS._spheroid_fembem_mark_directions([1.0, 0.01, 0.001, 0.0], level, (5, 5, 5))==(
+        3, 3, 4)
+    @test AS._spheroid_fembem_mark_directions([1.0, 0.01, 0.001, 0.0], level, (2, 5, 5))==level
+    @test AS._spheroid_fembem_mark_directions([1.0, 0.9, 0.001, 0.0], level, (2, 5, 5))==(
+        2, 4, 4)
+    @test AS._spheroid_fembem_mark_directions([0.0, 0.0, 0.0, 1.0], level, (5, 5, 5))==(
+        3, 4, 5)
+    @test AS._spheroid_fembem_mark_directions(zeros(4), level, (5, 5, 5))==level
+    @test AS._spheroid_fembem_mark_directions(ones(4), level, level)==level
 end
 
 @testset "Higher-order spheroid condensation and reflection" begin
@@ -346,20 +405,28 @@ end
     @test isapprox(scattering_amplitude(near_sphere),
         scattering_amplitude(exact_sphere); rtol = 1e-6)
     @test diagnostics(near_sphere).representation_residual < 1e-8
-    # A joint FE/BE refinement supplies a reported TS change without a modal answer.
+    # Independent spatial changes and their interaction supply a reported TS
+    # change without a spheroidal modal answer.
     refined = coupled(body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
         n_r = 2, n_theta = 12, n_boundary = 8,
-        order = 4, m_max = 6, target_tol = 1e-7, rtol = 1e-8, mode_threads = 2)
+        order = 4, m_max = 6, target_tol = 1e-7, rtol = 1e-8, mode_threads = 2,
+        max_refinements = (radial = 4, angular = 4, boundary = 4))
     refinement = diagnostics(refined).refinement
     @test refinement.converged
     @test length(refinement.history)>=2
     @test refinement.change_db<=1e-7
-    @test last(refinement.history).n_boundary > first(refinement.history).n_boundary
-    @test last(refinement.history).n_r > first(refinement.history).n_r
-    @test last(refinement.history).n_theta > first(refinement.history).n_theta
+    @test maximum(refinement.mode_n_boundary)>first(refinement.history).n_boundary
+    @test maximum(refinement.mode_n_r)>first(refinement.history).n_r
+    @test maximum(refinement.mode_n_theta)>first(refinement.history).n_theta
     @test length(refinement.mode_refinements) == 7
     @test all(1 .<= refinement.mode_refinements .<= 4)
     @test length(unique(refinement.mode_refinements)) > 1
+    @test refinement.estimator===:directional_fourier_ts_mesh_change
+    @test size(refinement.directional_amplitude_changes)==(7, 3)
+    @test length(refinement.interaction_amplitude_changes)==7
+    for axis in (:radial, :angular, :boundary)
+        @test all(1 .<= getproperty(refinement.mode_refinements_by_axis, axis) .<= 4)
+    end
     uniform = coupled(body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
         order = 4, m_max = 6,
         n_r = maximum(refinement.mode_n_r), n_theta = maximum(refinement.mode_n_theta),
@@ -387,21 +454,113 @@ end
     end
 end
 
+@testset "Radial reduction preserves the complete FEM-BEM equations" begin
+    AS=AcousticScattering
+    body=Spheroid(0.02, 0.015)
+    for bc in (FluidFilled(1.2, 0.85), FluidFilled(1.0, 1.0), GasFilled(0.00129, 0.23)),
+        (beta, half, split) in ((0.6, false, true), (pi/2, true, true), (0.0, false, false))
+
+        options=(; half, incidence_angle = beta, m_max = 2, mode_threads = 2, rtol = 1e-9,
+            chief_points = 8, split_symmetry = split)
+        reference=AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+            options..., reports = AS._SolveReports(), tensor = false)
+        reports=AS._SolveReports()
+        radial=AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+            options..., reports, interior_reduction = :radial)
+        @test all(system->system.interior_reduction===:radial, reports.systems)
+        @test all(system->system.fem_relative_residual<=1e-9, reports.systems)
+        for (index, (old, new)) in enumerate(zip(reference, radial))
+            @test new.pressure≈old.pressure rtol=2e-9 atol=1e-12
+            @test new.derivative≈old.derivative rtol=2e-9 atol=1e-10
+            for (theta, phi) in ((pi-beta, pi), (0.3, 0.8), (2.1, 1.2))
+                @test AS._spheroid_curved_amplitude(new, 100.0, index-1, theta, phi)≈
+                AS._spheroid_curved_amplitude(old, 100.0, index-1, theta, phi) rtol=2e-9 atol=1e-12
+            end
+        end
+    end
+    bc=FluidFilled(1.2, 0.85)
+    mesh=AS._spheroid_fembem_confocal(
+        bc, body.a, body.b, 3, 8, 4; half = true, assemble_bulk = false)
+    be=AS._spheroid_curved_boundary(body.a, body.b, 8, 6; half = true)
+    T, B=AS._spheroid_fembem_trace(mesh, be)
+    K, V=AS._spheroid_curved_operators(
+        be, 100.0, 0:0, Val(1), Val(6); rtol = 1e-9, chief_points = 4)
+    reports=AS._SolveReports()
+    fallback=AS._spheroid_fembem_tensor_mode(
+        mesh, be, T, B, K[1], V[1], 100.0, 0, pi/2, reports, 1;
+        interior_reduction = :radial, radial_maxiter = 1)
+    @test only(reports.systems).interior_reduction===:tensor
+    @test only(reports.systems).radial_attempt.reason===:iteration
+    direct=AS._spheroid_fembem_tensor_mode(
+        mesh, be, T, B, K[1], V[1], 100.0, 0, pi/2, AS._SolveReports(), 1;
+        interior_reduction = :angular)
+    @test fallback.pressure≈direct.pressure rtol=1e-12
+    @test fallback.derivative≈direct.derivative rtol=1e-12
+    # An independently assembled Kronecker matrix checks the boundary inverse,
+    # with unrelated loads and repeated application through the same workspace.
+    for m in (0, 2), parity in (1, -1)
+
+        inverse=AS._spheroid_fembem_radial_inverse(mesh, 100.0, m, parity)
+        n=length(inverse.angular_free)
+        radial=complex.(Matrix(inverse.Ar))
+        radial[end, end]-=im*inverse.eta
+        complete=kron(radial, inverse.Mt)+kron(inverse.Mr, inverse.At)
+        workspace=zeros(ComplexF64, n, length(inverse.radial_free))
+        for phase in (0.3, 0.8, 0.3)
+            load=cis.(phase .* (1:n))
+            rhs=zeros(ComplexF64, size(complete, 1))
+            rhs[(end - n + 1):end]=load
+            expected=reshape(complete\rhs, n, :)[:, end]
+            actual=AS._spheroid_fembem_radial_apply!(zeros(ComplexF64, n), inverse, load, workspace)
+            @test actual≈expected rtol=2e-11 atol=1e-12
+        end
+    end
+    for interior_ka in (pi, 4.493409457909064)
+        k=interior_ka*bc.soundspeed_contrast
+        reports=AS._SolveReports()
+        modes=AS._spheroid_fembem_level(Spheroid(1.00000001, 1.0), bc, k, 6, 32, 24, 6, 5;
+            half = false, incidence_angle = 0.6, m_max = 10, mode_threads = 2, rtol = 1e-8,
+            chief_points = 8, reports, interior_reduction = :radial)
+        amplitude=sum(AS._spheroid_curved_amplitude(field, k, m-1, pi-0.6, pi)
+        for (m, field) in enumerate(modes))
+        @test amplitude≈scattering_amplitude(modal(Sphere(1.0), bc, k)) rtol=1e-6
+        @test all(system->system.interior_reduction===:radial, reports.systems)
+    end
+    fresh=[AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+               half = false, incidence_angle = beta, m_max = 2, mode_threads = 2, rtol = 1e-9,
+               chief_points = 8, reports = AS._SolveReports(), interior_reduction = :radial)
+           for beta in (0.6, -0.6, 0.6)]
+    cached=AS._with_numerical_reuse() do
+        [AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+             half = false, incidence_angle = beta, m_max = 2, mode_threads = 2, rtol = 1e-9,
+             chief_points = 8, reports = AS._SolveReports(), interior_reduction = :radial)
+         for beta in (0.6, -0.6, 0.6)]
+    end
+    for (reference, reused) in zip(fresh, cached), (old, new) in zip(reference, reused)
+
+        @test new.pressure≈old.pressure rtol=1e-12 atol=1e-14
+        @test new.derivative≈old.derivative rtol=1e-12 atol=1e-12
+    end
+end
+
 @testset "Tensor FEM-BEM elimination" begin
     AS = AcousticScattering
     body = Spheroid(0.02, 0.015)
     # Compare independent elimination orders of the same discrete weak form,
-    # including density-only and speed-only scattering and unreduced domains.
+    # including density-only and speed-only scattering, unreduced domains and
+    # both contraction orders for the independently sized FE/BE interfaces.
     for (bc, beta, split) in ((FluidFilled(1.2, 0.85), 0.6, true),
-        (FluidFilled(1.2, 1.0), 0.6, true), (FluidFilled(1.0, 0.85), 0.6, true),
-        (FluidFilled(0.0012, 0.23), 0.6, true),
-        (FluidFilled(1.2, 0.85), pi/2, true), (FluidFilled(1.2, 0.85), 0.0, false))
+            (FluidFilled(1.2, 1.0), 0.6, true), (FluidFilled(1.0, 0.85), 0.6, true),
+            (FluidFilled(0.0012, 0.23), 0.6, true),
+            (FluidFilled(1.2, 0.85), pi/2, true), (FluidFilled(1.2, 0.85), 0.0, false)),
+        (nt, nb) in ((24, 16), (48, 12))
+
         options = (;
             half = beta==pi/2, incidence_angle = beta, m_max = 4, mode_threads = 2,
             rtol = 1e-8, chief_points = 8, split_symmetry = split)
-        original = AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+        original = AS._spheroid_fembem_level(body, bc, 100.0, 3, nt, nb, 4, 5;
             options..., tensor = false, reports = AS._SolveReports())
-        reduced = AS._spheroid_fembem_level(body, bc, 100.0, 3, 24, 16, 4, 5;
+        reduced = AS._spheroid_fembem_level(body, bc, 100.0, 3, nt, nb, 4, 5;
             options..., tensor = true, reports = AS._SolveReports())
         for (old, new) in zip(original, reduced)
             @test isapprox(new.pressure, old.pressure; rtol = 1e-8, atol = 1e-12)
@@ -410,21 +569,28 @@ end
     end
     # A singular local interior block must not create an artificial pole.
     stiffness = [2.0 1.0 0.0; 1.0 0.0 1.0; 0.0 1.0 3.0]
-    factor = (; stiffness, mass = zeros(3, 3), wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    factor = (; stiffness, mass = Matrix(Diagonal([0.5, 1.0, 1.5])),
+        wave = zeros(3, 3), azimuthal = zeros(3, 3))
     load = ComplexF64[0.2, 0.3im, 0.4]
     for m in (0, 1)
-        A = ComplexF64.(stiffness)
-        rhs = hcat(ComplexF64[0, 0, 1], load)
-        if m>0
-            A[1, :] .= 0
-            A[:, 1] .= 0
-            A[1, 1] = 1
-            rhs[1, :] .= 0
+        base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, m, 1.0, 1.0, 2.0)
+        band, response = similar(base), zeros(ComplexF64, 3)
+        # Reuse the factorization storage at different shifts, then revisit the
+        # singular local block. Compare to two independent full-system loads.
+        for lambda in (0.0, 0.2, -0.3, 0.0)
+            A = ComplexF64.(stiffness+lambda*factor.mass)
+            rhs = hcat(ComplexF64[0, 0, 1], load)
+            if m>0
+                A[1, :] .= 0
+                A[:, 1] .= 0
+                A[1, 1] = 1
+                rhs[1, :] .= 0
+            end
+            A[end, end] += 2im
+            AS._spheroid_fembem_radial_map!(response, band, base, mass, 2, lambda)
+            actual = [response[end], sum(response .* load)]
+            @test isapprox(actual, (A \ rhs)[end, :]; rtol = 1e-13)
         end
-        A[end, end] += 2im
-        actual = AS._spheroid_fembem_radial_response(
-            [factor], 2, m, 1.0, 1.0, 0.0, load, 2.0)
-        @test isapprox(actual, (A \ rhs)[end, :]; rtol = 1e-13)
     end
     # Interior spherical Dirichlet and Neumann frequencies remain regular
     # transmission problems. Both are independent of exterior CHIEF checks.

@@ -1,5 +1,5 @@
-# Close-ring Helmholtz kernels: integrate the first three even Taylor terms
-# analytically in azimuth, leaving a smooth remainder for fixed quadrature.
+# Close-ring Helmholtz kernels: use Taylor subtraction at small k*r and
+# Fourier convolution at larger k*r, retaining adaptive quadrature as fallback.
 # Laplace Fourier coefficients are toroidal harmonics Q_{m-1/2}(1+d²/2).
 # With R=sqrt(rho*rho2), d=distance/R and s=r/R, q_m=∫₀^π cos(mφ)/s dφ.
 # Multiplication by s² gives the adjacent-mode differences for the s and s³
@@ -52,6 +52,118 @@ end
 end
 
 @inline _ring_q(q, m) = @inbounds q[abs(m) + 1]
+
+# Smooth Helmholtz factors convolved with toroidal harmonics. The factors grow
+# at most linearly with k*r, avoiding high Taylor powers. Their imaginary parts
+# are entire functions of squared distance and need no singular quadrature.
+function _ring_convolution_rule(order, modes)
+    points = max(2order, order+last(modes)+8)
+    angles = collect(range(0.0, pi; length = points+1))
+    weights = fill(inv(Float64(points)), points+1)
+    weights[[1, end]] ./= 2
+    transform = [cos(m*phi)*weights[j] for m in 0:order, (j, phi) in enumerate(angles)]
+    observations = [cos(m*phi)*weights[j] for m in modes, (j, phi) in enumerate(angles)]
+    return (; order, half_sines = sin.(angles ./ 2), transform, observations,
+        samples = zeros(points+1, 4), coefficients = zeros(order+1, 2), imaginary = zeros(length(modes), 2))
+end
+
+function _ring_convolution_workspace(modes, maxlambda)
+    8<maxlambda<=64 && 0<=first(modes)<=last(modes)<=128 && length(modes)>=6 ||
+        return nothing
+    order = max(16, ceil(Int, abs(maxlambda))+24)
+    return (;
+        maxlambda, q = zeros(last(modes)+order+20), normal = zeros(last(modes)+order+20),
+        coarse = _ring_convolution_rule(order, modes), fine = _ring_convolution_rule(order+16, modes))
+end
+
+@inline function _ring_convolution_integral(
+        q, normal, d, lambda, p, t, rinv, modes, ::Val{N}, rule) where {N}
+    @inbounds for j in eachindex(rule.half_sines)
+        s = rule.half_sines[j]
+        r = hypot(d, 2s)
+        x = lambda*r
+        sn, cs = sincos(x)
+        imaginaryK = abs(x)<1 ? imag(first(_ring_split_remainder(x))) : sn-x*cs
+        rule.samples[j, 1] = cs
+        rule.samples[j, 2] = cs+x*sn
+        rule.samples[j, 3] = sn/r
+        rule.samples[j, 4] = imaginaryK/r^3*(p-4t*s*s)
+    end
+    mul!(rule.coefficients, rule.transform, view(rule.samples, :, 1:2))
+    mul!(rule.imaginary, rule.observations, view(rule.samples, :, 3:4))
+    answer = MVector{2N, ComplexF64}(undef)
+    @inbounds for i in 1:2N
+        c = mod1(i, N)
+        if c>length(modes)
+            answer[i] = 0
+            continue
+        end
+        m = modes[c]
+        component = i<=N ? 2 : 1
+        moments = i<=N ? normal : q
+        value = rule.coefficients[1, component]*moments[m + 1]
+        @inbounds for l in 1:rule.order
+            value += rule.coefficients[l + 1, component]*(moments[abs(m - l) + 1]+moments[m + l + 1])
+        end
+        answer[i] = complex(value/pi, rule.imaginary[c, component])*(i<=N ? rinv^2 : rinv)/2
+    end
+    return SVector(answer)
+end
+
+function _ring_convolution_moments!(q, normal, d, p, t)
+    dsq = d*d
+    multiplier = p/dsq+t
+    if (length(q)-1)*d<=2
+        # Propagate adjacent differences as well as Q. This avoids subtracting
+        # nearly equal Q values when forming the normal-derivative moments.
+        root = hypot(d, 2.0)
+        K, E = _ring_elliptic_complement(d/root)
+        q[1] = 2K/root
+        normal[1] = multiplier*2E/root-t*q[1]
+        difference = dsq*q[1]/2-root*E
+        @inbounds for m in 1:(length(q) - 1)
+            q[m + 1] = q[m]+difference
+            H = (m-0.5)*(-difference-dsq*q[m + 1]/2)/(1+dsq/4)
+            normal[m + 1] = multiplier*H-t*q[m + 1]
+            difference = ((m-0.5)*difference+m*dsq*q[m + 1])/(m+0.5)
+        end
+        return 64length(q)
+    end
+    E = _ring_laplace_modes!(q, d)
+    @inbounds for m in 0:(length(q) - 1)
+        qm = q[m + 1]
+        H = m==0 ? 2E/hypot(d, 2.0) :
+            (m-0.5)*(q[m]-qm-dsq*qm/2)/(1+dsq/4)
+        normal[m + 1] = multiplier*H-t*qm
+    end
+    return 16length(q)^2
+end
+
+@inline function _ring_convolution_KV(k, rho, z, rho2, z2, normal, projection,
+        modes, rtol, width::Val{N}, scratch) where {N}
+    rejected = (false, zero(SVector{2N, ComplexF64}))
+    scratch===nothing && return rejected
+    rtol>=1e-7 || return rejected
+    radius, distance = sqrt(rho*rho2), hypot(rho-rho2, z-z2)
+    radius>0 && distance>=_RING_DISTANCE_FLOOR || return rejected
+    d, lambda = distance/radius, k*radius
+    0<d<=0.5 && abs(lambda)<=scratch.maxlambda || return rejected
+    p, t, rinv = projection/radius, normal*rho/(2radius), inv(radius)
+    propagation = _ring_convolution_moments!(scratch.q, scratch.normal, d, p, t)
+    fine = _ring_convolution_integral(
+        scratch.q, scratch.normal, d, lambda, p, t, rinv, modes, width, scratch.fine)
+    target = max(_QUAD_ATOL, rtol*norm(fine))
+    # Include arithmetic error in the moments and transforms. Refining the
+    # Fourier rule alone cannot reveal errors shared by both resolutions.
+    roundoff = eps(Float64) * propagation * scratch.q[1] * (1+abs(lambda)) *
+               max(rinv, (abs(p)/d^2+abs(t))*rinv^2)
+    all(isfinite, fine) && roundoff<=0.05target || return rejected
+    coarse = _ring_convolution_integral(
+        scratch.q, scratch.normal, d, lambda, p, t, rinv, modes, width, scratch.coarse)
+    norm(fine-coarse)<=0.05target || return rejected
+    return true, fine
+end
+
 @inline function _ring_r1(q, dsq, m)
     return (2 + dsq) * _ring_q(q, m) - _ring_q(q, m - 1) - _ring_q(q, m + 1)
 end

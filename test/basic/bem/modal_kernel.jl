@@ -51,6 +51,70 @@ using Test
         end
     end
     @test accepted >= 120
+    convolution_accepted = 0
+    for geometry in ((1.0, 1.0, 1e-6, 0.7, 0.0),
+            (1.0, 0.99, 0.03, -0.7, 0.006),
+            (1.0, 1.0, 0.3, 0.7, 0.03)),
+        ka in (12.0, 43.0, 60.0), modes in (0:15, 16:31, 48:63, 96:111)
+        rho, rho2, z2, normal, projection = geometry
+        expected = reference(ka, geometry..., modes, Val(16))
+        scratch = AS._ring_convolution_workspace(modes, ka)
+        for scale in (1e-3, 1.0, 1e3)
+            accepted_case, actual = AS._ring_convolution_KV(ka/scale, rho*scale, 0.0,
+                rho2*scale, z2*scale, normal, projection*scale, modes, 1e-6, Val(16), scratch)
+            accepted_case || continue
+            convolution_accepted += 1
+            scaled = SVector{32}(ntuple(i->expected[i]/(i<=16 ? scale^2 : scale), Val(32)))
+            @test norm(actual-scaled) <= 0.01max(AS._QUAD_ATOL, 1e-6norm(scaled))
+            @test all(isfinite, actual)
+        end
+    end
+    @test convolution_accepted >= 20
+end
+
+@testset "Convolution ring guards and quadrature rejection" begin
+    AS = AcousticScattering
+    for (modes, ka) in ((0:0, 40.0), (0:15, 0.0), (0:15, 65.0), (120:135, 40.0))
+        @test AS._ring_convolution_workspace(modes, ka) === nothing
+    end
+    modes, width = 0:15, Val(16)
+    workspace = AS._bem_quadrature_workspace(modes, width; maxlambda = 40.0)
+    args = (40.0, 1.0, 0.0, 1.0, 0.001, 0.7, 0.0, modes)
+    @test first(AS._ring_convolution_KV(args..., 1e-6, width, workspace.convolution))
+    @test !first(AS._ring_convolution_KV(args..., 1e-12, width, workspace.convolution))
+    workspace.convolution.coarse.transform .*= 2
+    @test !first(AS._ring_convolution_KV(args..., 1e-6, width, workspace.convolution))
+    geometry = AS._ring_geometry(1.0, 0.0, 1.0, 0.001, 0.7, 0.0)
+    f = phi -> AS._ring_KV_modes(40.0, geometry, phi, 0, 16, width)
+    expected = 2AS._azimuthal_peak_quadrature(f, 15, 1.0, 0.0, 1.0, 0.001,
+        1e-6, AS._QUAD_ATOL/2, workspace)
+    actual = AS._azimuthal_KV_modes(args..., false, nothing, 1e-6, width, workspace)
+    @test actual == expected
+    partial = 3:8
+    workspace = AS._bem_quadrature_workspace(partial, Val(8); maxlambda = 12.0)
+    accepted, result = AS._ring_convolution_KV(12.0, 1.0, 0.0, 1.0, 0.001,
+        0.7, 0.0, partial, 1e-6, Val(8), workspace.convolution)
+    @test accepted
+    @test all(iszero, result[[7, 8, 15, 16]])
+    integrand = phi->AS._ring_KV_modes(12.0, geometry, phi, 3, 6, Val(8))
+    reference = 2AS._azimuthal_peak_quadrature(integrand, 8, 1.0, 0.0, 1.0, 0.001,
+        1e-10, AS._QUAD_ATOL/2, workspace)
+    @test result ≈ reference rtol=1e-10
+end
+
+@testset "High-frequency curved operators against tighter direct quadrature" begin
+    AS = AcousticScattering
+    boundary = AS._spheroid_curved_boundary(0.02, 0.01, 4, 5; half = true)
+    # The tighter run falls outside the convolution eligibility and recomputes
+    # the original azimuthal integrals. Compare complete boundary and CHIEF rows.
+    accelerated = AS._spheroid_curved_operators(boundary, 1200.0, 0:7, Val(8), Val(5);
+        rtol = 1e-6, split = true, chief_points = 2)
+    direct = AS._spheroid_curved_operators(boundary, 1200.0, 0:7, Val(8), Val(5);
+        rtol = 1e-10, split = true, chief_points = 2)
+    for (left, right) in zip(accelerated, direct), (a, b) in zip(left, right)
+
+        @test norm(a-b) <= 2e-7norm(b)
+    end
 end
 
 @testset "Split ring eligibility and fallback preserve adaptive evaluation" begin

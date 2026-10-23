@@ -339,7 +339,9 @@ strength and complex amplitude. The callback supplies the fixed frequency and ma
 an ordinary solution or a [`components`](@ref) comparison.
 """
 function incidence_angle_sweep(solve::Function, angles::AbstractVector{<:Real})
-    ts, amplitudes, labels = _resolve_sweep(solve, angles)
+    ts, amplitudes, labels = _with_numerical_reuse() do
+        _resolve_sweep(solve, angles)
+    end
     return IncidenceAngleSweep(Float64.(angles), ts, amplitudes, labels)
 end
 
