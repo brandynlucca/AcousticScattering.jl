@@ -345,6 +345,82 @@ function incidence_angle_sweep(solve::Function, angles::AbstractVector{<:Real})
     return IncidenceAngleSweep(Float64.(angles), ts, amplitudes, labels)
 end
 
+# Each angle retains its own adaptive state. Rendezvous only at spatial solves
+# so common Fourier operators can be consumed before their bounded cache expires.
+function _coupled_angle_solutions(body, boundary, k, angles; on_solution = (i,s)->nothing, kwargs...)
+    _validate_incidence_sweep(angles, 0.0)
+    count=length(angles)
+    requests=Channel{Any}(count)
+    responses=[Channel{Any}(1) for _ in angles]
+    solutions=Vector{CoupledSolution}(undef,count)
+    cancelled=Ref(false)
+    tasks=map(eachindex(angles)) do index
+        @async try
+            solution=task_local_storage(:acousticscattering_fembem_batch,
+                (;requests,response=responses[index],index,cancelled)) do
+                coupled(body,boundary,k;incidence_angle=angles[index],kwargs...)
+            end
+            cancelled[] || put!(requests,(;index,solution))
+        catch exception
+            cancelled[] || put!(requests,(;index,exception))
+        end
+    end
+    active=trues(count)
+    try
+        while any(active)
+            pending=Any[]
+            for _ in 1:sum(active)
+                event=take!(requests)
+                if haskey(event,:exception)
+                    throw(event.exception)
+                elseif haskey(event,:solution)
+                    solutions[event.index]=event.solution
+                    active[event.index]=false
+                    on_solution(event.index,event.solution)
+                else
+                    push!(pending,event)
+                end
+            end
+            isempty(pending) && continue
+            results=_spheroid_fembem_level_batch(getproperty.(pending,:request))
+            for (event,result) in zip(pending,results)
+                put!(responses[event.index],result)
+            end
+        end
+    finally
+        # Release every suspended adaptive solve on errors, including callback
+        # failures. Buffered channels keep cleanup independent of task ordering.
+        cancelled[]=true
+        for response in responses
+            isready(response) || put!(response,InterruptException())
+        end
+        foreach(wait,tasks)
+    end
+    return solutions
+end
+
+"""
+    incidence_angle_sweep(coupled, body, boundary, k, angles; coupling,
+        return_diagnostics=false, kwargs...)
+
+Sample coupled FEM/BEM backscatter at incident polar `angles` in radians.
+Accepts the controls of [`coupled`](@ref). Stream common spatial operators
+across angles while retaining each angle's independent refinement and Fourier
+limit. Operator storage is bounded per Fourier component rather than retained
+for the entire sweep. With `return_diagnostics=true`, return
+`(; sweep, diagnostics)`, with one diagnostic report per angle.
+Angles on the same mesh share geometry. Different refinement meshes and
+concurrent Fourier workers require additional storage.
+"""
+function incidence_angle_sweep(::typeof(coupled), body::Spheroid,
+        boundary::FluidFilled, k::Real, angles::AbstractVector{<:Real};
+        return_diagnostics::Bool = false, kwargs...)
+    solutions=_coupled_angle_solutions(body,boundary,k,angles;kwargs...)
+    amplitudes=scattering_amplitude.(solutions)
+    sweep=IncidenceAngleSweep(Float64.(angles),target_strength.(amplitudes),amplitudes,["Scattered field"])
+    return return_diagnostics ? (;sweep,diagnostics=diagnostics.(solutions)) : sweep
+end
+
 function _validate_incidence_sweep(angles, incidence_azimuth)
     isempty(angles) && throw(ArgumentError("a sweep needs at least one sample"))
     all(isfinite, angles) || throw(ArgumentError("sweep coordinates must be finite"))

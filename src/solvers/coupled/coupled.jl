@@ -53,6 +53,12 @@ coordinate checks. These additional solves can cost more than joint refinement.
 changing mesh counts or polynomial degrees. Increase these controls separately
 and compare complex amplitudes. A mesh-change threshold is not an error bound.
 
+`interior_field=:scattered` approximates interior scattered pressure.
+`:total` approximates interior total pressure and uses boundary forcing instead
+of incident-field volume integration. Both return exterior scattered fields.
+The finite-element representations differ, so check their spatial convergence
+independently. Scattered pressure is preferable near matched fluid properties.
+
 Results retain far-field traces and support observation `angle` and `azimuth`.
 Pressure queries, `retain_fields`, exterior `R` and `dtn_form` are unsupported.
 """
@@ -65,7 +71,7 @@ function coupled(body::AbstractBody, boundary::AbstractBoundaryCondition, k::Rea
     body isa Spheroid && body.a>body.b && boundary isa FluidFilled || throw(ArgumentError(
         "interior FEM / exterior BEM requires a homogeneous FluidFilled prolate spheroid"))
     allowed=(:n_r, :n_theta, :n_boundary, :boundary_order,
-        :rtol, :chief_points, :quadrature_extra,
+        :rtol, :chief_points, :quadrature_extra, :interior_field,
         :adaptive, :target_tol, :max_refinements)
     all(key->key in allowed, keys(kwargs)) || throw(ArgumentError(
         "unsupported coupled controls: $(setdiff(collect(keys(kwargs)),collect(allowed)))"))
@@ -84,7 +90,7 @@ include("postprocessing.jl")
 # Interior confocal finite elements coupled to a curved exterior boundary integral.
 # This numerical coordinate map uses no spheroidal wave functions.
 function _spheroid_fembem_confocal(
-        boundary, a, b, nr, nt, p; half = true, assemble_bulk = true,
+        boundary, a, b, nr, nt, p; half = true, assemble_bulk = true, assemble_load = true,
         quadrature_extra::Integer = 0)
     # rho=b*s*sin(chi), z=sqrt(a^2-b^2+b^2*s^2)*cos(chi).
     # At s=0 the mesh reaches the focal segment, whose nodes remain distinct.
@@ -156,9 +162,9 @@ function _spheroid_fembem_confocal(
     axis_nodes = vcat([idx(1, j) for j in 1:ntn], [idx(i, 1) for i in 1:nrn])
     half || append!(axis_nodes, [idx(i, ntn) for i in 1:nrn])
     fixed = unique(map[axis_nodes])
-    load_basis = hcat([kron(first(bases[js]), first(bases[jt]))
-                       for jt in eachindex(q) for js in eachindex(q)]...)
-    load_points = Base.map(1:length(cells)) do e
+    load_basis = assemble_load ? hcat([kron(first(bases[js]), first(bases[jt]))
+                       for jt in eachindex(q) for js in eachindex(q)]...) : zeros(0, 0)
+    load_points = Base.map(1:(assemble_load ? length(cells) : 0)) do e
         er, et = mod1(e, nr), cld(e, nr)
         sl, sr = radial_edges[er:(er + 1)]
         tl, tr = angular_edges[et:(et + 1)]
@@ -634,19 +640,24 @@ function _spheroid_fembem_radial_operator(
         LinearAlgebra.lu(V)
     end
     exterior_map=factor\(D*pressure_map)
-    return (; inverse, rawD, rawV, pressure_map, flux_map, exterior_map)
+    return (; inverse, rawD, rawV, pressure_map, flux_map, exterior_map, factor, D)
 end
 
 function _spheroid_fembem_radial_mode(mesh, be, T, B, K, V, k, m, beta, reports, workers;
-        parity, load, reuse, reuse_key, exterior_key = nothing, maxiter = 300)
+        parity, load, reuse, reuse_key, exterior_key = nothing, maxiter = 300,
+        interior_field = :scattered)
     op=_reuse_numerical(reuse, (:fembem_radial_operator, reuse_key, m, parity==-1)) do
         _spheroid_fembem_radial_operator(
             mesh, be, T, B, K, V, k, m, parity; reuse, exterior_key)
     end
     op===nothing && return (; field = nothing, reason = :radial_eigensystem, iterations = 0)
     inverse=op.inverse
+    incident=[_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
+    parity==0 || (incident=(incident+parity*(-1)^m*conj(incident))/2)
+    driven_flux=interior_field===:total ? op.factor\(op.D*incident) : zeros(ComplexF64, length(be.chi))
     load=parity==0 ? load : (load+parity*(-1)^m*conj(load))/2
     source=load[inverse.angular_free, inverse.radial_free]
+    interior_field===:total && (source[:, end] += op.flux_map*driven_flux)
     transformed=source*inverse.E
     work=copy(transformed)
     _spheroid_fembem_radial_solve!(work, inverse)
@@ -670,11 +681,12 @@ function _spheroid_fembem_radial_mode(mesh, be, T, B, K, V, k, m, beta, reports,
     if !history.isconverged || !(residual.relative_residual<=1e-12)
         return (; field = nothing, reason = :iteration, iterations = history.iters)
     end
-    qs=-op.exterior_map*u
+    qs=driven_flux-op.exterior_map*u
     ps=op.pressure_map*u
+    interior_field===:total && (ps-=incident)
     # Reconstruct the volume field and check the original, unpreconditioned
     # finite-element equations, including the forcing and interface flux.
-    mul!(input, op.flux_map, qs)
+    mul!(input, op.flux_map, qs-driven_flux)
     mul!(mass_image, inverse.Mt, u)
     @. input-=im*inverse.eta*mass_image
     work .= transformed
@@ -684,22 +696,20 @@ function _spheroid_fembem_radial_mode(mesh, be, T, B, K, V, k, m, beta, reports,
     _spheroid_fembem_radial_solve!(work, inverse)
     interior=work*transpose(inverse.E)
     original_rhs=copy(source)
-    original_rhs[:, end] += op.flux_map*qs
+    original_rhs[:, end] += op.flux_map*(qs-driven_flux)
     original_residual=inverse.Mt*(interior*inverse.Ar)+inverse.At*(interior*inverse.Mr)-original_rhs
     fem_residual=_residual_report(original_residual, original_rhs)
     trace_residual=norm(interior[:, end]-u)/max(norm(u), floatmin(Float64))
     if !(fem_residual.relative_residual<=1e-9 && trace_residual<=1e-10)
         return (; field = nothing, reason = :original_equations, iterations = history.iters)
     end
-    incident=[_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
-    parity==0 || (incident=(incident+parity*(-1)^m*conj(incident))/2)
     representation_residual=_residual_report(op.rawD*ps+op.rawV*qs, incident).relative_residual
     _record_solve!(
         reports, operator, u, rhs; mode = m, component = :fem_bem, mode_workers = workers,
         method = :gmres, iterations = history.iters, converged = true,
         representation_residual, n_r = mesh.nr, n_theta = mesh.half ? 2mesh.nt : mesh.nt,
         n_boundary = be.elements, chief_points = size(op.rawV, 1)-length(be.chi), parity,
-        interior_reduction = :radial, interior_node_count = (mesh.nr*mesh.p+1)*(mesh.nt*mesh.p+1),
+        interior_reduction = :radial, interior_field, interior_node_count = (mesh.nr*mesh.p+1)*(mesh.nt*mesh.p+1),
         fem_relative_residual = fem_residual.relative_residual, trace_relative_residual = trace_residual,
         radial_eigen_residual = inverse.eigen_residual, radial_orthogonality = inverse.orthogonality)
     return (; field = _SpheroidSurfaceMode(be, ps, qs),
@@ -716,30 +726,48 @@ end
 # No analytical spheroidal functions or fitted modal data enter this reduction.
 function _spheroid_fembem_tensor_mode(
         mesh, be, T, B, K, V, k, m, beta, reports, workers; parity = 0,
-        load = _spheroid_fembem_tensor_load(mesh, be, B, k, m, beta), reuse = nothing, reuse_key = nothing,
-        interior_reduction = :auto, radial_maxiter = 300, exterior_key = nothing)
+        load = nothing, reuse = nothing, reuse_key = nothing,
+        interior_reduction = :auto, radial_maxiter = 300, exterior_key = nothing,
+        interior_field = :scattered)
+    interior_field in (:total, :scattered) || throw(ArgumentError("interior_field must be :total or :scattered"))
+    if load===nothing && interior_field===:scattered
+        load=_spheroid_fembem_tensor_load(mesh, be, B, k, m, beta)
+    end
     radial_attempt = nothing
     if interior_reduction===:radial ||
        (interior_reduction===:auto && _spheroid_fembem_use_radial(mesh))
+        if load===nothing
+            load=zeros(ComplexF64, mesh.nt*mesh.p+1, mesh.nr*mesh.p+1)
+            load[:, end]=B*[_dpdn_inc_mode(m, k, beta, r, z, nx, nz)
+                           for (r,z,nx,nz) in zip(be.rho,be.z,be.nrho,be.nz)]
+        end
         radial_attempt=_spheroid_fembem_radial_mode(
             mesh, be, T, B, K, V, k, m, beta, reports, workers;
-            parity, load, reuse, reuse_key, exterior_key, maxiter = radial_maxiter)
+            parity, load, reuse, reuse_key, exterior_key, maxiter = radial_maxiter, interior_field)
         radial_attempt.field===nothing || return radial_attempt.field
     end
     op = _reuse_numerical(reuse, (:fembem_operator, reuse_key, m, parity==-1)) do
         _spheroid_fembem_tensor_operator(
             mesh, be, T, B, K, V, k, m, parity; reuse, exterior_key)
     end
-    load = parity==0 ? load : (load+parity*(-1)^m*conj(load))/2
     incident = [_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
     parity==0 || (incident=(incident+parity*(-1)^m*conj(incident))/2)
-    transformed = transpose(op.E)*load
-    forcing = [sum(view(op.radial, :, j) .* view(transformed, j, :)) for j in axes(op.E, 2)]
+    forcing = if interior_field===:total
+        derivative=[_dpdn_inc_mode(m, k, beta, r, z, nx, nz)
+                    for (r,z,nx,nz) in zip(be.rho,be.z,be.nrho,be.nz)]
+        parity==0 || (derivative=(derivative+parity*(-1)^m*conj(derivative))/2)
+        op.beta_response .* (op.flux_map*derivative)
+    else
+        load = parity==0 ? load : (load+parity*(-1)^m*conj(load))/2
+        transformed = transpose(op.E)*load
+        [sum(view(op.radial, :, j) .* view(transformed, j, :)) for j in axes(op.E, 2)]
+    end
     particular = forcing[op.regular] ./ op.alpha[op.regular]
     exterior_forcing = op.regular_exterior===nothing ?
                        op.D*(op.pressure_map[:, op.regular]*particular) :
                        op.regular_exterior*particular
-    rhs = vcat(-exterior_forcing, forcing[op.retained])
+    rhs = vcat(interior_field===:total ? op.D*incident-exterior_forcing : -exterior_forcing,
+        forcing[op.retained])
     solution = op.factor\rhs
     nbe = length(be.chi)
     qs = solution[1:nbe]
@@ -747,35 +775,57 @@ function _spheroid_fembem_tensor_mode(
     coefficients[op.regular] = particular+op.response .* (op.flux_map[op.regular, :]*qs)
     coefficients[op.retained] = solution[(nbe + 1):end]
     ps = op.pressure_map*coefficients
+    interior_field===:total && (ps-=incident)
     representation_residual = _residual_report(op.rawD*ps+op.rawV*qs, incident).relative_residual
     _record_solve!(reports, op.matrix, solution, rhs; mode = m,
         component = :fem_bem, mode_workers = workers,
         representation_residual, n_r = mesh.nr, n_theta = mesh.half ? 2mesh.nt : mesh.nt, n_boundary = be.elements,
-        chief_points = size(op.rawV, 1)-nbe, parity, interior_reduction = :tensor,
+        chief_points = size(op.rawV, 1)-nbe, parity, interior_reduction = :tensor, interior_field,
         interior_node_count = (mesh.nr*mesh.p+1)*(mesh.nt*mesh.p+1), retained_angular_modes = length(op.retained),
         radial_attempt)
     return _SpheroidSurfaceMode(be, ps, qs)
 end
 
-function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_order;
+function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_order; kwargs...)
+    request=(; body, boundary, k, nr, nt, nb, order, boundary_order, kwargs...)
+    batch=get(task_local_storage(), :acousticscattering_fembem_batch, nothing)
+    if batch!==nothing
+        batch.cancelled[] && throw(InterruptException())
+        put!(batch.requests, (; index=batch.index, request))
+        response=take!(batch.response)
+        batch.cancelled[] && throw(InterruptException())
+        response isa Exception && throw(response)
+        return response
+    end
+    return only(_spheroid_fembem_level_batch([request]))
+end
+
+function _spheroid_fembem_level_setup(body, boundary, k, nr, nt, nb, order, boundary_order;
         half, incidence_angle, m_max, mode_threads, rtol, chief_points, reports,
         split_symmetry::Bool = true, tensor::Bool = true, modes = 0:m_max,
-        interior_reduction = :auto,
+        interior_reduction = :auto, interior_field = :scattered,
         operator_spans = nothing,
         quadrature_extra::Integer = 0,
+        geometry_cache = nothing,
         fields = Vector{_SpheroidSurfaceMode}(undef, m_max+1))
-    reuse = _numerical_reuse_context()
+    interior_field===:total && !tensor && throw(ArgumentError("total interior pressure requires tensor reduction"))
     split = split_symmetry && !half && iseven(nt) && iseven(nb) && iseven(chief_points)
     reduced = half || split
     reuse_key = (
         body.a, body.b, boundary.density_contrast, boundary.soundspeed_contrast, k,
         nr, nt, nb, order, boundary_order, half, split, rtol, chief_points, quadrature_extra)
-    be = _spheroid_curved_boundary(body.a, body.b, reduced ? div(nb, 2) : nb,
-        boundary_order+1; half = reduced)
-    mesh = _spheroid_fembem_confocal(boundary, body.a, body.b, nr,
-        reduced ? div(nt, 2) : nt, order; half = reduced, assemble_bulk = !tensor,
-        quadrature_extra)
-    T, B = _spheroid_fembem_trace(mesh, be)
+    function geometry()
+        be = _spheroid_curved_boundary(body.a, body.b, reduced ? div(nb, 2) : nb,
+            boundary_order+1; half = reduced)
+        mesh = _spheroid_fembem_confocal(boundary, body.a, body.b, nr,
+            reduced ? div(nt, 2) : nt, order; half = reduced, assemble_bulk = !tensor,
+            quadrature_extra, assemble_load = interior_field===:scattered)
+        T, B = _spheroid_fembem_trace(mesh, be)
+        (;be,mesh,T,B)
+    end
+    geometry_key=(body.a,body.b,boundary.density_contrast,boundary.soundspeed_contrast,
+        nr,nt,nb,order,boundary_order,reduced,tensor,quadrature_extra,interior_field)
+    (;be,mesh,T,B)=geometry_cache===nothing ? geometry() : get!(geometry,geometry_cache,geometry_key)
     full_boundary = split ?
                     _spheroid_curved_boundary(body.a, body.b, nb,
         boundary_order+1; half = false) : be
@@ -790,7 +840,29 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
         end
     end
     operator_spans===nothing || (groups=operator_spans)
-    for span in groups
+    return (;body,boundary,k,nr,nt,nb,order,boundary_order,half,incidence_angle,m_max,
+        rtol,chief_points,reports,tensor,interior_reduction,interior_field,quadrature_extra,
+        fields,modes,split,reuse_key,be,mesh,T,B,full_boundary,workers,groups)
+end
+
+function _spheroid_fembem_level_batch(requests)
+    geometry_cache=length(requests)==1 ? nothing : Dict{Any,Any}()
+    setups=map(requests) do request
+        (;body,boundary,k,nr,nt,nb,order,boundary_order)=request
+        options=Base.structdiff(request,(;body,boundary,k,nr,nt,nb,order,boundary_order))
+        _spheroid_fembem_level_setup(body,boundary,k,nr,nt,nb,order,boundary_order;options...,geometry_cache)
+    end
+    # Keep each angle's requested meshes, Fourier indices and quadrature spans.
+    # Stream a common span across angles before moving to the next one.
+    spans=unique(vcat(getproperty.(setups,:groups)...))
+    inherited_reuse=_numerical_reuse_context()
+    for span in spans
+        selected_setups=filter(setup->span in setup.groups,setups)
+        span_reuse=length(requests)==1 ? inherited_reuse : _NumericalReuse(retain_prefix=false)
+        prepared=task_local_storage(:acousticscattering_numerical_reuse,span_reuse) do
+          map(selected_setups) do setup
+            (;body,boundary,k,nb,boundary_order,half,split,rtol,chief_points,
+                quadrature_extra,reuse_key,be,modes)=setup
         span_key = (reuse_key, first(span), last(span))
         exterior_key=(
             body.a, body.b, k, nb, boundary_order, half, split, rtol, chief_points,
@@ -801,17 +873,31 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
         operators = _spheroid_curved_operators(be, k, span, width,
             Val(boundary_order+1); rtol, split, quadrature_extra,
             chief_points = split ? div(chief_points, 2) : chief_points)
-        Ks, Vs = operators[1:2]
+            (;setup,span_key,exterior_key,selected,operators)
+          end
+        end
+        selected=sort!(unique(vcat(getproperty.(prepared,:selected)...)))
+        workers=maximum(s.workers for s in selected_setups)
         # Bound simultaneous factorizations independently of BEM row assembly.
         active_workers = min(workers, length(selected))
         @sync for worker in 1:active_workers
             Threads.@spawn for index in worker:active_workers:length(selected)
                 m = selected[index]
+                # One component's factors serve all requested incident fields,
+                # including the common even interior for broadside and oblique.
+                reuse=length(requests)==1 ? inherited_reuse : _NumericalReuse(retain_prefix=false)
+                for item in prepared
+                    m in item.selected || continue
+                    (;setup,span_key,exterior_key,operators)=item
+                    (;body,boundary,k,nb,boundary_order,half,split,rtol,chief_points,
+                        quadrature_extra,be,mesh,T,B,fields,tensor,incidence_angle,
+                        reports,interior_reduction,interior_field,full_boundary)=setup
+                    Ks,Vs=operators[1:2]
                 operator_index = m-first(span)+1
                 if split
                     bulk = tensor ? nothing :
                            _spheroid_fembem_bulk(mesh, k, m, incidence_angle)
-                    load = tensor ?
+                    load = tensor && interior_field===:scattered ?
                            _spheroid_fembem_tensor_load(
                         mesh, be, B, k, m, incidence_angle) : nothing
                     even = tensor ?
@@ -819,7 +905,7 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
                         mesh, be, T, B, Ks[operator_index], Vs[operator_index],
                         k, m, incidence_angle, reports, active_workers;
                         parity = 1, load, reuse, reuse_key = span_key,
-                        interior_reduction, exterior_key) :
+                        interior_reduction, exterior_key, interior_field) :
                            _spheroid_fembem_mode(
                         mesh, be, T, B, Ks[operator_index], Vs[operator_index],
                         k, m, incidence_angle, reports, active_workers; parity = 1, bulk)
@@ -829,7 +915,7 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
                         operators[4][operator_index],
                         k, m, incidence_angle, reports, active_workers;
                         parity = -1, load, reuse, reuse_key = span_key,
-                        interior_reduction, exterior_key) :
+                        interior_reduction, exterior_key, interior_field) :
                           _spheroid_fembem_mode(mesh, be, T, B,
                         operators[3][operator_index],
                         operators[4][operator_index], k, m, incidence_angle,
@@ -846,15 +932,16 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
                                     _spheroid_fembem_tensor_mode(
                         mesh, be, T, B, Ks[operator_index], Vs[operator_index],
                         k, m, incidence_angle, reports, active_workers;
-                        reuse, reuse_key = span_key, interior_reduction, exterior_key) :
+                        reuse, reuse_key = span_key, interior_reduction, exterior_key, interior_field) :
                                     _spheroid_fembem_mode(
                         mesh, be, T, B, Ks[operator_index],
                         Vs[operator_index], k, m, incidence_angle, reports, active_workers)
                 end
+                end
             end
         end
     end
-    return fields
+    return getproperty.(setups,:fields)
 end
 
 function _spheroid_fembem_refinement_limits(value)
@@ -915,7 +1002,8 @@ end
 
 function _spheroid_fembem_directional(body, boundary, k, initial, limits;
         half, incidence_angle, m_max, mode_threads, order, boundary_order,
-        rtol, chief_points, reports, quadrature_extra, target_tol, separate = true)
+        rtol, chief_points, reports, quadrature_extra, target_tol, separate = true,
+        interior_field = :scattered)
     counts = map(1:3) do d
         sizes = [initial[d]]
         for _ in 1:limits[d]
@@ -958,7 +1046,7 @@ function _spheroid_fembem_directional(body, boundary, k, initial, limits;
             trial = _spheroid_fembem_level(
                 body, boundary, k, nr, nt, nb, order, boundary_order;
                 half, incidence_angle, m_max, mode_threads, rtol, chief_points, reports,
-                quadrature_extra, modes = indices .- 1,
+                quadrature_extra, interior_field, modes = indices .- 1,
                 operator_spans = request.span===nothing ? nothing : [request.span])
             for index in indices
                 values[index][mesh_level] = _spheroid_curved_amplitude(
@@ -1044,7 +1132,9 @@ function _spheroid_fembem(body, boundary, k;
         n_r::Union{Nothing, Integer} = nothing, n_theta::Union{Nothing, Integer} = nothing,
         n_boundary::Union{Nothing, Integer} = nothing, boundary_order::Integer = 5,
         rtol::Real = 1e-6, chief_points::Integer = 8, quadrature_extra::Integer = 0,
-        adaptive::Bool = true, target_tol::Real = 0.01, max_refinements = 4)
+        adaptive::Bool = true, target_tol::Real = 0.01, max_refinements = 4,
+        interior_field::Symbol = :scattered)
+    interior_field in (:total, :scattered) || throw(ArgumentError("interior_field must be :total or :scattered"))
     body.a > body.b ||
         throw(ArgumentError("interior FEM / exterior BEM requires a prolate spheroid (a > b)"))
     isfinite(k) && k>0 || throw(ArgumentError("wavenumber must be finite and positive"))
@@ -1079,7 +1169,7 @@ function _spheroid_fembem(body, boundary, k;
         function refine()
             _spheroid_fembem_directional(body, boundary, k, (nr, nt, nb), limits;
                 half, incidence_angle, m_max, mode_threads, order, boundary_order,
-                rtol, chief_points, reports, quadrature_extra, target_tol, separate)
+                rtol, chief_points, reports, quadrature_extra, target_tol, separate, interior_field)
         end
         # Separate checks revisit exterior and interior operators. Joint
         # refinement advances every mesh count, so a standalone solve has
@@ -1090,14 +1180,14 @@ function _spheroid_fembem(body, boundary, k;
     else
         _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_order;
             half, incidence_angle, m_max, mode_threads, rtol, chief_points, reports,
-            quadrature_extra)
+            quadrature_extra, interior_field)
     end
     report = _summarize_solves(reports; method = :coupled,
         coupling = (; interior = coupling.interior, exterior = coupling.exterior),
         solver_options = (;
             incidence_angle, m_max, mode_threads, order, n_r = nr, n_theta = nt,
             n_boundary = nb, boundary_order, rtol, chief_points, quadrature_extra, adaptive, target_tol,
-            max_refinements, retain_fields = false), equatorial_symmetry = half,
+            max_refinements, interior_field, retain_fields = false), equatorial_symmetry = half,
         equatorial_decomposition = half ? :even :
                                    iseven(nt) && iseven(nb) && iseven(chief_points) ?
                                    :even_odd : :none,
