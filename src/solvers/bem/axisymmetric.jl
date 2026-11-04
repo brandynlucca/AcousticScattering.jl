@@ -1621,6 +1621,17 @@ function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
         selected = filter(m->m in span, modes)
         width = length(span)==1 ? Val(1) :
                 length(span)<=4 ? Val(4) : length(span)<=8 ? Val(8) : Val(16)
+        # A matching Fourier span retains completed traces and solve diagnostics.
+        mode_cache = _mode_solution_reuse_context()
+        result_key = mode_cache === nothing || reports === nothing ? nothing :
+            (:bem, typeof((body, bc, k, rtol, incidence_angle)), body.a, body.b, bc,
+                k, nb, degree, incidence_angle, mode_threads, Threads.nthreads(),
+                rtol, chief_points, quadrature_extra, first(span), last(span), width,
+                Tuple(selected))
+        if result_key !== nothing && _restore_mode_solutions!(mode_cache, result_key, fields, reports)
+            continue
+        end
+        report_start = result_key === nothing ? 0 : length(reports.systems)
         exterior = _spheroid_curved_operators(be, k, span, width, Val(degree+1);
             rtol, split, quadrature_extra,
             chief_points = split ? div(chief_points, 2) : chief_points)
@@ -1652,6 +1663,8 @@ function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
                 end
             end
         end
+        result_key === nothing ||
+            _store_mode_solutions!(mode_cache, result_key, selected, fields, reports, report_start)
     end
     return fields
 end

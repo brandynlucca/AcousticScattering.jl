@@ -6,6 +6,59 @@ end
 
 _SolveReports() = _SolveReports(NamedTuple[], ReentrantLock(), nothing)
 
+
+# Reuse completed mode solutions only within one explicitly scoped calculation.
+mutable struct _ModeSolutionReuse
+    entries::Dict{Any,Any}
+    bytes::Int
+    limit::Int
+    hits::Int
+    modes_reused::Int
+    lock::ReentrantLock
+end
+_ModeSolutionReuse(limit::Integer) =
+    _ModeSolutionReuse(Dict{Any,Any}(), 0, Int(limit), 0, 0, ReentrantLock())
+_mode_solution_reuse_context() =
+    get(task_local_storage(), :acousticscattering_mode_solution_reuse, nothing)
+
+function _with_mode_solution_reuse(f; max_bytes::Integer = 16*1024^2)
+    max_bytes >= 0 || throw(ArgumentError("mode solution cache budget must be nonnegative"))
+    _mode_solution_reuse_context() === nothing || return f()
+    max_bytes == 0 && return f()
+    return task_local_storage(f, :acousticscattering_mode_solution_reuse,
+        _ModeSolutionReuse(max_bytes))
+end
+
+function _restore_mode_solutions!(cache::_ModeSolutionReuse, key, fields, reports)
+    saved = lock(cache.lock) do
+        value = get(cache.entries, key, nothing)
+        value === nothing && return nothing
+        cache.hits += 1
+        cache.modes_reused += length(value.modes)
+        # Returned solutions cannot mutate retained results or another solution.
+        deepcopy(value)
+    end
+    saved === nothing && return false
+    for (mode, field) in zip(saved.modes, saved.fields)
+        fields[mode + 1] = field
+    end
+    append!(reports.systems, saved.systems)
+    return true
+end
+
+function _store_mode_solutions!(cache::_ModeSolutionReuse, key, modes, fields, reports, start)
+    value = (; modes = Tuple(modes), fields = [fields[m + 1] for m in modes],
+        systems = reports.systems[start + 1:end])
+    bytes = Base.summarysize((key, value))
+    lock(cache.lock) do
+        haskey(cache.entries, key) && return
+        bytes <= cache.limit - cache.bytes || return
+        cache.entries[key] = deepcopy(value)
+        cache.bytes += bytes
+    end
+    return nothing
+end
+
 # A sweep owns its cache. No operator is reused at a different frequency.
 # Bound retained storage so refinement at one angle cannot accumulate all of
 # its fine-grid operators while the remaining angles wait.

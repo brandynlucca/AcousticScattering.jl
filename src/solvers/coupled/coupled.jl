@@ -858,6 +858,28 @@ function _spheroid_fembem_level_batch(requests)
     inherited_reuse=_numerical_reuse_context()
     for span in spans
         selected_setups=filter(setup->span in setup.groups,setups)
+        # Retain exact single-request spans without changing multi-angle batching.
+        mode_cache = _mode_solution_reuse_context()
+        result_key = nothing
+        report_start = 0
+        if mode_cache !== nothing && length(requests) == 1
+            setup = only(selected_setups)
+            modes = filter(m -> m in span, setup.modes)
+            if setup.reports !== nothing
+                result_key = (:coupled,
+                    typeof((setup.body, setup.boundary, setup.k, setup.rtol, setup.incidence_angle)),
+                    setup.body.a, setup.body.b, setup.boundary, setup.k, setup.nr, setup.nt,
+                    setup.nb, setup.order, setup.boundary_order, setup.half,
+                    setup.incidence_angle, setup.workers, Threads.nthreads(), setup.rtol,
+                    setup.chief_points, setup.tensor, setup.interior_reduction,
+                    setup.interior_field, setup.quadrature_extra, setup.split,
+                    first(span), last(span), Tuple(modes))
+                if _restore_mode_solutions!(mode_cache, result_key, setup.fields, setup.reports)
+                    continue
+                end
+                report_start = length(setup.reports.systems)
+            end
+        end
         span_reuse=length(requests)==1 ? inherited_reuse : _NumericalReuse(retain_prefix=false)
         prepared=task_local_storage(:acousticscattering_numerical_reuse,span_reuse) do
           map(selected_setups) do setup
@@ -939,6 +961,11 @@ function _spheroid_fembem_level_batch(requests)
                 end
                 end
             end
+        end
+        if result_key !== nothing
+            setup = only(selected_setups)
+            modes = filter(m -> m in span, setup.modes)
+            _store_mode_solutions!(mode_cache, result_key, modes, setup.fields, setup.reports, report_start)
         end
     end
     return getproperty.(setups,:fields)
