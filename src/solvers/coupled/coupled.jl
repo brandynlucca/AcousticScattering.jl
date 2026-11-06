@@ -87,14 +87,72 @@ include("shell_fluid.jl")
 include("free_surface.jl")
 include("postprocessing.jl")
 
-# Interior confocal finite elements coupled to a curved exterior boundary integral.
-# This numerical coordinate map uses no spheroidal wave functions.
+# Store separable confocal geometry for reusable load-point buffers.
+struct _SpheroidFEMLoadPoints <: AbstractVector{Matrix{Float64}}
+    radial::Array{Float64, 3}
+    angular::Array{Float64, 3}
+    radial_widths::Vector{Float64}
+    angular_widths::Vector{Float64}
+    weights::Vector{Float64}
+    focal::Float64
+    b::Float64
+end
+
+Base.size(points::_SpheroidFEMLoadPoints) =
+    (length(points.radial_widths)*length(points.angular_widths),)
+Base.IndexStyle(::Type{_SpheroidFEMLoadPoints}) = IndexLinear()
+
+function _spheroid_fembem_load_points!(out, points::_SpheroidFEMLoadPoints, e)
+    @boundscheck checkbounds(points, e)
+    nq, nr = length(points.weights), length(points.radial_widths)
+    size(out)==(3, nq^2) || throw(DimensionMismatch("load point buffer dimensions differ"))
+    er, et = mod1(e, nr), cld(e, nr)
+    b, focal = points.b, points.focal
+    @inbounds for jt in 1:nq, js in 1:nq
+        radial, aa = points.radial[1, js, er], points.radial[2, js, er]
+        sine, cosine = points.angular[1, jt, et], points.angular[2, jt, et]
+        j = (jt-1)*nq+js
+        out[1, j] = b*radial*sine
+        out[2, j] = aa*cosine
+        out[3, j] = b^2*radial/aa * (focal^2*sine^2+b^2*radial^2) *
+                    sine * points.weights[js] * points.weights[jt] *
+                    points.radial_widths[er] * points.angular_widths[et]/4
+    end
+    return out
+end
+
+function Base.getindex(points::_SpheroidFEMLoadPoints, e::Int)
+    out = Matrix{Float64}(undef, 3, length(points.weights)^2)
+    return _spheroid_fembem_load_points!(out, points, e)
+end
+
+_spheroid_fembem_load_points!(out, points::AbstractVector, e) =
+    copyto!(out, points[e])
+
+function _spheroid_fembem_load_points(radial_edges, angular_edges, q, w, focal, b)
+    nr, nt = length(radial_edges)-1, length(angular_edges)-1
+    radial = Array{Float64}(undef, 2, length(q), nr)
+    angular = Array{Float64}(undef, 2, length(q), nt)
+    for er in 1:nr, js in eachindex(q)
+        sl, sr = radial_edges[er], radial_edges[er+1]
+        r = (sl+sr)/2+(sr-sl)*q[js]/2
+        radial[1, js, er] = r
+        radial[2, js, er] = hypot(focal, b*r)
+    end
+    for et in 1:nt, jt in eachindex(q)
+        tl, tr = angular_edges[et], angular_edges[et+1]
+        theta = (tl+tr)/2+(tr-tl)*q[jt]/2
+        angular[1, jt, et] = sin(theta)
+        angular[2, jt, et] = cos(theta)
+    end
+    return _SpheroidFEMLoadPoints(radial, angular, diff(radial_edges),
+        diff(angular_edges), w, focal, b)
+end
+
 function _spheroid_fembem_confocal(
         boundary, a, b, nr, nt, p; half = true, assemble_bulk = true, assemble_load = true,
         quadrature_extra::Integer = 0)
-    # rho=b*s*sin(chi), z=sqrt(a^2-b^2+b^2*s^2)*cos(chi).
-    # At s=0 the mesh reaches the focal segment, whose nodes remain distinct.
-    # Its natural condition applies to m=0, while nonzero modes vanish there.
+    # The confocal origin is a focal segment with natural m=0 and zero higher-mode conditions.
     focal = sqrt((a-b)*(a+b))
     nrn, ntn = nr*p+1, nt*p+1
     idx(i, j) = (i-1)*ntn+j
@@ -107,9 +165,7 @@ function _spheroid_fembem_confocal(
     bases = [_spheroid_hp_basis(p, x) for x in q]
     nloc = (p+1)^2
     cells = _SpheroidFEMElement[]
-    # The orthogonal confocal metric separates into radial and angular factors.
-    # Form the same tensor-product quadrature with one-dimensional integrals.
-    # This avoids repeating an O(p^4) outer product at every 2D quadrature point.
+    # Assemble separable metric factors through one-dimensional quadrature.
     function factors(edges, radial)
         return Base.map(1:(length(edges) - 1)) do e
             left, right = edges[e], edges[e + 1]
@@ -164,24 +220,9 @@ function _spheroid_fembem_confocal(
     fixed = unique(map[axis_nodes])
     load_basis = assemble_load ? hcat([kron(first(bases[js]), first(bases[jt]))
                        for jt in eachindex(q) for js in eachindex(q)]...) : zeros(0, 0)
-    load_points = Base.map(1:(assemble_load ? length(cells) : 0)) do e
-        er, et = mod1(e, nr), cld(e, nr)
-        sl, sr = radial_edges[er:(er + 1)]
-        tl, tr = angular_edges[et:(et + 1)]
-        points = Matrix{Float64}(undef, 3, length(q)^2)
-        for jt in eachindex(q), js in eachindex(q)
-
-            radial = (sl+sr)/2+(sr-sl)*q[js]/2
-            theta = (tl+tr)/2+(tr-tl)*q[jt]/2
-            aa = hypot(focal, b*radial)
-            j = (jt-1)*length(q)+js
-            points[1, j] = b*radial*sin(theta)
-            points[2, j] = aa*cos(theta)
-            points[3, j] = b^2*radial/aa * (focal^2*sin(theta)^2+b^2*radial^2) *
-                           sin(theta) * w[js] * w[jt] * (sr-sl) * (tr-tl)/4
-        end
-        points
-    end
+    load_points = assemble_load ?
+        _spheroid_fembem_load_points(radial_edges, angular_edges, q, w, focal, b) :
+        Matrix{Float64}[]
     return (; cells, kept, map, iface, fixed, ndof = length(kept),
         lb, li, p, nr, nt, angular_edges, load_basis, load_points,
         radial_factors, angular_factors, a, b, half, quadrature_extra,
@@ -223,8 +264,7 @@ function _spheroid_fembem_trace(mesh, boundary)
                                                                              (fe*transpose(basis))
         end
     end
-    # Each trace row and coupling column has support only on overlapping
-    # elements. Preserve that sparsity when applying the angular eigenvectors.
+    # Preserve local trace support when applying angular eigenvectors.
     return sparse(T), sparse(B)
 end
 
@@ -243,6 +283,8 @@ function _spheroid_fembem_bulk(mesh, k, m, beta)
     ids = zeros(Int, nb)
     loads = zeros(ComplexF64, mesh.ndof, 2)
     samples = zeros(ComplexF64, size(mesh.load_basis, 2), 2)
+    points = Matrix{Float64}(undef, 3, size(samples, 1))
+    local_load = Matrix{ComplexF64}(undef, size(mesh.load_basis, 1), 2)
     source_scale = k^2*(inv(mesh.soundspeed_contrast^2)-1)/mesh.density_contrast
     for (element, cell) in enumerate(mesh.cells)
         @. local_matrix = cell.S + m^2*cell.A - k^2*cell.M
@@ -256,7 +298,7 @@ function _spheroid_fembem_bulk(mesh, k, m, beta)
             ids[j] = mesh.map[cell.ids[lb[j]]]
         end
         if !iszero(source_scale)
-            points = mesh.load_points[element]
+            _spheroid_fembem_load_points!(points, mesh.load_points, element)
             for j in axes(points, 2)
                 amplitude = (m==0 ? 1.0 : 2.0)*im^m*besselj(m, k*points[1, j]*sin(beta))
                 phase = cis(k*points[2, j]*cos(beta))
@@ -264,7 +306,7 @@ function _spheroid_fembem_bulk(mesh, k, m, beta)
                 samples[j, 1] = weight*amplitude*phase
                 samples[j, 2] = weight*amplitude*conj(phase)
             end
-            local_load = mesh.load_basis*samples
+            mul!(local_load, mesh.load_basis, samples)
             condensed_load = local_load[lb, :]-transpose(ib)*local_load[li, :]
             loads[ids, :] += condensed_load
         end
@@ -287,9 +329,7 @@ function _spheroid_fembem_mode(mesh, boundary, T, B, K, V, k, m, beta, reports, 
     end
     rawD, rawV = D, V
     if size(V, 1)>nbe
-        # Surface rows enforce (I/2-K)p_s+V*q_s=0. CHIEF rows enforce the
-        # zero interior representation, -K*p_s+V*q_s=0. QR obtains the
-        # least-squares exterior flux map without forming normal equations.
+        # Use QR for the surface and CHIEF equations without forming normal equations.
         F = LinearAlgebra.qr(V)
         D = (F.Q' * D)[1:nbe, :]
         V = Matrix(F.R)
@@ -303,8 +343,7 @@ function _spheroid_fembem_mode(mesh, boundary, T, B, K, V, k, m, beta, reports, 
     derivative = [_dpdn_inc_mode(m, k, beta, r, z, nr, nz)
                   for (r, z, nr, nz) in zip(boundary.rho, boundary.z, boundary.nrho, boundary.nz)]
     if parity != 0
-        # Reflection changes both the axial coordinate and the axial normal.
-        # These are total-field even/odd loads on the positive half-domain.
+        # Reflect both the axial coordinate and normal for half-domain parity loads.
         for i in eachindex(incident)
             incident[i] = (incident[i] +
                            parity*_p_inc_mode(
@@ -315,10 +354,7 @@ function _spheroid_fembem_mode(mesh, boundary, T, B, K, V, k, m, beta, reports, 
         end
     end
     rhs = zeros(ComplexF64, ndof+nbe)
-    # Solve for scattered interior pressure. Its volume forcing is proportional
-    # to the sound-speed contrast, and its boundary load to the density contrast.
-    # Matched media therefore give zero scattering without subtracting two
-    # independently discretized O(1) total and incident fields.
+    # Contrast-based scattered-field forcing preserves exact zero scattering for matched media.
     rhs[1:ndof] = parity==0 ? bulk.loads[:, 1] :
                   (bulk.loads[:, 1]+parity*bulk.loads[:, 2])/2
     rhs[mesh.iface] += (1-inv(mesh.density_contrast))*(B*derivative)
@@ -340,22 +376,61 @@ function _spheroid_fembem_mode(mesh, boundary, T, B, K, V, k, m, beta, reports, 
     return _SpheroidSurfaceMode(boundary, ps, qs)
 end
 
+# Reuse real buffers for separate real and imaginary load contractions.
+function _spheroid_fembem_transform_load(
+        E::StridedMatrix{Float64}, load::AbstractMatrix{ComplexF64})
+    Base.require_one_based_indexing(E, load)
+    size(E, 1)==size(load, 1) || throw(DimensionMismatch("angular basis and load row counts differ"))
+    input = Matrix{Float64}(undef, size(load))
+    output = Matrix{Float64}(undef, size(E, 2), size(load, 2))
+    transformed = Matrix{ComplexF64}(undef, size(output))
+    # Skip exact parity zeros only when finite basis entries preserve IEEE propagation.
+    nonfinite_basis = !all(isfinite, E)
+    nonzero = nonfinite_basis
+    @inbounds for i in eachindex(input, load)
+        input[i] = real(load[i])
+        nonzero |= !iszero(input[i])
+    end
+    if nonzero
+        mul!(output, transpose(E), input)
+        @inbounds for i in eachindex(output, transformed)
+            transformed[i] = complex(output[i], 0.0)
+        end
+    else
+        fill!(transformed, 0)
+    end
+    nonzero = nonfinite_basis
+    @inbounds for i in eachindex(input, load)
+        input[i] = imag(load[i])
+        nonzero |= !iszero(input[i])
+    end
+    if nonzero
+        mul!(output, transpose(E), input)
+        @inbounds for i in eachindex(output, transformed)
+            transformed[i] = complex(real(transformed[i]), output[i])
+        end
+    end
+    return transformed
+end
+
 function _spheroid_fembem_tensor_load(mesh, be, B, k, m, beta)
     p, nr, nt = mesh.p, mesh.nr, mesh.nt
     nrn, ntn = nr*p+1, nt*p+1
     g, h = mesh.density_contrast, mesh.soundspeed_contrast
     load = zeros(ComplexF64, ntn, nrn)
     samples = zeros(ComplexF64, size(mesh.load_basis, 2))
+    points = Matrix{Float64}(undef, 3, length(samples))
+    local_load = Vector{ComplexF64}(undef, size(mesh.load_basis, 1))
     source_scale = k^2*(inv(h^2)-1)/g
     if !iszero(source_scale)
         for (element, cell) in enumerate(mesh.cells)
-            points = mesh.load_points[element]
+            _spheroid_fembem_load_points!(points, mesh.load_points, element)
             for j in axes(points, 2)
                 phase = cis(k*points[2, j]*cos(beta))
                 samples[j] = source_scale * points[3, j] * (m==0 ? 1.0 : 2.0) * im^m *
                              besselj(m, k*points[1, j]*sin(beta)) * phase
             end
-            local_load = mesh.load_basis*samples
+            mul!(local_load, mesh.load_basis, samples)
             for j in eachindex(cell.ids)
                 load[cell.ids[j]] += local_load[j]
             end
@@ -367,10 +442,7 @@ function _spheroid_fembem_tensor_load(mesh, be, B, k, m, beta)
     return load
 end
 
-# Solve the complete banded radial Robin system, including element interiors.
-# The Robin radial matrix is complex symmetric. Its last inverse column is
-# also its last inverse row (without conjugation), so every incident load can
-# reuse this one numerically computed boundary response.
+# Reuse the last inverse column of the complex-symmetric radial Robin matrix.
 function _spheroid_fembem_radial_pencil(factors, p, m, ki, g, eta)
     n = length(factors)*p+1
     base = zeros(ComplexF64, 3p+1, n)
@@ -400,8 +472,132 @@ function _spheroid_fembem_radial_map!(rhs, band, base, mass, p, lambda)
     return LinearAlgebra.LAPACK.gbtrs!('N', p, p, n, factor, pivots, rhs)
 end
 
-# Exact band Cholesky and triangular solves avoid a dense generalized
-# eigensystem reduction. The resulting standard problem remains symmetric.
+# Validate r=alpha*u and the real radial equations before using real responses.
+function _spheroid_fembem_real_radial_column!(result, index, radial, j,
+        coefficient, base, mass, p, lambda, eta, tolerance)
+    n = size(radial, 1)
+    isfinite(coefficient) && isfinite(lambda) || return :nonfinite_coefficient
+    denominator = real(coefficient)
+    (1-tolerance)/17<=denominator<=1+tolerance || return :denominator
+    abs(denominator-abs2(coefficient))<=tolerance || return :alpha_identity
+    scale, error = 0.0, 0.0
+    @inbounds for i in 1:n
+        value = radial[i, j]
+        isfinite(value) || return :nonfinite_response
+        real_value = real(value)/denominator
+        isfinite(real_value) || return :nonfinite_response
+        result[i, index] = real_value
+        scale = max(scale, abs(value))
+        error = max(error, abs(value-coefficient*real_value))
+    end
+    error<=tolerance*scale || return :reconstruction
+    endpoint = result[n, index]
+    isfinite(eta*endpoint) && abs(eta*endpoint)<=4*(1+tolerance) || return :endpoint_scale
+    abs(coefficient*complex(1.0, eta*endpoint)-1)<=tolerance || return :endpoint_identity
+    @inbounds for i in 1:n
+        residual = i==n ? -1.0 : 0.0
+        magnitude = i==n ? 1.0 : 0.0
+        for col in max(1, i-p):min(n, i+p)
+            row = 2p+1+i-col
+            entry = real(base[row, col])+lambda*mass[row, col]
+            term = entry*result[col, index]
+            residual += term
+            magnitude += abs(term)
+        end
+        isfinite(residual) && isfinite(magnitude) || return :nonfinite_residual
+        if !(abs(residual)<=tolerance*magnitude)
+            row_abs_sum, underflow = 0.0, false
+            for col in max(1, i-p):min(n, i+p)
+                row = 2p+1+i-col
+                entry = real(base[row, col])+lambda*mass[row, col]
+                value = result[col, index]
+                term = entry*value
+                row_abs_sum = nextfloat(row_abs_sum+abs(entry))
+                underflow |= issubnormal(value) || issubnormal(real(radial[col, j])) ||
+                             issubnormal(imag(radial[col, j])) || issubnormal(term) ||
+                             (iszero(term) && !iszero(entry) && !iszero(value))
+            end
+            isfinite(row_abs_sum) || return :nonfinite_residual
+            underflow || return :radial_residual
+            # Allow eight scalar roundings per band term at the gradual-underflow floor.
+            quantum = nextfloat(0.0)
+            propagated = nextfloat(nextfloat(quantum/denominator)*row_abs_sum)
+            allowance = nextfloat(8*(2p+1)*nextfloat(quantum+propagated))
+            isfinite(allowance) || return :nonfinite_residual
+            abs(residual)<=nextfloat(tolerance*magnitude+allowance) || return :radial_residual
+        end
+    end
+    return :accepted
+end
+
+function _spheroid_fembem_real_radial_pencil(base, mass, p, n, eta)
+    isfinite(eta) && eta>=0 || return false
+    p>=1 && n>=1 && size(base)==size(mass)==(3p+1, n) || return false
+    @inbounds for col in 1:n, row in axes(base, 1)
+        isfinite(base[row, col]) && isfinite(mass[row, col]) || return false
+        imag(base[row, col])==(row==2p+1 && col==n ? eta : 0.0) || return false
+    end
+    return true
+end
+
+function _spheroid_fembem_real_radial(radial, alpha, base, mass, p, values, regular, eta;
+        partition = false)
+    n, count = size(radial)
+    length(alpha)==length(values)==count || return nothing
+    _spheroid_fembem_real_radial_pencil(base, mass, p, n, eta) || return nothing
+    tolerance = 128eps(Float64)*(2p+1)
+    result = Matrix{Float64}(undef, n, length(regular))
+    accepted, failed, reasons = Int[], Int[], Symbol[]
+    @inbounds for (index, j) in enumerate(regular)
+        1<=j<=count || return nothing
+        slot = partition ? length(accepted)+1 : index
+        reason = _spheroid_fembem_real_radial_column!(result, slot, radial, j,
+            alpha[j], base, mass, p, values[j], eta, tolerance)
+        if reason!==:accepted
+            partition || return nothing
+            push!(failed, j)
+            push!(reasons, reason)
+        elseif partition
+            push!(accepted, j)
+        end
+    end
+    partition && return (; radial = view(result, :, 1:length(accepted)), regular = accepted, failed, reasons)
+    return result
+end
+
+# Retain radial endpoints only after complete-column validation.
+function _spheroid_fembem_radial_endpoints(base, mass, p, values, eta)
+    n, count = size(base, 2), length(values)
+    radial = Matrix{ComplexF64}(undef, n, 1)
+    column = view(radial, :, 1)
+    real_column = Matrix{Float64}(undef, n, 1)
+    band = similar(base)
+    beta_response = Vector{ComplexF64}(undef, count)
+    alpha = Vector{ComplexF64}(undef, count)
+    real_endpoints = Vector{Float64}(undef, count)
+    real_regular = _spheroid_fembem_real_radial_pencil(base, mass, p, n, eta)
+    tolerance = 128eps(Float64)*(2p+1)
+    @inbounds for j in eachindex(values)
+        _spheroid_fembem_radial_map!(column, band, base, mass, p, values[j])
+        beta_response[j] = radial[n, 1]
+        alpha[j] = 1-im*eta*beta_response[j]
+        if real_regular && !(abs(alpha[j])<=0.25eta*abs(beta_response[j]))
+            reason = _spheroid_fembem_real_radial_column!(real_column, 1, radial, 1,
+                alpha[j], base, mass, p, values[j], eta, tolerance)
+            if reason===:accepted
+                real_endpoints[j] = real_column[n, 1]
+            else
+                real_regular = false
+            end
+        end
+    end
+    retained = findall(j->abs(alpha[j])<=0.25eta*abs(beta_response[j]), eachindex(alpha))
+    regular = setdiff(eachindex(alpha), retained)
+    response = real_regular ? real_endpoints[regular] : beta_response[regular] ./ alpha[regular]
+    return (; beta_response, alpha, retained, regular, response, real_regular)
+end
+
+# Preserve symmetry with band Cholesky and triangular solves.
 function _spheroid_band_cholesky!(L)
     p, n = size(L, 1)-1, size(L, 2)
     @inbounds for j in 1:n
@@ -463,7 +659,11 @@ function _spheroid_fembem_angular(mesh, k, m, parity)
     end
     _spheroid_band_cholesky!(mass)
     _spheroid_band_ldiv!(mass, angular)
-    standard = _spheroid_band_ldiv!(mass, copy(transpose(angular)))
+    # Reuse the first whitening matrix while preserving every transposed entry.
+    @inbounds for j in 1:n, i in 1:(j-1)
+        angular[i, j], angular[j, i] = angular[j, i], angular[i, j]
+    end
+    standard = _spheroid_band_ldiv!(mass, angular)
     values, vectors = LinearAlgebra.LAPACK.syevd!('V', 'U', standard)
     _spheroid_band_ldiv!(mass, vectors; transposed = true)
     E = zeros(ntn, n)
@@ -485,16 +685,31 @@ function _spheroid_fembem_exterior(
         if size(V, 1)>nbe
             factor=LinearAlgebra.qr(V)
             D=(factor.Q' * D)[1:nbe, :]
-            reducedV=Matrix(factor.R)
+            reducedV=factor.R
         end
         (; D, V = reducedV, rawD, rawV)
     end
 end
 
+# Apply complex-by-real products through two real BLAS contractions.
+_spheroid_fembem_mul(A, B) = A*B
+
+function _spheroid_fembem_mul(A::Matrix{ComplexF64}, B::Matrix{Float64})
+    size(A, 2)==size(B, 1) || throw(DimensionMismatch("matrix inner dimensions differ"))
+    C = Matrix{ComplexF64}(undef, size(A, 1), size(B, 2))
+    isempty(C) && return C
+    if iszero(size(A, 2))
+        fill!(C, 0)
+        return C
+    end
+    LinearAlgebra.BLAS.gemm!('N', 'N', 1.0, reinterpret(Float64, A), B,
+        0.0, reinterpret(Float64, C))
+    return C
+end
+
 function _spheroid_fembem_tensor_operator(mesh, be, T, B, K, V, k, m, parity;
-        reuse = nothing, exterior_key = nothing)
-    # Geometry and discretization are explicit in every reuse key. Parity zero
-    # and even parity have the same angular constraints, but different loads.
+        reuse = nothing, exterior_key = nothing, boundary_only::Bool = false)
+    # Include geometry, discretization and angular parity in reuse keys.
     angular_key = (:fembem_angular, mesh.a, mesh.b, mesh.nt, mesh.p, mesh.half,
         mesh.quadrature_extra, mesh.soundspeed_contrast, k, m, parity==-1)
     eigenproblem = _reuse_numerical(reuse, angular_key) do
@@ -503,43 +718,62 @@ function _spheroid_fembem_tensor_operator(mesh, be, T, B, K, V, k, m, parity;
     E = eigenproblem.vectors
     g, ki = mesh.density_contrast, k/mesh.soundspeed_contrast
     eta = mesh.a*mesh.b*ki/g
-    radial_key = (:fembem_radial, angular_key, mesh.nr, g)
-    radial = _reuse_numerical(reuse, radial_key) do
-        responses = Matrix{ComplexF64}(undef, mesh.nr*mesh.p+1, length(eigenproblem.values))
+    radial_key = (:fembem_radial, angular_key, mesh.nr, g, boundary_only)
+    if boundary_only
+        endpoints = _reuse_numerical(reuse, radial_key) do
+            base, mass = _spheroid_fembem_radial_pencil(
+                mesh.radial_factors, mesh.p, m, ki, g, eta)
+            _spheroid_fembem_radial_endpoints(base, mass, mesh.p, eigenproblem.values, eta)
+        end
+        radial = regular_radial = nothing
+        (; beta_response, alpha, retained, regular, response, real_regular) = endpoints
+    else
+        radial = _reuse_numerical(reuse, radial_key) do
+            responses = Matrix{ComplexF64}(undef, mesh.nr*mesh.p+1, length(eigenproblem.values))
+            base, mass = _spheroid_fembem_radial_pencil(
+                mesh.radial_factors, mesh.p, m, ki, g, eta)
+            band = similar(base)
+            for j in eachindex(eigenproblem.values)
+                _spheroid_fembem_radial_map!(view(responses, :, j), band, base, mass,
+                    mesh.p, eigenproblem.values[j])
+            end
+            responses
+        end
+        beta_response = vec(radial[end, :])
+        alpha = 1 .- im*eta .* beta_response
+        retained = findall(j->abs(alpha[j])<=0.25eta*abs(beta_response[j]), eachindex(alpha))
+        regular = setdiff(eachindex(alpha), retained)
         base, mass = _spheroid_fembem_radial_pencil(
             mesh.radial_factors, mesh.p, m, ki, g, eta)
-        band = similar(base)
-        for j in eachindex(eigenproblem.values)
-            _spheroid_fembem_radial_map!(view(responses, :, j), band, base, mass,
-                mesh.p, eigenproblem.values[j])
-        end
-        responses
+        # Failed real-response validation restores the complete complex calculation.
+        regular_radial = _spheroid_fembem_real_radial(
+            radial, alpha, base, mass, mesh.p, eigenproblem.values, regular, eta)
+        real_regular = regular_radial!==nothing
+        response = real_regular ? vec(regular_radial[end, :]) :
+                   beta_response[regular] ./ alpha[regular]
     end
-    beta_response = vec(radial[end, :])
-    alpha = 1 .- im*eta .* beta_response
     nbe = length(be.chi)
     exterior=_spheroid_fembem_exterior(be, K, V, m, parity; reuse, exterior_key)
     D, V, rawD, rawV=exterior.D, exterior.V, exterior.rawD, exterior.rawV
     pressure_map = T*E
     flux_map = transpose(E)*B
-    retained = findall(j->abs(alpha[j])<=0.25eta*abs(beta_response[j]), eachindex(alpha))
-    regular = setdiff(eachindex(alpha), retained)
-    response = beta_response[regular] ./ alpha[regular]
-    # Choose the cheaper contraction of the same Schur complement. Applying
-    # complex D to the real angular map costs half as much per entry as applying
-    # it to the complex boundary response. Neither path truncates angular modes.
-    regular_exterior = length(regular)>2nbe ? nothing : D*pressure_map[:, regular]
+    # Use real contractions when all regular radial responses pass validation.
+    full_response = real_regular ? 3length(regular)>2nbe : length(regular)>2nbe
+    regular_exterior = full_response ? nothing :
+                       _spheroid_fembem_mul(D, pressure_map[:, regular])
     schur = if regular_exterior===nothing
-        interior_response = (pressure_map[:, regular] .* transpose(response))*flux_map[regular, :]
-        V+D*interior_response
+        interior_response = _spheroid_fembem_mul(
+            pressure_map[:, regular] .* transpose(response), flux_map[regular, :])
+        V+_spheroid_fembem_mul(D, interior_response)
     else
-        V+(regular_exterior .* transpose(response))*flux_map[regular, :]
+        V+_spheroid_fembem_mul(
+            regular_exterior .* transpose(response), flux_map[regular, :])
     end
-    retained_exterior = D*pressure_map[:, retained]
+    retained_exterior = _spheroid_fembem_mul(D, pressure_map[:, retained])
     matrix = [schur retained_exterior;
               -Diagonal(beta_response[retained])*flux_map[retained, :] Matrix(Diagonal(alpha[retained]))]
     return (;
-        E, radial, alpha, beta_response, rawD, rawV,
+        E, radial, regular_radial, real_regular, alpha, beta_response, rawD, rawV,
         D, pressure_map, flux_map, regular_exterior,
         retained, regular, response, matrix, factor = LinearAlgebra.lu(matrix))
 end
@@ -560,9 +794,7 @@ function _spheroid_fembem_factor_matrices(factors, p, k, m, scale)
     return sparse(rows, cols, stiffness, n, n), sparse(rows, cols, mass, n, n)
 end
 
-# Diagonalize the shorter radial coordinate, then solve every angular system
-# as a complete band matrix. The complex Robin term is removed by the boundary
-# equation. It changes only the algebraic solver, not the FEM weak form.
+# Diagonalize the radial coordinate while retaining complete angular band solves.
 function _spheroid_fembem_radial_inverse(mesh, k, m, parity)
     p=mesh.p
     nr, nt=mesh.nr*p+1, mesh.nt*p+1
@@ -684,8 +916,7 @@ function _spheroid_fembem_radial_mode(mesh, be, T, B, K, V, k, m, beta, reports,
     qs=driven_flux-op.exterior_map*u
     ps=op.pressure_map*u
     interior_field===:total && (ps-=incident)
-    # Reconstruct the volume field and check the original, unpreconditioned
-    # finite-element equations, including the forcing and interface flux.
+    # Validate reconstructed fields against the original unpreconditioned FEM equations.
     mul!(input, op.flux_map, qs-driven_flux)
     mul!(mass_image, inverse.Mt, u)
     @. input-=im*inverse.eta*mass_image
@@ -722,8 +953,34 @@ function _spheroid_fembem_use_radial(mesh)
     return nt>=1024 && nt>=4nr && storage<=384*1024^2
 end
 
-# Fast diagonalization of the same tensor-product finite-element equations.
-# No analytical spheroidal functions or fitted modal data enter this reduction.
+# Preserve the scalar parity operations while allocating only the projected load.
+function _spheroid_fembem_parity_load(load, m, parity)
+    parity==0 && return load
+    sign = parity*(-1)^m
+    return @. (load+sign*conj(load))/2
+end
+
+# Reuse product storage without changing the ordinary array sum reduction.
+function _spheroid_fembem_contract_load!(products::Vector{ComplexF64}, radial,
+        transformed, radial_columns, transformed_rows)
+    Base.require_one_based_indexing(products, radial, transformed)
+    length(products)==size(radial, 1)==size(transformed, 2) ||
+        throw(DimensionMismatch("radial product lengths differ"))
+    length(radial_columns)==length(transformed_rows) ||
+        throw(DimensionMismatch("radial and transformed selections differ"))
+    result = Vector{ComplexF64}(undef, length(radial_columns))
+    for (index, (column, row)) in enumerate(zip(radial_columns, transformed_rows))
+        checkbounds(radial, :, column)
+        checkbounds(transformed, row, :)
+        @inbounds for i in eachindex(products)
+            products[i] = radial[i, column]*transformed[row, i]
+        end
+        result[index] = sum(products)
+    end
+    return result
+end
+
+# Diagonalize the tensor-product FEM equations without fitted modal data.
 function _spheroid_fembem_tensor_mode(
         mesh, be, T, B, K, V, k, m, beta, reports, workers; parity = 0,
         load = nothing, reuse = nothing, reuse_key = nothing,
@@ -746,28 +1003,43 @@ function _spheroid_fembem_tensor_mode(
             parity, load, reuse, reuse_key, exterior_key, maxiter = radial_maxiter, interior_field)
         radial_attempt.field===nothing || return radial_attempt.field
     end
-    op = _reuse_numerical(reuse, (:fembem_operator, reuse_key, m, parity==-1)) do
+    boundary_only = interior_field===:total
+    op = _reuse_numerical(reuse, (:fembem_operator, reuse_key, m, parity==-1, boundary_only)) do
         _spheroid_fembem_tensor_operator(
-            mesh, be, T, B, K, V, k, m, parity; reuse, exterior_key)
+            mesh, be, T, B, K, V, k, m, parity; reuse, exterior_key, boundary_only)
     end
     incident = [_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
     parity==0 || (incident=(incident+parity*(-1)^m*conj(incident))/2)
-    forcing = if interior_field===:total
+    particular, retained_forcing = if interior_field===:total
         derivative=[_dpdn_inc_mode(m, k, beta, r, z, nx, nz)
                     for (r,z,nx,nz) in zip(be.rho,be.z,be.nrho,be.nz)]
         parity==0 || (derivative=(derivative+parity*(-1)^m*conj(derivative))/2)
-        op.beta_response .* (op.flux_map*derivative)
+        boundary_forcing = op.flux_map*derivative
+        forcing = op.beta_response .* boundary_forcing
+        particular = op.real_regular ? op.response .* boundary_forcing[op.regular] :
+                     forcing[op.regular] ./ op.alpha[op.regular]
+        particular, forcing[op.retained]
     else
-        load = parity==0 ? load : (load+parity*(-1)^m*conj(load))/2
-        transformed = transpose(op.E)*load
-        [sum(view(op.radial, :, j) .* view(transformed, j, :)) for j in axes(op.E, 2)]
+        load = _spheroid_fembem_parity_load(load, m, parity)
+        transformed = _spheroid_fembem_transform_load(op.E, load)
+        products = Vector{ComplexF64}(undef, size(op.radial, 1))
+        if op.regular_radial===nothing
+            forcing = _spheroid_fembem_contract_load!(products, op.radial, transformed,
+                axes(op.E, 2), axes(op.E, 2))
+            forcing[op.regular] ./ op.alpha[op.regular], forcing[op.retained]
+        else
+            particular = _spheroid_fembem_contract_load!(products, op.regular_radial,
+                transformed, eachindex(op.regular), op.regular)
+            retained_forcing = _spheroid_fembem_contract_load!(products, op.radial,
+                transformed, op.retained, op.retained)
+            particular, retained_forcing
+        end
     end
-    particular = forcing[op.regular] ./ op.alpha[op.regular]
     exterior_forcing = op.regular_exterior===nothing ?
                        op.D*(op.pressure_map[:, op.regular]*particular) :
                        op.regular_exterior*particular
     rhs = vcat(interior_field===:total ? op.D*incident-exterior_forcing : -exterior_forcing,
-        forcing[op.retained])
+        retained_forcing)
     solution = op.factor\rhs
     nbe = length(be.chi)
     qs = solution[1:nbe]
@@ -800,6 +1072,61 @@ function _spheroid_fembem_level(body, boundary, k, nr, nt, nb, order, boundary_o
     return only(_spheroid_fembem_level_batch([request]))
 end
 
+function _spheroid_fembem_operator_groups(modes, boundary_nodes; allow_wide = true)
+    groups = UnitRange{Int}[]
+    for m in modes
+        if isempty(groups) || m-first(last(groups))>=16
+            push!(groups, m:m)
+        else
+            groups[end] = first(last(groups)):m
+        end
+    end
+    # Share quadrature across adjacent spans while preserving gaps and the storage bound.
+    boundary_nodes<=512 || return groups
+    merged = UnitRange{Int}[]
+    for span in groups
+        if !isempty(merged) && first(span)==last(last(merged))+1 &&
+           last(span)-first(last(merged))<32
+            merged[end] = first(last(merged)):last(span)
+        else
+            push!(merged, span)
+        end
+    end
+    allow_wide || return merged
+    # Merge complete aligned spans within the dense-operator storage budget.
+    bytes_per_mode = 64boundary_nodes*(boundary_nodes+8)
+    capacity = fld(768*1024^2, max(bytes_per_mode, 1))
+    widths = capacity>=128 ? (128, 64) : capacity>=64 ? (64,) : ()
+    isempty(widths) && return merged
+    groups = merged
+    merged = UnitRange{Int}[]
+    i = 1
+    while i<=length(groups)
+        combined = false
+        for width in widths
+            start = first(groups[i])
+            mod(start, width)==0 || continue
+            final = start+width-1
+            j = i
+            while j<length(groups) && last(groups[j])<final &&
+                  first(groups[j+1])==last(groups[j])+1
+                j += 1
+            end
+            if last(groups[j])==final
+                push!(merged, start:final)
+                i = j+1
+                combined = true
+                break
+            end
+        end
+        if !combined
+            push!(merged, groups[i])
+            i += 1
+        end
+    end
+    return merged
+end
+
 function _spheroid_fembem_level_setup(body, boundary, k, nr, nt, nb, order, boundary_order;
         half, incidence_angle, m_max, mode_threads, rtol, chief_points, reports,
         split_symmetry::Bool = true, tensor::Bool = true, modes = 0:m_max,
@@ -807,6 +1134,7 @@ function _spheroid_fembem_level_setup(body, boundary, k, nr, nt, nb, order, boun
         operator_spans = nothing,
         quadrature_extra::Integer = 0,
         geometry_cache = nothing,
+        wide_operators::Bool = true,
         fields = Vector{_SpheroidSurfaceMode}(undef, m_max+1))
     interior_field===:total && !tensor && throw(ArgumentError("total interior pressure requires tensor reduction"))
     split = split_symmetry && !half && iseven(nt) && iseven(nb) && iseven(chief_points)
@@ -831,14 +1159,9 @@ function _spheroid_fembem_level_setup(body, boundary, k, nr, nt, nb, order, boun
         boundary_order+1; half = false) : be
     memory_workers = max(1, floor(Int, 4*(50000/(mesh.ndof+length(be.chi)))^1.5))
     workers = min(mode_threads, Threads.nthreads(), tensor ? 4 : memory_workers)
-    groups = UnitRange{Int}[]
-    for m in modes
-        if isempty(groups) || m-first(last(groups))>=16
-            push!(groups, m:m)
-        else
-            groups[end] = first(last(groups)):m
-        end
-    end
+    # Limit grouping when reuse, multiple requests or CHIEF rows require additional copies.
+    allow_wide = wide_operators && chief_points<=8 && _numerical_reuse_context()===nothing
+    groups = _spheroid_fembem_operator_groups(modes, length(be.chi); allow_wide)
     operator_spans===nothing || (groups=operator_spans)
     return (;body,boundary,k,nr,nt,nb,order,boundary_order,half,incidence_angle,m_max,
         rtol,chief_points,reports,tensor,interior_reduction,interior_field,quadrature_extra,
@@ -850,10 +1173,10 @@ function _spheroid_fembem_level_batch(requests)
     setups=map(requests) do request
         (;body,boundary,k,nr,nt,nb,order,boundary_order)=request
         options=Base.structdiff(request,(;body,boundary,k,nr,nt,nb,order,boundary_order))
-        _spheroid_fembem_level_setup(body,boundary,k,nr,nt,nb,order,boundary_order;options...,geometry_cache)
+        _spheroid_fembem_level_setup(body,boundary,k,nr,nt,nb,order,boundary_order;
+            options...,geometry_cache,wide_operators=length(requests)==1)
     end
-    # Keep each angle's requested meshes, Fourier indices and quadrature spans.
-    # Stream a common span across angles before moving to the next one.
+    # Stream common Fourier spans across angles while preserving requested meshes.
     spans=unique(vcat(getproperty.(setups,:groups)...))
     inherited_reuse=_numerical_reuse_context()
     for span in spans
@@ -890,8 +1213,9 @@ function _spheroid_fembem_level_batch(requests)
             body.a, body.b, k, nb, boundary_order, half, split, rtol, chief_points,
             quadrature_extra, first(span), last(span))
         selected = filter(m -> m in span, modes)
-        width = length(span)==1 ? Val(1) :
-                length(span)<=4 ? Val(4) : length(span)<=8 ? Val(8) : Val(16)
+        width = length(span)==1 ? Val(1) : length(span)<=4 ? Val(4) :
+                length(span)<=8 ? Val(8) : length(span)<=16 ? Val(16) :
+                length(span)<=32 ? Val(32) : length(span)<=64 ? Val(64) : Val(128)
         operators = _spheroid_curved_operators(be, k, span, width,
             Val(boundary_order+1); rtol, split, quadrature_extra,
             chief_points = split ? div(chief_points, 2) : chief_points)
@@ -905,8 +1229,7 @@ function _spheroid_fembem_level_batch(requests)
         @sync for worker in 1:active_workers
             Threads.@spawn for index in worker:active_workers:length(selected)
                 m = selected[index]
-                # One component's factors serve all requested incident fields,
-                # including the common even interior for broadside and oblique.
+                # Reuse component factors across compatible incident fields.
                 reuse=length(requests)==1 ? inherited_reuse : _NumericalReuse(retain_prefix=false)
                 for item in prepared
                     m in item.selected || continue
@@ -942,8 +1265,7 @@ function _spheroid_fembem_level_batch(requests)
                         operators[3][operator_index],
                         operators[4][operator_index], k, m, incidence_angle,
                         reports, active_workers; parity = -1, bulk)
-                    # Restore traces in full-meridian order for all observation
-                    # directions, independently of the illumination symmetry.
+                    # Restore full-meridian trace ordering independently of illumination symmetry.
                     pressure = vcat(even.pressure+odd.pressure,
                         reverse(even.pressure-odd.pressure))
                     derivative = vcat(even.derivative+odd.derivative,
@@ -982,10 +1304,7 @@ function _spheroid_fembem_refinement_limits(value)
     return Int.(limits)
 end
 
-# Compare the current mesh with three independently coarsened meshes and a
-# jointly coarsened mesh. The fourth difference measures the interaction that
-# would be missed by adding the three coordinate changes. These are observed
-# discretization changes, not rigorous bounds on the remaining continuum error.
+# Include coordinate interactions in the successive-mesh convergence estimate.
 function _spheroid_fembem_directional_changes(values, levels)
     current = values[levels]
     directions = ntuple(3) do d
@@ -1005,9 +1324,7 @@ function _spheroid_fembem_mark_directions(weights, levels, limits)
     return ntuple(d->levels[d]+(d in available && axis_weights[d]>=largest/2), 3)
 end
 
-# Process each common BEM batch across the requested interior meshes before
-# moving to the next batch. Bound its size so recent operators fit in the
-# adaptive cache even at fine boundary resolutions.
+# Bound shared BEM batches to fit the adaptive operator cache.
 function _spheroid_fembem_refinement_requests(
         requested, counts, m_max, boundary_order, reduced)
     schedule=NamedTuple[]
@@ -1092,8 +1409,7 @@ function _spheroid_fembem_directional(body, boundary, k, initial, limits;
             if directional[index]
                 changes[index, :] .= _spheroid_fembem_directional_changes(values[index], levels[index])
             else
-                # Modes that pass the original joint check do not need three
-                # additional solves just to decide where further work belongs.
+                # Skip directional probes after the joint refinement check passes.
                 level = levels[index]
                 changes[index, :] .= (
                     values[index][level]-values[index][level .- 1], 0, 0, 0)
@@ -1198,9 +1514,7 @@ function _spheroid_fembem(body, boundary, k;
                 half, incidence_angle, m_max, mode_threads, order, boundary_order,
                 rtol, chief_points, reports, quadrature_extra, target_tol, separate, interior_field)
         end
-        # Separate checks revisit exterior and interior operators. Joint
-        # refinement advances every mesh count, so a standalone solve has
-        # no such reuse. An enclosing angle-sweep cache still applies.
+        # Retain operators for directional refinement or an enclosing angle sweep.
         result, nr, nt, nb = separate ?
                              _with_numerical_reuse(refine; retain_prefix = false) : refine()
         result
