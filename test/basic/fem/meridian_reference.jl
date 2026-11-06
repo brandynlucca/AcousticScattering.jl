@@ -97,8 +97,7 @@ end
         @test_throws ArgumentError AS._spheroid_fembem_refinement_limits(invalid)
     end
     level=(2, 3, 4)
-    # Coordinate checks separate anisotropic errors and expose mixed terms
-    # that could otherwise cancel in a simultaneous mesh change.
+    # Separate coordinate checks expose cancellation between refinement errors.
     f(r, t, b) = complex(2.0^-r+0.1*2.0^-t, 0.01*2.0^-b)+0.3im*2.0^(-r-t)
     samples=Dict((r, t, b)=>f(r, t, b) for r in 1:2 for t in 2:3 for b in 3:4)
     delta=AS._spheroid_fembem_directional_changes(samples, level)
@@ -118,6 +117,146 @@ end
     @test AS._spheroid_fembem_mark_directions(ones(4), level, level)==level
 end
 
+@testset "FEM-BEM operator groups preserve existing spans" begin
+    AS = AcousticScattering
+    target_modes = vcat(filter(!=(12), collect(0:31)), 33, 50)
+    cases = [
+        (Int[], UnitRange{Int}[], UnitRange{Int}[]),
+        ([7], [7:7], [7:7]),
+        (collect(0:15), [0:15], [0:15]),
+        (collect(0:31), [0:15, 16:31], [0:31]),
+        (collect(0:32), [0:15, 16:31, 32:32], [0:31, 32:32]),
+        (collect(5:54), [5:20, 21:36, 37:52, 53:54], [5:36, 37:54]),
+        (collect(32:95), [32:47, 48:63, 64:79, 80:95], [32:63, 64:95]),
+        ([0, 15, 17, 32], [0:15, 17:32], [0:15, 17:32]),
+        ([3, 19, 35], [3:3, 19:19, 35:35], [3:3, 19:19, 35:35]),
+        (target_modes, [0:15, 16:31, 33:33, 50:50], [0:31, 33:33, 50:50])]
+    for (modes, original, merged) in cases, boundary_nodes in (1, 296, 400, 512, 513, 536, 720)
+        saved_modes = copy(modes)
+        groups = AS._spheroid_fembem_operator_groups(modes, boundary_nodes)
+        expected = boundary_nodes<=512 ? merged : original
+        @test groups == expected
+        @test modes == saved_modes
+        @test all(span -> length(span)<=(boundary_nodes<=512 ? 32 : 16), groups)
+        covered = collect(Iterators.flatten(groups))
+        # Preserve gaps between independently requested mode spans.
+        @test covered == collect(Iterators.flatten(original))
+        @test all(m -> m in covered, modes)
+        @test length(covered) == length(unique(covered))
+    end
+    @test AS._spheroid_fembem_operator_groups(0:31, 512) == [0:31]
+    @test AS._spheroid_fembem_operator_groups(0:31, 513) == [0:15, 16:31]
+    @test 12 in only(AS._spheroid_fembem_operator_groups(target_modes[1:31], 512))
+    target_groups = AS._spheroid_fembem_operator_groups(target_modes, 512)
+    @test length.(target_groups) == [32, 1, 1]
+    @test all(m -> all(span -> !(m in span), target_groups), 34:49)
+end
+
+@testset "Wider FEM-BEM operator spans preserve boundary matrices" begin
+    AS = AcousticScattering
+    boundary = AS._spheroid_curved_boundary(0.1, 0.1/1.001, 2, 8; half = true)
+    controls = (; rtol = 1e-6, split = true, chief_points = 2)
+    for (k, modes) in ((40.0, 0:31), (2pi*285000/1477.3, 176:207))
+        wide = AS._spheroid_curved_operators(
+            boundary, k, modes, Val(32), Val(8); controls...)
+        left = AS._spheroid_curved_operators(
+            boundary, k, first(modes):(first(modes)+15), Val(16), Val(8); controls...)
+        right = AS._spheroid_curved_operators(
+            boundary, k, (first(modes)+16):last(modes), Val(16), Val(8); controls...)
+        for component in eachindex(wide)
+            reference = vcat(left[component], right[component])
+            @test length(wide[component]) == length(modes)
+            for (actual, expected) in zip(wide[component], reference)
+                @test size(actual) == (length(boundary.chi)+2, length(boundary.chi))
+                @test all(isfinite, actual)
+                @test norm(actual-expected) <= 2e-7norm(expected)
+            end
+        end
+    end
+    # A partial final span exercises padding without adding physical modes.
+    partial = AS._spheroid_curved_operators(
+        boundary, 40.0, 3:21, Val(32), Val(8); controls...)
+    left = AS._spheroid_curved_operators(
+        boundary, 40.0, 3:18, Val(16), Val(8); controls...)
+    right = AS._spheroid_curved_operators(
+        boundary, 40.0, 19:21, Val(4), Val(8); controls...)
+    for component in eachindex(partial)
+        reference = vcat(left[component], right[component])
+        @test length(partial[component]) == 19
+        for (actual, expected) in zip(partial[component], reference)
+            @test norm(actual-expected) <= 2e-7norm(expected)
+        end
+    end
+end
+
+@testset "FEM-BEM complete Fourier prefixes respect storage and reuse limits" begin
+    AS = AcousticScattering
+    for nodes in (296, 400, 512, 513)
+        baseline = AS._spheroid_fembem_operator_groups(0:333, nodes)
+        expanded = AS._spheroid_fembem_operator_groups(0:341, nodes)
+        @test collect(Iterators.flatten(baseline)) == collect(0:333)
+        @test collect(Iterators.flatten(expanded)) == collect(0:341)
+        @test baseline[1:end-1] == expanded[1:length(baseline)-1]
+        for span in baseline
+            if length(span)>32
+                @test length(span) in (64, 128)
+                @test mod(first(span), length(span)) == 0
+                @test 64nodes*(nodes+8)*length(span) <= 768*1024^2
+            end
+        end
+    end
+    @test AS._spheroid_fembem_operator_groups(0:333, 296) ==
+          [0:127, 128:255, 256:319, 320:333]
+    @test AS._spheroid_fembem_operator_groups(0:333, 400) ==
+          [0:63, 64:127, 128:191, 192:255, 256:319, 320:333]
+    @test maximum(length, AS._spheroid_fembem_operator_groups(0:333, 512)) == 32
+    @test maximum(length, AS._spheroid_fembem_operator_groups(0:333, 513)) == 16
+    sparse = vcat(collect(0:63), collect(80:127), [145, 161])
+    groups = AS._spheroid_fembem_operator_groups(sparse, 296)
+    @test groups == [0:63, 80:111, 112:127, 145:145, 161:161]
+    @test collect(Iterators.flatten(groups)) == sparse
+
+    boundary = AS._spheroid_curved_boundary(0.1, 0.1/1.001, 2, 8; half = true)
+    controls = (;rtol = 1e-6, split = true, chief_points = 2)
+    for modes in (0:127, 192:319)
+        wide = AS._spheroid_curved_operators(boundary, 2pi*285000/1477.3,
+            modes, Val(128), Val(8); controls...)
+        parts = [AS._spheroid_curved_operators(boundary, 2pi*285000/1477.3,
+                     start:start+31, Val(32), Val(8); controls...)
+                 for start in first(modes):32:last(modes)]
+        for component in eachindex(wide)
+            reference = vcat((part[component] for part in parts)...)
+            @test length(wide[component]) == length(modes)
+            for (actual, expected) in zip(wide[component], reference)
+                @test size(actual) == size(expected)
+                @test all(isfinite, actual)
+                @test norm(actual-expected) <= 2e-7norm(expected)
+            end
+        end
+    end
+end
+
+@testset "Wider FEM-BEM groups exclude retained operator copies" begin
+    AS = AcousticScattering
+    original = [start:min(start+31, 127) for start in 0:32:127]
+    @test AS._spheroid_fembem_operator_groups(0:127, 296; allow_wide = false) == original
+    body = Spheroid(0.1, 0.09)
+    boundary = GasFilled(0.00129, 0.23)
+    function setup(; chief_points = 8, wide_operators = true)
+        AS._spheroid_fembem_level_setup(body, boundary, 40.0, 2, 4, 4, 2, 1;
+            half = true, incidence_angle = pi/2, m_max = 127, mode_threads = 1,
+            rtol = 1e-6, chief_points, reports = nothing, modes = 0:127,
+            interior_field = :total, wide_operators)
+    end
+    @test setup().groups == [0:127]
+    @test setup(; chief_points = 9).groups == original
+    @test setup(; wide_operators = false).groups == original
+    cached = AS._with_numerical_reuse(; retain_prefix = false) do
+        setup().groups
+    end
+    @test cached == original
+end
+
 @testset "Higher-order spheroid condensation and reflection" begin
     AS = AcousticScattering
     for boundary in (Rigid(), PressureRelease(), GasFilled(0.00129, 0.23))
@@ -135,8 +274,7 @@ end
 
 @testset "Higher-order fluid condensation at oblique incidence" begin
     AS = AcousticScattering
-    # Uncondensed equations independently check the reused Schur buffers and
-    # incident lifting across cells both on and away from the fluid interface.
+    # Compare Schur buffers and incident lifting against uncondensed equations.
     for order in (2, 4, 6), boundary in (FluidFilled(1.2, 0.8), GasFilled(0.00129, 0.23))
 
         meshes = [AS._spheroid_hp_geometry(boundary, 0.02, 0.015, 0.03,
@@ -152,9 +290,7 @@ end
 end
 
 @testset "Higher-order spheroid spherical limit" begin
-    # An independently solved sphere checks wave normalization, the incident
-    # lifting, pressure recovery, rotations and outgoing continuation. The
-    # spheroid constructor excludes exactly equal semiaxes.
+    # A near-sphere reference checks normalization, pressure, rotations and radiation.
     a = 0.02
     k = 100.0
     body = Spheroid(a * (1 + 1e-10), a)
@@ -186,8 +322,7 @@ end
 end
 
 @testset "Meridian high-order angular normalization" begin
-    # Independent high-precision evaluation of the unnormalized polynomials.
-    # These orders occur for a 70 by 10 mm spheroid at 100 and 200 kHz.
+    # Evaluate high-order unnormalized polynomials independently.
     setprecision(BigFloat, 256) do
         for (m, l_max) in ((0, 12), (3, 14), (97, 113), (175, 206))
             for x in (-0.7, 0.0, 0.3, 1.0)
@@ -220,8 +355,7 @@ end
     @test all(!iszero, nonzeros(K))
 end
 
-# Recorded before merging the cylinder/spheroid mode assemblies on 2026-10-02.
-# These detect refactor drift; independent physical checks remain in the extended suite.
+# Frozen mode-assembly regressions supplement independent physical checks.
 const MERIDIAN_REFACTOR_AMPLITUDES = [
     [complex(0.00038669466408967, 0.001104526889109793),
         complex(0.0022748124814603934, 0.0013599000088818922),
@@ -287,8 +421,7 @@ end
 
 @testset "Prolate FEM-BEM radiation and transmission" begin
     AS = AcousticScattering
-    # Exact outgoing monopole and Cartesian dipole check the jump, outward
-    # derivative, Fourier normalization, reflection and far-field phase.
+    # Exact monopole and dipole fields check jumps, reflection and normalization.
     for half in (true, false)
         be = AS._spheroid_curved_boundary(0.02, 0.015, half ? 8 : 16, 6; half)
         k = 100.0
@@ -339,8 +472,7 @@ end
         @test report.solver_options.retain_fields===false
         @test length(report.systems)==(beta==pi/2 ? 7 : 14)
         if beta != pi/2
-            # Compare the decomposition against the unreduced equations with
-            # the same partitions, modes, quadrature and CHIEF locations.
+            # Compare reduction against complete equations on identical discretizations.
             full = AS._spheroid_fembem_level(body, bc, k, 3, 24, 16, 4, 5;
                 half = false, incidence_angle = beta, m_max = 6, mode_threads = 2,
                 rtol = 1e-8, chief_points = 8, reports = AS._SolveReports(),
@@ -358,8 +490,7 @@ end
         @test_throws ArgumentError pressure(coupled_solution, (0.03, 0.0, 0.0))
         @test_throws ArgumentError scattering_amplitude(coupled_solution; angle = NaN)
         if beta == 0.6
-            # Updating disjoint modes preserves the other traces and agrees
-            # with assembling the complete Fourier range on the same mesh.
+            # Disjoint mode updates preserve previously computed traces.
             subset = copy(coupled_solution.data.modes)
             AS._spheroid_fembem_level(body, bc, k, 3, 24, 16, 4, 5;
                 half = false, incidence_angle = beta, m_max = 6, mode_threads = 2,
@@ -395,8 +526,7 @@ end
             m_max = 5, adaptive = false, incidence_angle = 0.6, rtol = 1e-8)
         @test abs(scattering_amplitude(transparent)) < 1e-8
     end
-    # Near a spherical exterior Dirichlet irregular frequency, auxiliary
-    # interior constraints retain agreement with the exact fluid sphere.
+    # CHIEF constraints preserve the sphere reference near fictitious resonances.
     near_sphere = coupled(Spheroid(1.00000001, 1.0), bc, pi;
         coupling = Coupling(interior = :fem, exterior = :bem),
         order = 6, n_r = 6, n_theta = 32, n_boundary = 24,
@@ -405,8 +535,7 @@ end
     @test isapprox(scattering_amplitude(near_sphere),
         scattering_amplitude(exact_sphere); rtol = 1e-6)
     @test diagnostics(near_sphere).representation_residual < 1e-8
-    # Independent spatial changes and their interaction supply a reported TS
-    # change without a spheroidal modal answer.
+    # Independent spatial refinements supply the reported TS change.
     refined = coupled(body, bc, k; coupling = Coupling(interior = :fem, exterior = :bem),
         n_r = 2, n_theta = 12, n_boundary = 8,
         order = 4, m_max = 6, target_tol = 1e-7, rtol = 1e-8, mode_threads = 2,
@@ -496,8 +625,7 @@ end
         interior_reduction = :angular)
     @test fallback.pressure≈direct.pressure rtol=1e-12
     @test fallback.derivative≈direct.derivative rtol=1e-12
-    # An independently assembled Kronecker matrix checks the boundary inverse,
-    # with unrelated loads and repeated application through the same workspace.
+    # Compare reused radial inverses against an independent Kronecker system.
     for m in (0, 2), parity in (1, -1)
 
         inverse=AS._spheroid_fembem_radial_inverse(mesh, 100.0, m, parity)
@@ -543,12 +671,636 @@ end
     end
 end
 
+@testset "Compact confocal load geometry and reusable projection" begin
+    AS = AcousticScattering
+    for half in (false, true), p in (2, 4), extra in (0, 2)
+        a, b, nr, nt = 0.1, 0.1/1.001, 3, 5
+        bc = FluidFilled(1.24/1026.8, 345/1477.3)
+        mesh = AS._spheroid_fembem_confocal(bc, a, b, nr, nt, p;
+            half, assemble_bulk = false, quadrature_extra = extra)
+        q, w = AS._spheroid_hp_rule(p+3+extra)
+        radial_edges = collect(range(0.0, 1.0; length = nr+1))
+        angular_edges = collect(range(0.0, half ? pi/2 : pi; length = nt+1))
+        focal = sqrt((a-b)*(a+b))
+        direct = map(1:(nr*nt)) do e
+            er, et = mod1(e, nr), cld(e, nr)
+            sl, sr = radial_edges[er:er+1]
+            tl, tr = angular_edges[et:et+1]
+            points = zeros(3, length(q)^2)
+            for jt in eachindex(q), js in eachindex(q)
+                r = (sl+sr)/2+(sr-sl)*q[js]/2
+                theta = (tl+tr)/2+(tr-tl)*q[jt]/2
+                aa = hypot(focal, b*r)
+                j = (jt-1)*length(q)+js
+                points[:, j] = [b*r*sin(theta), aa*cos(theta),
+                    b^2*r/aa*(focal^2*sin(theta)^2+b^2*r^2)*sin(theta)*
+                    w[js]*w[jt]*(sr-sl)*(tr-tl)/4]
+            end
+            points
+        end
+        buffer = similar(first(direct))
+        @test length(mesh.load_points)==nr*nt
+        for e in eachindex(direct)
+            @test isequal(mesh.load_points[e], direct[e])
+            @test AS._spheroid_fembem_load_points!(buffer, mesh.load_points, e)===buffer
+            @test isequal(buffer, direct[e])
+        end
+        first_copy = mesh.load_points[1]
+        first_copy[1] = NaN
+        @test isequal(mesh.load_points[1], direct[1])
+        @test_throws BoundsError mesh.load_points[0]
+        @test_throws BoundsError mesh.load_points[nr*nt+1]
+        @test_throws DimensionMismatch AS._spheroid_fembem_load_points!(zeros(2, 2), mesh.load_points, 1)
+        be = AS._spheroid_curved_boundary(a, b, 8, 3; half)
+        T, B = AS._spheroid_fembem_trace(mesh, be)
+        for beta in (0.0, deg2rad(37.0), pi/2), m in (0, 3, 240)
+            k = 2pi*285000/1477.3
+            expected = zeros(ComplexF64, nt*p+1, nr*p+1)
+            scale = k^2*(inv(bc.soundspeed_contrast^2)-1)/bc.density_contrast
+            for (cell, points) in zip(mesh.cells, direct)
+                samples = [scale*points[3, j]*(m==0 ? 1.0 : 2.0)*im^m*
+                    AS.besselj(m, k*points[1, j]*sin(beta))*cis(k*points[2, j]*cos(beta))
+                    for j in axes(points, 2)]
+                local_load = mesh.load_basis*samples
+                for j in eachindex(cell.ids)
+                    expected[cell.ids[j]] += local_load[j]
+                end
+            end
+            derivative = [AS._dpdn_inc_mode(m, k, beta, r, z, nx, nz)
+                for (r, z, nx, nz) in zip(be.rho, be.z, be.nrho, be.nz)]
+            expected[:, end] += (1-inv(bc.density_contrast))*(B*derivative)
+            actual = AS._spheroid_fembem_tensor_load(mesh, be, B, k, m, beta)
+            @test isequal(actual, expected)
+        end
+    end
+    mesh = AS._spheroid_fembem_confocal(FluidFilled(1.0, 1.0), 0.1, 0.08, 2, 4, 2;
+        assemble_bulk = false, assemble_load = false)
+    @test isempty(mesh.load_points)
+end
+
+@testset "Real contractions preserve the complex angular load" begin
+    AS = AcousticScattering
+    for (rows, modes, columns) in ((1, 1, 1), (7, 3, 5), (3, 7, 2), (5, 4, 0), (0, 3, 2)),
+        phase in (0.0+0im, 1.0+0im, 0.0+1im, 1.0-2im)
+        E = [sin(i+2j)/(i+j) for i in 1:rows, j in 1:modes]
+        load = ComplexF64[phase*(-1)^(i+j)*(i+2j)/9 for i in 1:rows, j in 1:columns]
+        saved_E, saved_load = copy(E), copy(load)
+        expected = setprecision(BigFloat, 192) do
+            ComplexF64[ComplexF64(sum((BigFloat(E[i, j])*Complex{BigFloat}(load[i, col])
+                            for i in 1:rows); init = zero(Complex{BigFloat})))
+             for j in 1:modes, col in 1:columns]
+        end
+        actual = AS._spheroid_fembem_transform_load(E, load)
+        @test size(actual)==(modes, columns)
+        @test eltype(actual)===ComplexF64
+        @test actual ≈ expected rtol=3e-14 atol=3e-15
+        @test E==saved_E
+        @test load==saved_load
+    end
+    E = [0.2 -0.5; 0.7 0.3; -0.4 0.9]
+    load = ComplexF64[1+2im -3+4im; 5-6im 7+8im; -9+10im 11-12im]
+    @test AS._spheroid_fembem_transform_load(E, load) ≈ transpose(E)*load rtol=2e-14
+    @test AS._spheroid_fembem_transform_load(view(E, :, 1:1), view(load, :, 2:2)) ≈
+          transpose(E[:, 1:1])*load[:, 2:2] rtol=2e-14
+    for entry in (NaN, Inf, -Inf), component in (:real, :imaginary)
+        nonfinite_load = zeros(ComplexF64, 3, 1)
+        nonfinite_load[1] = component===:real ? complex(entry, 0.0) : complex(0.0, entry)
+        expected = complex.(transpose(E)*real.(nonfinite_load), transpose(E)*imag.(nonfinite_load))
+        @test isequal(AS._spheroid_fembem_transform_load(E, nonfinite_load), expected)
+    end
+    for entry in (NaN, Inf, -Inf)
+        nonfinite_E = copy(E)
+        nonfinite_E[1, 1] = entry
+        zero_load = zeros(ComplexF64, 3, 1)
+        expected = complex.(transpose(nonfinite_E)*real.(zero_load), transpose(nonfinite_E)*imag.(zero_load))
+        @test isequal(AS._spheroid_fembem_transform_load(nonfinite_E, zero_load), expected)
+    end
+    @test_throws DimensionMismatch AS._spheroid_fembem_transform_load(E, zeros(ComplexF64, 2, 4))
+end
+
+@testset "Fused parity loads preserve scalar arithmetic and ownership" begin
+    AS = AcousticScattering
+    finite = ComplexF64[complex((-1)^(i+j)*(i+2j)/7, (2i-j)/9)
+                       for i in 1:4, j in 1:3]
+    special = reshape(ComplexF64[
+        complex(0.0, 0.0), complex(-0.0, 0.0), complex(0.0, -0.0), complex(-0.0, -0.0),
+        complex(nextfloat(0.0), -nextfloat(0.0)), complex(floatmin(Float64), -floatmin(Float64)),
+        complex(Inf, 1.0), complex(-Inf, -1.0), complex(1.0, Inf), complex(-1.0, -Inf),
+        complex(NaN, 2.0), complex(3.0, NaN)], 4, 3)
+    for load in (finite, complex.(real.(finite)), complex.(0.0, imag.(finite)), special,
+            zeros(ComplexF64, 3, 0), zeros(ComplexF64, 0, 2), view(finite, :, 1:2)),
+        m in (0, 1, 24, 35)
+        saved = copy(load)
+        for parity in (0, 1, -1)
+            expected = parity==0 ? load : (load+parity*(-1)^m*conj(load))/2
+            actual = AS._spheroid_fembem_parity_load(load, m, parity)
+            @test isequal(actual, expected)
+            @test isequal(load, saved)
+            @test size(actual)==size(load)
+            @test (actual===load)==(parity==0)
+        end
+        even = AS._spheroid_fembem_parity_load(load, m, 1)
+        odd = AS._spheroid_fembem_parity_load(load, m, -1)
+        @test isequal(even, (saved+(-1)^m*conj(saved))/2)
+        @test isequal(odd, (saved+(-1)*(-1)^m*conj(saved))/2)
+        if !isempty(even)
+            even[1] = complex(19.0, -23.0)
+            @test isequal(load, saved)
+            @test isequal(odd, (saved+(-1)*(-1)^m*conj(saved))/2)
+        end
+    end
+end
+
+@testset "Buffered radial contractions preserve array sum reductions" begin
+    AS = AcousticScattering
+    direct(radial, transformed, columns, rows) = ComplexF64[
+        sum(view(radial, :, column) .* view(transformed, row, :))
+        for (column, row) in zip(columns, rows)]
+    for n in (0, 1, 2, 15, 16, 1023, 1024, 1025, 1363), real_response in (false, true)
+        radial_real = [(-1)^(i+j)*(i+3j)/(i+j+1) for i in 1:n, j in 1:4]
+        radial = real_response ? radial_real :
+                 complex.(radial_real, [(-1)^i*(2i-j)/(i+j+1) for i in 1:n, j in 1:4])
+        transformed = ComplexF64[complex((-1)^i*(i+2j)/11, (3i-j)/13)
+                                 for j in 1:4, i in 1:n]
+        saved_radial, saved_transformed = copy(radial), copy(transformed)
+        products = fill(complex(NaN, NaN), n)
+        for selected in (collect(1:4), [4, 2, 1], [3], Int[])
+            expected = direct(radial, transformed, selected, selected)
+            actual = AS._spheroid_fembem_contract_load!(products, radial, transformed,
+                selected, selected)
+            @test isequal(actual, expected)
+            @test eltype(actual)===ComplexF64
+            @test isequal(radial, saved_radial)
+            @test isequal(transformed, saved_transformed)
+            @test isequal(AS._spheroid_fembem_contract_load!(products, radial, transformed,
+                selected, selected), expected)
+        end
+        regular = [4, 1, 3]
+        compact = radial[:, regular]
+        @test isequal(AS._spheroid_fembem_contract_load!(products, compact, transformed,
+            eachindex(regular), regular), direct(compact, transformed, eachindex(regular), regular))
+        @test isempty(AS._spheroid_fembem_contract_load!(products, compact[:, 1:0],
+            transformed, 1:0, Int[]))
+    end
+    values = [0.0, -0.0, nextfloat(0.0), -nextfloat(0.0), 1e100, -1e100, Inf, -Inf, NaN]
+    for real_response in (false, true)
+        radial = real_response ? reshape(copy(values), :, 1) :
+                 reshape(complex.(values, reverse(values)), :, 1)
+        transformed = reshape(complex.(reverse(values), values), 1, :)
+        products = zeros(ComplexF64, length(values))
+        @test isequal(AS._spheroid_fembem_contract_load!(products, radial, transformed,
+            1:1, 1:1), direct(radial, transformed, 1:1, 1:1))
+    end
+    radial = [(-1)^i*(i+j)/7 for i in 1:1363, j in 1:3]
+    transformed = ComplexF64[complex((i+j)/11, (-1)^i*(i-j)/13) for j in 1:3, i in 1:1363]
+    expected = direct(radial, transformed, [3, 1], [2, 3])
+    tasks = [Threads.@spawn begin
+                 products = zeros(ComplexF64, size(radial, 1))
+                 AS._spheroid_fembem_contract_load!(products, radial, transformed, [3, 1], [2, 3])
+             end for _ in 1:4]
+    @test all(value->isequal(value, expected), fetch.(tasks))
+    @test_throws DimensionMismatch AS._spheroid_fembem_contract_load!(ComplexF64[],
+        radial, transformed, 1:1, 1:1)
+    @test_throws DimensionMismatch AS._spheroid_fembem_contract_load!(zeros(ComplexF64, 1363),
+        radial, transformed, 1:1, 1:2)
+    @test_throws BoundsError AS._spheroid_fembem_contract_load!(zeros(ComplexF64, 1363),
+        radial, transformed, [4], [1])
+end
+
+@testset "Dense complex-real Schur products" begin
+    AS = AcousticScattering
+    for (rows, inner, columns) in ((1, 1, 1), (7, 3, 5), (3, 7, 2),
+            (0, 3, 2), (5, 3, 0), (5, 0, 4), (0, 0, 0)),
+        phase in (1.0+0im, 0.0+1im, 1.0-2im)
+        A = ComplexF64[phase*(-1)^(i+j)*(2i-j)/7 for i in 1:rows, j in 1:inner]
+        B = Float64[(-1)^(i+j)*(i+3j)/11 for i in 1:inner, j in 1:columns]
+        saved_A, saved_B = copy(A), copy(B)
+        expected = setprecision(BigFloat, 192) do
+            ComplexF64[ComplexF64(sum((Complex{BigFloat}(A[i, k])*BigFloat(B[k, j])
+                            for k in 1:inner); init = zero(Complex{BigFloat})))
+             for i in 1:rows, j in 1:columns]
+        end
+        actual = AS._spheroid_fembem_mul(A, B)
+        @test size(actual)==(rows, columns)
+        @test eltype(actual)===ComplexF64
+        @test isapprox(actual, expected; rtol = 3e-14, atol = 3e-15)
+        @test A==saved_A
+        @test B==saved_B
+    end
+    A = ComplexF64[1+2im -3+4im 5-6im; -7+8im 9-10im -11-12im]
+    B = [0.2 -0.5; 0.7 0.3; -0.4 0.9]
+    # Unsupported storage and element combinations retain ordinary dispatch.
+    for (left, right) in ((real.(A), B), (A, complex.(B)),
+            (view(A, :, :), view(B, :, :)), (A, sparse(B)),
+            (transpose(copy(transpose(A))), B), (ComplexF32.(A), Float32.(B)))
+        @test AS._spheroid_fembem_mul(left, right)==left*right
+    end
+    @test_throws DimensionMismatch AS._spheroid_fembem_mul(A, zeros(2, 4))
+    @test_throws DimensionMismatch AS._spheroid_fembem_mul(zeros(ComplexF64, 0, 3), zeros(2, 0))
+
+    # Independent block algebra checks both contractions and complex fallback.
+    for (nt, nb) in ((4, 8), (12, 2)), m in (0, 1)
+        mesh = AS._spheroid_fembem_confocal(
+            FluidFilled(1.2, 0.85), 0.02, 0.015, 2, nt, 2;
+            half = true, assemble_bulk = false, assemble_load = false)
+        be = AS._spheroid_curved_boundary(0.02, 0.015, nb, 2; half = true)
+        T, B = AS._spheroid_fembem_trace(mesh, be)
+        nbe = length(be.chi)
+        K = ComplexF64[0.01cis(i+2j)/(i+j) for i in 1:nbe, j in 1:nbe]
+        V = Matrix{ComplexF64}(I, nbe, nbe)
+        cache = AS._NumericalReuse()
+        initial = AS._spheroid_fembem_tensor_operator(
+            mesh, be, T, B, K, V, 100.0, m, 1; reuse = cache)
+        eta = mesh.a*mesh.b*100.0/(mesh.density_contrast*mesh.soundspeed_contrast)
+        # A prescribed retained endpoint isolates augmented-block arithmetic.
+        initial.radial[end, 1] = -0.9im/eta
+        for fallback in (false, true)
+            if fallback
+                initial.radial[2, last(initial.regular)] += 1.0
+            end
+            op = AS._spheroid_fembem_tensor_operator(
+                mesh, be, T, B, K, V, 100.0, m, 1; reuse = cache)
+            @test 1 in op.retained
+            @test (op.regular_radial===nothing)==fallback
+            @test (op.regular_exterior===nothing)==(nt==12)
+            expected = setprecision(BigFloat, 192) do
+                D = Complex{BigFloat}.(op.D)
+                P = BigFloat.(op.pressure_map)
+                F = BigFloat.(op.flux_map)
+                response = Complex{BigFloat}.(op.response)
+                schur = Complex{BigFloat}.(V)+D*(P[:, op.regular]*Diagonal(response)*F[op.regular, :])
+                lower = -Diagonal(Complex{BigFloat}.(op.beta_response[op.retained]))*F[op.retained, :]
+                ComplexF64.([schur D*P[:, op.retained];
+                    lower Matrix(Diagonal(Complex{BigFloat}.(op.alpha[op.retained])))])
+            end
+            @test isapprox(op.matrix, expected; rtol = 3e-13, atol = 3e-15)
+            rhs = ComplexF64[cis(j)/(j+1) for j in axes(expected, 1)]
+            @test isapprox(op.factor\rhs, expected\rhs; rtol = 5e-12, atol = 5e-14)
+        end
+    end
+end
+
+@testset "Endpoint radial responses preserve full-column validation" begin
+    AS = AcousticScattering
+    function compare_endpoints(base, mass, p, values, eta)
+        radial = Matrix{ComplexF64}(undef, size(base, 2), length(values))
+        band = similar(base)
+        for j in eachindex(values)
+            AS._spheroid_fembem_radial_map!(view(radial, :, j), band, base, mass, p, values[j])
+        end
+        beta_response = vec(radial[end, :])
+        alpha = 1 .- im*eta .* beta_response
+        retained = findall(j -> abs(alpha[j])<=0.25eta*abs(beta_response[j]), eachindex(alpha))
+        regular = setdiff(eachindex(alpha), retained)
+        real_radial = AS._spheroid_fembem_real_radial(
+            radial, alpha, base, mass, p, values, regular, eta)
+        expected = real_radial===nothing ? beta_response[regular] ./ alpha[regular] :
+                   vec(real_radial[end, :])
+        saved_base, saved_mass = copy(base), copy(mass)
+        actual = AS._spheroid_fembem_radial_endpoints(base, mass, p, values, eta)
+        @test actual.beta_response==beta_response
+        @test actual.alpha==alpha
+        @test actual.retained==retained
+        @test actual.regular==regular
+        @test actual.real_regular==(real_radial!==nothing)
+        @test actual.response==expected
+        @test eltype(actual.response)===eltype(expected)
+        @test base==saved_base
+        @test mass==saved_mass
+        @test actual.beta_response!==actual.alpha
+        snapshot = deepcopy(actual)
+        repeated = AS._spheroid_fembem_radial_endpoints(base, mass, p, reverse(values), eta)
+        @test actual==snapshot
+        @test repeated.beta_response!==actual.beta_response
+        @test repeated.response!==actual.response
+        return actual
+    end
+    stiffness = [2.0 1.0 0.0; 1.0 0.0 1.0; 0.0 1.0 3.0]
+    for scale in (1e-8, 1.0, 1e8), density in (1.0, 0.0012), m in (0, 1)
+        factor = (; stiffness = scale*stiffness, mass = scale*Matrix(Diagonal([0.5, 1.0, 1.5])),
+            wave = zeros(3, 3), azimuthal = zeros(3, 3))
+        eta = 2scale/density
+        base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, m, 1.0, density, eta)
+        actual = compare_endpoints(base, mass, 2, [0.0, 0.2, -0.3], eta)
+        @test actual.real_regular
+        @test isempty(actual.retained)
+    end
+    factor = (; stiffness, mass = Matrix(Diagonal([0.5, 1.0, 1.5])),
+        wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, 0, 1.0, 1.0, 2.0)
+    # A solvable complex interior pencil must retain the complete complex path.
+    base[5, 1] += 1e-4im
+    fallback = compare_endpoints(base, mass, 2, [0.0, 0.2, -0.3], 2.0)
+    @test !fallback.real_regular
+    @test eltype(fallback.response)===ComplexF64
+    pole_factor = (; stiffness = Matrix(Diagonal([2.0, 1.0, 1e-12])),
+        mass = zeros(3, 3), wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    base, mass = AS._spheroid_fembem_radial_pencil([pole_factor], 2, 0, 1.0, 1.0, 2.0)
+    pole = compare_endpoints(base, mass, 2, [0.0], 2.0)
+    @test pole.retained==[1]
+    @test isempty(pole.regular) && isempty(pole.response)
+    empty = compare_endpoints(base, mass, 2, Float64[], 2.0)
+    @test isempty(empty.alpha) && isempty(empty.retained) && isempty(empty.regular)
+    for coupling in (-3.14159e-303, -2.71828e-308, -9.999e-312)
+        factor = (; stiffness = [1e5 coupling; coupling 1e4], mass = zeros(2, 2),
+            wave = zeros(2, 2), azimuthal = zeros(2, 2))
+        base, mass = AS._spheroid_fembem_radial_pencil([factor], 1, 0, 1.0, 1.0, 3e4)
+        @test compare_endpoints(base, mass, 1, [0.0], 3e4).real_regular
+    end
+end
+
+@testset "Endpoint operators preserve total fields and formulation cache isolation" begin
+    AS = AcousticScattering
+    for (nt, nb) in ((4, 8), (12, 2)), m in (0, 1), parity in (1, -1)
+        mesh = AS._spheroid_fembem_confocal(
+            FluidFilled(1.2, 0.85), 0.02, 0.015, 2, nt, 2;
+            half = true, assemble_bulk = false, assemble_load = false)
+        be = AS._spheroid_curved_boundary(0.02, 0.015, nb, 2; half = true)
+        T, B = AS._spheroid_fembem_trace(mesh, be)
+        nbe = length(be.chi)
+        K = ComplexF64[0.01cis(i+2j)/(i+j) for i in 1:nbe, j in 1:nbe]
+        V = Matrix{ComplexF64}(I, nbe, nbe)
+        full = AS._spheroid_fembem_tensor_operator(mesh, be, T, B, K, V, 100.0, m, parity)
+        streamed = AS._spheroid_fembem_tensor_operator(
+            mesh, be, T, B, K, V, 100.0, m, parity; boundary_only = true)
+        @test streamed.radial===nothing && streamed.regular_radial===nothing
+        @test streamed.real_regular==full.real_regular
+        for name in (:alpha, :beta_response, :retained, :regular, :response,
+                :pressure_map, :flux_map, :regular_exterior, :matrix)
+            @test isequal(getproperty(streamed, name), getproperty(full, name))
+        end
+        @test Base.summarysize(streamed)<Base.summarysize(full)
+        if nt==4 && m==0 && parity==1
+            factors = [merge(factor, (; stiffness = complex.(factor.stiffness)))
+                       for factor in mesh.radial_factors]
+            factors[1].stiffness[2, 2] += 1e-4im
+            fallback_mesh = merge(mesh, (; radial_factors = factors))
+            full_fallback = AS._spheroid_fembem_tensor_operator(
+                fallback_mesh, be, T, B, K, V, 100.0, m, parity)
+            streamed_fallback = AS._spheroid_fembem_tensor_operator(
+                fallback_mesh, be, T, B, K, V, 100.0, m, parity; boundary_only = true)
+            @test !full_fallback.real_regular && !streamed_fallback.real_regular
+            @test full_fallback.regular_radial===nothing
+            @test streamed_fallback.radial===nothing
+            for name in (:alpha, :beta_response, :retained, :regular, :response, :matrix)
+                @test isequal(getproperty(streamed_fallback, name), getproperty(full_fallback, name))
+            end
+        end
+        beta = 0.61
+        incident = [AS._p_inc_mode(m, 100.0, beta, r, z) for (r, z) in zip(be.rho, be.z)]
+        derivative = [AS._dpdn_inc_mode(m, 100.0, beta, r, z, nx, nz)
+                      for (r, z, nx, nz) in zip(be.rho, be.z, be.nrho, be.nz)]
+        incident = (incident+parity*(-1)^m*conj(incident))/2
+        derivative = (derivative+parity*(-1)^m*conj(derivative))/2
+        # Full-column endpoint elimination supplies an independent boundary RHS.
+        forcing = full.beta_response .* (full.flux_map*derivative)
+        particular = forcing[full.regular] ./ full.alpha[full.regular]
+        rhs = vcat(full.D*(incident-full.pressure_map[:, full.regular]*particular),
+            forcing[full.retained])
+        solution = full.matrix\rhs
+        coefficients = zeros(ComplexF64, length(full.alpha))
+        coefficients[full.regular] = particular+full.response .* (full.flux_map[full.regular, :]*solution[1:nbe])
+        coefficients[full.retained] = solution[nbe+1:end]
+        expected_pressure = full.pressure_map*coefficients-incident
+        field = AS._spheroid_fembem_tensor_mode(
+            mesh, be, T, B, K, V, 100.0, m, beta, AS._SolveReports(), 1;
+            parity, interior_reduction = :angular, interior_field = :total)
+        @test isapprox(field.pressure, expected_pressure; rtol = 2e-12, atol = 2e-14)
+        @test isapprox(field.derivative, solution[1:nbe]; rtol = 2e-12, atol = 2e-13)
+        load = ComplexF64[cis(i+2j)/(i+j) for i in 1:(mesh.nt*mesh.p+1), j in 1:(mesh.nr*mesh.p+1)]
+        saved_load = copy(load)
+        fresh = Dict(formulation => AS._spheroid_fembem_tensor_mode(
+            mesh, be, T, B, K, V, 100.0, m, beta, AS._SolveReports(), 1;
+            parity, load, interior_reduction = :angular, interior_field = formulation)
+                     for formulation in (:total, :scattered))
+        for order in ((:total, :scattered, :total), (:scattered, :total, :scattered))
+            cache = AS._NumericalReuse()
+            for formulation in order
+                cached = AS._spheroid_fembem_tensor_mode(
+                    mesh, be, T, B, K, V, 100.0, m, beta, AS._SolveReports(), 1;
+                    parity, load, reuse = cache, reuse_key = :endpoint_regression,
+                    exterior_key = :endpoint_regression, interior_reduction = :angular,
+                    interior_field = formulation)
+                @test cached.pressure==fresh[formulation].pressure
+                @test cached.derivative==fresh[formulation].derivative
+            end
+            total_op = cache.entries[(:fembem_operator, :endpoint_regression, m, parity==-1, true)][1]
+            scattered_op = cache.entries[(:fembem_operator, :endpoint_regression, m, parity==-1, false)][1]
+            @test total_op.radial===nothing
+            @test scattered_op.radial isa Matrix{ComplexF64}
+            @test total_op.E===scattered_op.E
+            radial_keys = filter(key -> first(key)===:fembem_radial, collect(keys(cache.entries)))
+            @test Set(last.(radial_keys))==Set((false, true))
+        end
+        @test load==saved_load
+    end
+end
+
+@testset "Real regular radial Robin responses" begin
+    AS = AcousticScattering
+    stiffness = [2.0 1.0 0.0; 1.0 0.0 1.0; 0.0 1.0 3.0]
+    radial_mass = Matrix(Diagonal([0.5, 1.0, 1.5]))
+    values = [0.0, 0.2, -0.3]
+    load = ComplexF64[0.2, 0.3im, 0.4]
+    for scale in (1e-8, 1.0, 1e8), density in (1.0, 0.0012), m in (0, 1)
+        factor = (; stiffness = scale*stiffness, mass = scale*radial_mass,
+            wave = zeros(3, 3), azimuthal = zeros(3, 3))
+        eta = 2scale/density
+        base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, m, 1.0, density, eta)
+        band = similar(base)
+        radial = zeros(ComplexF64, 3, length(values))
+        for j in eachindex(values)
+            AS._spheroid_fembem_radial_map!(view(radial, :, j), band, base, mass, 2, values[j])
+        end
+        alpha = 1 .- im*eta .* radial[end, :]
+        regular = eachindex(values)
+        actual = AS._spheroid_fembem_real_radial(radial, alpha, base, mass, 2, values, regular, eta)
+        @test actual!==nothing
+        actual===nothing && continue
+        @test eltype(actual)===Float64
+        for j in regular
+            # Dense high-precision solves check scaling and the constrained node.
+            reference = setprecision(BigFloat, 192) do
+                A = (BigFloat.(factor.stiffness)+BigFloat(values[j])*BigFloat.(factor.mass))/BigFloat(density)
+                if m>0
+                    A[1, :] .= 0
+                    A[:, 1] .= 0
+                    A[1, 1] = 1
+                end
+                Float64.(A \ BigFloat[0, 0, 1])
+            end
+            @test actual[:, j] ≈ reference rtol=2e-13
+            @test alpha[j]*actual[:, j] ≈ radial[:, j] rtol=2e-13
+            @test sum(actual[:, j] .* load) ≈ sum(radial[:, j] .* load)/alpha[j] rtol=2e-13
+            @test actual[end, j] ≈ radial[end, j]/alpha[j] rtol=2e-13 atol=1e-13*maximum(abs, reference)
+            m==0 || @test iszero(actual[1, j])
+        end
+        # The m=1, lambda=0 pencil has an exactly zero endpoint Green value.
+        m==0 || @test abs(actual[end, 1])<=1e-14*maximum(abs, actual[:, 1])
+        pressure = [1.0 0.2 -0.3; 0.4 0.7 0.5]
+        flux = [0.6 -0.2; 0.3 0.5; -0.4 0.8]
+        exterior = ComplexF64[1+0.2im 0.3-0.1im; -0.2+0.4im 0.8+0.1im]
+        original = (exterior*pressure .* transpose(radial[end, :] ./ alpha))*flux
+        reconstructed = exterior*((pressure .* transpose(actual[end, :]))*flux)
+        @test reconstructed ≈ original rtol=3e-13
+    end
+
+    factor = (; stiffness, mass = radial_mass, wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, 0, 1.0, 1.0, 2.0)
+    radial = reshape((ComplexF64.(stiffness)+Diagonal(ComplexF64[0, 0, 2im])) \ ComplexF64[0, 0, 1], 3, 1)
+    alpha = [1-2im*radial[end]]
+    check(response, coefficient = alpha, pencil = base, shifts = [0.0], indices = [1], eta = 2.0) =
+        AS._spheroid_fembem_real_radial(response, coefficient, pencil, mass, 2, shifts, indices, eta)
+    @test check(radial)!==nothing
+    for invalid in (NaN, Inf, -1.0)
+        @test check(radial, alpha, base, [0.0], [1], invalid)===nothing
+    end
+    @test check(radial, [0.0+0im])===nothing
+    @test check(radial, [NaN+0im])===nothing
+    @test check(radial, alpha, base, [Inf])===nothing
+    @test check(radial, alpha, base, [0.0], [0])===nothing
+    @test check(radial, alpha, base, [0.0], [2])===nothing
+    invalid = copy(radial)
+    invalid[2] += 1e-4im
+    @test check(invalid)===nothing
+    invalid = copy(radial)
+    invalid[2] += alpha[1]*1e-4
+    @test check(invalid)===nothing
+    invalid = copy(radial)
+    invalid[2] = Inf
+    @test check(invalid)===nothing
+    invalid_base = copy(base)
+    invalid_base[5, 1] += 1e-4im
+    @test check(radial, alpha, invalid_base)===nothing
+    @test size(check(radial, alpha, base, [0.0], Int[]))==(3, 0)
+
+    # A near-pole endpoint remains in the original complex augmented system.
+    pole_factor = (; stiffness = Matrix(Diagonal([2.0, 1.0, 1e-12])),
+        mass = zeros(3, 3), wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    pole_base, pole_mass = AS._spheroid_fembem_radial_pencil([pole_factor], 2, 0, 1.0, 1.0, 2.0)
+    pole_radial = zeros(ComplexF64, 3, 1)
+    AS._spheroid_fembem_radial_map!(view(pole_radial, :, 1), similar(pole_base), pole_base, pole_mass, 2, 0.0)
+    pole_alpha = [1-2im*pole_radial[end]]
+    @test abs(pole_alpha[1])<=0.5abs(pole_radial[end])
+    @test AS._spheroid_fembem_real_radial(
+        pole_radial, pole_alpha, pole_base, pole_mass, 2, [0.0], [1], 2.0)===nothing
+end
+
+@testset "Real radial residuals include gradual-underflow quantization" begin
+    AS = AcousticScattering
+    relative_failures = 0
+    for coupling in (-3.14159e-303, -2.71828e-308, -9.999e-312)
+        stiffness = [1e5 coupling; coupling 1e4]
+        factor = (; stiffness, mass = zeros(2, 2), wave = zeros(2, 2), azimuthal = zeros(2, 2))
+        eta = 3e4
+        base, mass = AS._spheroid_fembem_radial_pencil([factor], 1, 0, 1.0, 1.0, eta)
+        radial = zeros(ComplexF64, 2, 1)
+        AS._spheroid_fembem_radial_map!(view(radial, :, 1), similar(base), base, mass, 1, 0.0)
+        alpha = [1-im*eta*radial[end]]
+        actual = AS._spheroid_fembem_real_radial(radial, alpha, base, mass, 1, [0.0], [1], eta)
+        @test actual!==nothing
+        actual===nothing && continue
+        @test issubnormal(actual[1])
+        setprecision(BigFloat, 256) do
+            reference = BigFloat.(stiffness) \ BigFloat[0, 1]
+            difference = BigFloat.(actual[:, 1])-reference
+            @test norm(difference)<=big"2e-13"*norm(reference)
+            # Resolve normalized subnormal responses against a high-precision solve.
+            @test abs(difference[1])<=64BigFloat(nextfloat(0.0))/BigFloat(real(alpha[1]))
+        end
+        terms = stiffness[1, :] .* actual[:, 1]
+        relative_failures += abs(sum(terms))>128eps(Float64)*3sum(abs, terms)
+        # Reject ordinary residual errors and excessive subnormal corruption.
+        for perturbation in (1e-200, 1e-318)
+            corrupted = copy(radial)
+            corrupted[1] += alpha[1]*perturbation
+            rejected = AS._spheroid_fembem_real_radial(
+                corrupted, alpha, base, mass, 1, [0.0], [1], eta; partition = true)
+            @test isempty(rejected.regular)
+            @test rejected.reasons==[:radial_residual]
+        end
+    end
+    @test relative_failures>=2
+end
+
+@testset "Partitioned real responses preserve complex augmented equations" begin
+    AS = AcousticScattering
+    stiffness = [2.0 1.0 0.0; 1.0 0.0 1.0; 0.0 1.0 3.0]
+    factor = (; stiffness, mass = Matrix(Diagonal([0.5, 1.0, 1.5])),
+        wave = zeros(3, 3), azimuthal = zeros(3, 3))
+    values, eta = [0.0, 0.2, -0.3], 2.0
+    base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, 0, 1.0, 1.0, eta)
+    radial = zeros(ComplexF64, 3, 3)
+    for j in eachindex(values)
+        AS._spheroid_fembem_radial_map!(view(radial, :, j), similar(base), base, mass, 2, values[j])
+    end
+    alpha = 1 .- im*eta .* radial[end, :]
+    partition = AS._spheroid_fembem_real_radial(
+        radial, alpha, base, mass, 2, values, 1:3, eta; partition = true)
+    @test partition.regular==[1, 2, 3]
+    @test isempty(partition.failed)
+    @test isempty(partition.reasons)
+    @test partition.radial ≈ AS._spheroid_fembem_real_radial(radial, alpha, base, mass, 2, values, 1:3, eta)
+
+    # Preserve complex rejected columns while compacting accepted responses.
+    radial[2, 2] += 1e-5im
+    saved_radial, saved_alpha = copy(radial), copy(alpha)
+    @test AS._spheroid_fembem_real_radial(radial, alpha, base, mass, 2, values, 1:3, eta)===nothing
+    pressure = [1.0 0.2 -0.3; 0.4 0.7 0.5]
+    flux = [0.6 -0.2; 0.3 0.5; -0.4 0.8]
+    exterior = ComplexF64[1+0.2im 0.3-0.1im; -0.2+0.4im 0.8+0.1im]
+    single = ComplexF64[2+0.3im 0.1+0.2im; -0.3+0.1im 1.5-0.2im]
+    load = ComplexF64[complex(sin(i+j), cos(i+2j)) for i in 1:3, j in 1:3]
+    incident = ComplexF64[0.2+0.3im, -0.1+0.4im]
+    derivative = ComplexF64[0.3-0.2im, 0.5+0.1im]
+    beta_response = vec(radial[end, :])
+    full_matrix = [single exterior*pressure;
+                   -Diagonal(beta_response)*flux Matrix(Diagonal(alpha))]
+    for original_retained in (Int[], [3]), interior_field in (:scattered, :total)
+        original_regular = setdiff(1:3, original_retained)
+        partition = AS._spheroid_fembem_real_radial(
+            radial, alpha, base, mass, 2, values, original_regular, eta; partition = true)
+        @test partition.regular==setdiff(original_regular, [2])
+        @test partition.failed==[2]
+        @test partition.reasons==[:reconstruction]
+        regular = partition.regular
+        retained = sort(vcat(original_retained, partition.failed))
+        response = vec(partition.radial[end, :])
+        boundary_forcing = flux*derivative
+        forcing = interior_field===:scattered ?
+                  [sum(radial[:, j] .* load[:, j]) for j in 1:3] :
+                  beta_response .* boundary_forcing
+        particular = interior_field===:scattered ?
+                     [sum(partition.radial[:, index] .* load[:, j])
+                      for (index, j) in enumerate(regular)] :
+                     response .* boundary_forcing[regular]
+        source = interior_field===:scattered ? zeros(ComplexF64, 2) : exterior*incident
+        reference = full_matrix \ vcat(source, forcing)
+        schur = single+exterior*((pressure[:, regular] .* transpose(response))*flux[regular, :])
+        matrix = [schur exterior*pressure[:, retained];
+                  -Diagonal(beta_response[retained])*flux[retained, :] Matrix(Diagonal(alpha[retained]))]
+        solution = matrix \ vcat(source-exterior*(pressure[:, regular]*particular), forcing[retained])
+        coefficients = zeros(ComplexF64, 3)
+        coefficients[regular] = particular+response .* (flux[regular, :]*solution[1:2])
+        coefficients[retained] = solution[3:end]
+        actual = vcat(solution[1:2], coefficients)
+        @test actual ≈ reference rtol=2e-13 atol=2e-14
+        @test full_matrix*actual ≈ vcat(source, forcing) rtol=2e-13 atol=2e-14
+    end
+    @test radial==saved_radial
+    @test alpha==saved_alpha
+    rejected = AS._spheroid_fembem_real_radial(
+        radial, zeros(ComplexF64, 3), base, mass, 2, values, 1:3, eta; partition = true)
+    @test isempty(rejected.regular)
+    @test size(rejected.radial)==(3, 0)
+    @test rejected.failed==[1, 2, 3]
+    @test rejected.reasons==fill(:denominator, 3)
+end
+
 @testset "Tensor FEM-BEM elimination" begin
     AS = AcousticScattering
     body = Spheroid(0.02, 0.015)
-    # Compare independent elimination orders of the same discrete weak form,
-    # including density-only and speed-only scattering, unreduced domains and
-    # both contraction orders for the independently sized FE/BE interfaces.
+    # Compare independent eliminations across materials, domains and FE/BE sizes.
     for (bc, beta, split) in ((FluidFilled(1.2, 0.85), 0.6, true),
             (FluidFilled(1.2, 1.0), 0.6, true), (FluidFilled(1.0, 0.85), 0.6, true),
             (FluidFilled(0.0012, 0.23), 0.6, true),
@@ -575,8 +1327,7 @@ end
     for m in (0, 1)
         base, mass = AS._spheroid_fembem_radial_pencil([factor], 2, m, 1.0, 1.0, 2.0)
         band, response = similar(base), zeros(ComplexF64, 3)
-        # Reuse the factorization storage at different shifts, then revisit the
-        # singular local block. Compare to two independent full-system loads.
+        # Revisit singular shifts after factorization reuse with independent loads.
         for lambda in (0.0, 0.2, -0.3, 0.0)
             A = ComplexF64.(stiffness+lambda*factor.mass)
             rhs = hcat(ComplexF64[0, 0, 1], load)
@@ -592,8 +1343,7 @@ end
             @test isapprox(actual, (A \ rhs)[end, :]; rtol = 1e-13)
         end
     end
-    # Interior spherical Dirichlet and Neumann frequencies remain regular
-    # transmission problems. Both are independent of exterior CHIEF checks.
+    # Interior Dirichlet and Neumann poles remain regular transmission problems.
     bc = FluidFilled(1.2, 0.85)
     for interior_ka in (pi, 4.493409457909064)
         k = interior_ka*bc.soundspeed_contrast
