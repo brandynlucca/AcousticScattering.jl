@@ -1,5 +1,6 @@
-# Outer-quadrature breakpoints for a panel pair's meridian integral, split at the closest-approach
-# parameter s* so adaptive quadrature doesn't have to discover a near-singularity on its own.
+using QuadGK: quadgk!
+
+# Split meridian quadrature at the closest approach.
 function _closest_param(xρ::Real, xz::Real, p::Panel)
     dρ, dz = p.rho2 - p.rho1, p.z2 - p.z1
     denom = dρ^2 + dz^2
@@ -28,6 +29,18 @@ function _azimuthal_sinh_breakpoints(m::Integer, scale::Real, upper::Real)
     return points
 end
 
+# Reuse initial-interval storage separately from adapted segments.
+function _azimuthal_quadgk(integrand::F, points, rtol, atol, workspace) where {F}
+    initial = workspace.azimuthal_initial
+    resize!(initial, length(points)-1)
+    @inbounds for j in eachindex(initial)
+        initial[j] = eltype(initial)(points[j], points[j+1], nothing, nothing)
+    end
+    return quadgk(integrand, first(points), last(points); rtol, atol,
+        eval_segbuf = initial, segbuf = workspace.azimuthal,
+        maxevals = _AZIMUTHAL_MAXEVALS)
+end
+
 # Integrates `integrand(Δφ)` over [0,π]. The substitution `Δφ = scale * sinh(τ)` makes the near-singular peak at Δφ = 0 smooth.
 function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ2::Real,
         z2::Real, rtol::Real, atol::Real, workspace = nothing)
@@ -35,30 +48,35 @@ function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ
     upper = asinh(π / scale)
     if workspace !== nothing
         points = workspace.breaks
-        # Start with full-cycle intervals; the embedded error estimate refines
-        # wherever the kernel or the coordinate map needs more nodes.
+        transformed = τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ))
+        # Try half-cycle intervals first when the full-cycle start exhausts the evaluation cap.
+        fallback = nothing
+        if m > div(_AZIMUTHAL_MAXEVALS, 15)
+            resize!(points, m + 1)
+            for j in eachindex(points)
+                points[j] = asinh((j - 1) * π / (m * scale))
+            end
+            points[end] = upper
+            fallback, error = _azimuthal_quadgk(transformed, points, rtol, atol, workspace)
+            error <= max(atol, rtol * norm(fallback)) && return fallback
+        end
         resize!(points, max(cld(m, 2) + 1, 2))
         for j in eachindex(points)
             points[j] = asinh(2(j - 1) * π / (max(m, 1) * scale))
         end
         points[end] = upper
-        # Passing the endpoints as an array avoids specializing on every mode's
-        # breakpoint count. Only storage is reused; every integral is reevaluated.
-        transformed = τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ))
-        val, error = quadgk(transformed,
-            points; rtol, atol, segbuf = workspace.azimuthal,
-            maxevals = _AZIMUTHAL_MAXEVALS)
+        # Array endpoints avoid specialization on breakpoint counts.
+        val, error = _azimuthal_quadgk(transformed, points, rtol, atol, workspace)
         (m <= 1 || error <= max(atol, rtol * norm(val))) && return val
+        fallback===nothing || return fallback
 
-        # Preserve the former capped result when the coarser start cannot meet
-        # its error target. The fallback has the original grid and its own cap.
+        # Retain the original capped fallback after a failed coarse start.
         resize!(points, max(m + 1, 2))
         for j in eachindex(points)
             points[j] = asinh((j - 1) * π / (m * scale))
         end
         points[end] = upper
-        return quadgk(transformed, points; rtol, atol, segbuf = workspace.azimuthal,
-            maxevals = _AZIMUTHAL_MAXEVALS)[1]
+        return _azimuthal_quadgk(transformed, points, rtol, atol, workspace)[1]
     end
     val, _ = quadgk(τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ)),
         _azimuthal_sinh_breakpoints(m, scale, upper)...; rtol = rtol, atol = atol,
@@ -67,10 +85,39 @@ function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ
 end
 
 # Calls `f(i)` for every row `i` in `1:n`. Threads take one row at a time so uneven row costs stay balanced.
-_foreach_row(f, n::Integer) = _foreach_row((i, _) -> f(i), n, () -> nothing)
+_foreach_row(f::F, n::Integer;
+    compile_serially::Bool = true) where {F} =
+    _foreach_row((i, _) -> f(i), n, () -> nothing; compile_serially)
+
+function _foreach_row_primed_worker(f::F, n::Integer, make_workspace::W,
+        next::Threads.Atomic{Int}, middle::Integer, prime::Bool,
+        ready::Channel{Bool}, release::Base.Event) where {F, W}
+    workspace = if prime
+        completed = false
+        try
+            scratch = make_workspace()
+            f(middle, scratch)
+            completed = true
+            scratch
+        finally
+            put!(ready, completed)
+        end
+    else
+        make_workspace()
+    end
+    prime && wait(release)
+    while true
+        i = Threads.atomic_add!(next, 1) + 1
+        i > n && break
+        i == middle && continue
+        f(i, workspace)
+    end
+    return nothing
+end
 
 # Scratch belongs to the task, so migration between threads cannot alias buffers.
-function _foreach_row(f, n::Integer, make_workspace)
+function _foreach_row(f::F, n::Integer, make_workspace::W;
+        compile_serially::Bool = true) where {F, W}
     if Threads.nthreads() == 1 || n < 2
         workspace = make_workspace()
         for i in 1:n
@@ -79,6 +126,27 @@ function _foreach_row(f, n::Integer, make_workspace)
         return nothing
     end
     next = Threads.Atomic{Int}(0)
+    if compile_serially
+        # Prime a middle row inside the owning worker before releasing other workers.
+        middle = cld(n, 2)
+        ready = Channel{Bool}(1)
+        release = Base.Event()
+        Threads.@sync begin
+            Threads.@spawn _foreach_row_primed_worker(
+                f, n, make_workspace, next, middle, true, ready, release)
+            try
+                if take!(ready)
+                    for _ in 2:min(Threads.nthreads(), n)
+                        Threads.@spawn _foreach_row_primed_worker(
+                            f, n, make_workspace, next, middle, false, ready, release)
+                    end
+                end
+            finally
+                notify(release)
+            end
+        end
+        return nothing
+    end
     Threads.@sync for _ in 1:min(Threads.nthreads(), n)
         Threads.@spawn let workspace = make_workspace()
             while true
@@ -110,15 +178,13 @@ function _ring_distance(ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
     hypot(ρ - ρ2, z - z2, 2sqrt(ρ * ρ2) * sin(Δφ / 2))
 end
 
-# Floor on the ring distance r, guards against a floating-point r=0.0/NaN at fine meshes (a
-# rounding artifact at a measure-zero sample point, not a true kernel singularity).
+# Guard against distance rounding to zero at fine meshes.
 const _RING_DISTANCE_FLOOR = 1e-12
 
-# Absolute-tolerance floor for every quadgk call, lets genuinely tiny panel-pair contributions converge immediately without a pure rtol criterion over-resolving them.
+# Use an absolute tolerance floor for negligible panel-pair contributions.
 const _QUAD_ATOL = 1e-10
 
-# Hard evaluation cap on every adaptive quadrature call, bounds near-axis (small ρ) self-pairs at
-# high Fourier mode m that otherwise converge very slowly, at the cost of some precision there.
+# Cap adaptive evaluations for slowly converging near-axis pairs.
 const _AZIMUTHAL_MAXEVALS = 2000
 
 # ∂G/∂n_y at ring point y=(ρ2,φ',z2), field point x=(ρ,0,z), Δφ=φ'-0, n̂_y=(nρ2 cosΔφ, nρ2 sinΔφ, nz2).
@@ -138,8 +204,7 @@ function _ring_G(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
     return cis(k * r) / (4π * r)
 end
 
-# Breakpoints aligned to cos(mΔφ)'s zero crossings, avoids quadgk having to discover the
-# oscillation structure itself, which otherwise dominates cost and grows explosively with m.
+# Align quadrature intervals with Fourier zero crossings.
 _azimuthal_breakpoints(m::Integer) = m == 0 ? (0.0, 2π) : range(0.0, 2π; length = 4m + 1)
 _azimuthal_half_breakpoints(m::Integer) = m == 0 ? (0.0, π) : range(0.0, π; length = 2m + 1)
 
@@ -156,7 +221,7 @@ end
 # Quadrature error target of the panel rule, well below the solver tolerance.
 const _MERIDIAN_LOG_TOLERANCE = log(1e12)
 
-# Node count for a field point `separation` from the panel midpoint, from the Bernstein ellipse error bound plus the phase change across the panel.
+# Select panel nodes from the Bernstein ellipse bound and phase variation.
 function _meridian_node_count(separation::Real, panel_length::Real, k::Real)
     delta = 2separation / panel_length
     bernstein = delta + sqrt(max(delta^2 - 1, 0))
@@ -284,19 +349,17 @@ end
 # Meridian separation selects panel quadrature; ring separation separately selects azimuthal quadrature.
 const _AZIMUTHAL_FAR_FACTOR = 0.75
 
-# Whether (ρ,z) is far enough from panel `pj` (relative to the panel's own
-# arc length) for the fixed-order azimuthal rule to be safe.
+# Use fixed azimuthal quadrature only for sufficiently distant panels.
 function _azimuthal_is_far(ρ::Real, z::Real, pj::Panel)
     hypot(ρ - pj.rhom, z - pj.zm) > _AZIMUTHAL_FAR_FACTOR * pj.L
 end
 
-# Order for the fixed azimuthal rule, accounts for both cos(mΔφ) and the ring kernel's own phase
-# oscillation (significant when kρ is large, e.g. an oblate spheroid's equator).
+# Resolve both Fourier oscillation and the Helmholtz phase.
 function _azimuthal_fixed_order(m::Integer, k::Real, ρ::Real, ρ2::Real)
     max(4m + 32, ceil(Int, 8 * k * min(ρ, ρ2)) + 32)
 end
 
-# Fixed Gauss-Legendre rules by order. A miss swaps in an updated copy under a lock, so concurrent readers never see a dictionary being modified.
+# Publish cached Gauss-Legendre rules through locked copy replacement.
 mutable struct _FixedRuleCache
     @atomic rules::Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}
 end
@@ -437,8 +500,7 @@ end
     if N > 1
         c[2] = cos((m0 + 1) * x)
         twocos = 2cos(x)
-        # The fixed-width recurrence stays on the stack when bounds checks cannot
-        # expose the mutable temporary through an exception path.
+        # Avoid exception paths that expose the stack-local recurrence buffer.
         @inbounds for i in 3:N
             c[i] = twocos * c[i - 1] - c[i - 2]
         end
@@ -471,6 +533,8 @@ include("ring_kernel.jl")
 # Nested integration needs distinct inner and outer segment buffers.
 function _bem_quadrature_workspace(modes, ::Val{N}; maxlambda = 0.0) where {N}
     return (; breaks = zeros(max(cld(last(modes), 2) + 1, 2)),
+        azimuthal_initial = alloc_segbuf(Float64, Nothing, Nothing;
+            size = max(last(modes), 1)),
         azimuthal = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
         meridian = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
         modal = _ring_split_workspace(modes, Val(N)),
@@ -523,6 +587,11 @@ function _azimuthal_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, n�
         accepted, convolution = _ring_convolution_KV(k, ρ, z, ρ2, z2, nρ2, projection,
             modes, rtol, width, workspace.convolution)
         accepted && return convolution
+    end
+    if workspace!==nothing && hasproperty(workspace, :recurrence)
+        accepted, recurrence = _ring_recurrence_KV(k, ρ, z, ρ2, z2, nρ2,
+            projection, modes, rtol, width, workspace.recurrence)
+        accepted && return recurrence
     end
     val = _azimuthal_peak_quadrature(
         Δφ -> _ring_KV_modes(k, geometry, Δφ, m0, count, width),
@@ -728,10 +797,7 @@ function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh;
     return p_scat, dpdn_scat, ps
 end
 
-# Robin condition ∂p_total/∂n=-ik*p_total/zeta folded into the direct CBIE identity
-# 0.5*p_scat-K[p_scat]=-G[∂p_scat/∂n]: substituting ∂p_scat/∂n=-beta*(p_scat+p_inc)-∂p_inc/∂n
-# (beta=ik/zeta) gives (0.5I-K-beta*G)*p_scat = beta*G[p_inc]+G[∂p_inc/∂n], which reduces to
-# Rigid's own equation at beta=0 (zeta→∞) and forces p_scat→-p_inc as beta→∞ (zeta→0).
+# Fold the Robin boundary condition into the direct CBIE.
 function solve_axial(bc::Impedance, k::Real, mesh::MeridianMesh;
         rtol::Real = 1e-6, solve_reports = nothing)
     ps = panels(mesh)
@@ -761,8 +827,7 @@ function solve_axial(bc::Impedance, k::Real, mesh::MeridianMesh;
     return p_scat, dpdn_scat, ps
 end
 
-# Fluid-filled/transmission boundary, axial incidence: standalone (no shell) interface, exterior
-# and interior CBIEs coupled by pressure/velocity continuity into a 4n x 4n system for [p_scat; dpdn_scat; p_int; dpdn_int]. Limiting cases g->∞/g->0 recover Rigid/PressureRelease respectively.
+# Couple exterior and interior CBIEs through pressure and velocity continuity.
 
 """
     _chief_points(mesh, n_points)
@@ -965,8 +1030,7 @@ function solve_axial_adaptive(boundary::Union{Rigid, PressureRelease},
     return p, d, ps
 end
 
-# Oblique incidence, rigid boundary: Jacobi-Anger expansion of p_inc = e^{ik(x sinβ + z cosβ)} into
-# azimuthal Fourier modes cos(mφ), decoupled since the ring kernel depends only on the source/field azimuth difference; mode m solves its own CBIE via assemble_cbie_operators(mesh, k; m=m).
+# Decouple oblique rigid scattering into azimuthal Fourier modes.
 
 function _besselj_deriv(m::Integer, x::Real)
     m == 0 ? -besselj(1, x) : (besselj(m - 1, x) - besselj(m + 1, x)) / 2
@@ -1019,8 +1083,7 @@ function solve_oblique(::Rigid, k::Real, mesh::MeridianMesh, incidence_angle::Re
     return p_scat_modes, dpdn_scat_modes, ps
 end
 
-# Oblique incidence, pressure-release boundary: needs only p_inc's value (Dirichlet data), so the
-# plain Jacobi-Anger expansion suffices, no Jₘ' term; same per-mode decoupling as the rigid case.
+# Pressure-release forcing requires only the incident Dirichlet data.
 
 function _p_inc_mode(m::Integer, k::Real, β::Real, ρ::Real, z::Real)
     εm = m == 0 ? 1.0 : 2.0
@@ -1059,7 +1122,7 @@ function solve_oblique(
     return p_scat_modes, dpdn_scat_modes, ps
 end
 
-# Each mode's system matrix depends only on the mesh/k/mode, not the incidence angle, so `incidence_angle_sweep` factorizes it once and reuses it for every angle.
+# Reuse incidence-independent modal factorizations across angle sweeps.
 function _oblique_mode_factors(
         ::Rigid, k::Real, mesh::MeridianMesh; m_max::Integer, rtol::Real = 1e-5,
         modes::AbstractUnitRange{<:Integer} = 0:m_max)
@@ -1195,8 +1258,7 @@ function _oblique_solve_batch(
         rtol, solve_reports, first_mode = first(modes))
 end
 
-# Oblique incidence, fluid-filled/transmission: generalizes solve_axial(::FluidFilled, ...)'s
-# 4n x 4n coupled system to oblique incidence, only the incident-field RHS data changes per mode m, decoupled the same way as the rigid/pressure-release oblique solvers.
+# Apply the coupled transmission system independently to each azimuthal mode.
 
 """
     solve_oblique(boundary::FluidFilled, k, mesh::MeridianMesh, incidence_angle; m_max, rtol=1e-5, precision=:double)
@@ -1336,8 +1398,7 @@ function solve_oblique(
         A[rows, (off_d + 1):(off_d + n)] = -g .* V_int
         b[rows] = -R
 
-        # CHIEF over-determination breaks the spurious null-space at fictitious interior
-        # eigenvalues; chief_points regularizes the exterior block, chief_points_int the interior block (scaled by g).
+        # CHIEF constraints remove fictitious interior null spaces from both interface blocks.
         for (idx, (ρ0, z0)) in enumerate(chief_pts)
             K_row, V_row = chief_row(mesh, k, ρ0, z0; m = m, rtol = rtol)
             row = n_total + idx
@@ -1387,8 +1448,7 @@ function _spheroid_curved_operators(boundary, k, modes, width::Val{N}, degree::V
         throw(ArgumentError("parity splitting requires a half boundary"))
     key = (:curved_operators, boundary.a, boundary.b, boundary.elements, boundary.degree,
         boundary.half, k, first(modes), last(modes), N, P, rtol, quadrature_extra)
-    # Physical boundary rows are shared even when illumination symmetry changes
-    # the number of CHIEF rows. Both reflection parities share the quadrature.
+    # Share physical boundary quadrature across illumination symmetries and CHIEF layouts.
     base = _reuse_numerical(cache, key) do
         _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
             rtol, split = boundary.half, quadrature_extra)
@@ -1437,7 +1497,11 @@ function _spheroid_curved_operators_uncached(
                       for (q, x) in enumerate(fixed_sources[e])]
                      for e in 1:boundary.elements]
     _foreach_row(length(target_chi),
-        () -> _bem_quadrature_workspace(modes, Val(N); maxlambda = abs(k*b))) do i,
+        () -> (; _bem_quadrature_workspace(modes, Val(N); maxlambda = abs(k*b))...,
+            recurrence = 8<abs(k*b)<=160 ? _ring_recurrence_workspace(modes, Val(N)) : nothing,
+            curved_meridian = alloc_segbuf(Float64, Vector{ComplexF64}, Float64),
+            parts = (zeros(ComplexF64, 2N*P), zeros(ComplexF64, 2N*P)),
+            left = zeros(ComplexF64, 2N*P), right = zeros(ComplexF64, 2N*P))) do i,
     workspace
         target = target_chi[i]
         rho, z = target_rho[i], target_z[i]
@@ -1447,6 +1511,10 @@ function _spheroid_curved_operators_uncached(
             normal = a*sin(source)/speed
             projection = !chief_only && i<=n ? -2a*b*sin((target-source)/2)^2/speed :
                          normal*(rho-sr)+b*cos(source)/speed*(z-sz)
+            if first(modes)>0 && _ring_fourier_tail_logbound(
+                    k, rho, z, sr, sz, normal, projection, modes)<=log(0.01_QUAD_ATOL)
+                return zero(SVector{2N, ComplexF64})
+            end
             if hypot(rho-sr, z-sz) >= 0.5sqrt(rho*sr)
                 geometry = _ring_geometry(rho, z, sr, sz, normal, projection)
                 total = zero(SVector{2N, ComplexF64})
@@ -1459,46 +1527,53 @@ function _spheroid_curved_operators_uncached(
             return _azimuthal_KV_modes(k, rho, z, sr, sz, normal,
                 projection, modes, false, nothing, rtol, Val(N), workspace)
         end
+        # Keep direct, reflected and self-half results separate while reusing segment storage.
+        parts = workspace.parts
         for e in 1:boundary.elements
             left, right = boundary.edges[e], boundary.edges[e + 1]
-            parts = Vector{Vector{ComplexF64}}()
             for reflection in 0:(boundary.half ? 1 : 0)
                 reflected_target = reflection==0 ? target : pi-target
-                function integrand(source)
+                function integrand!(result, source)
                     local_coordinate = (2source-left-right)/(right-left)
                     basis = _spheroid_curved_basis(boundary.nodes, local_coordinate)
                     jac = b*sin(source)*hypot(a*sin(source), b*cos(source))
                     kv = kernel(reflection==0 ? source : pi-source)*jac
-                    result = Vector{ComplexF64}(undef, 2N*P)
                     for j in eachindex(result)
                         result[j] = kv[mod1(j, 2N)]*basis[cld(j, 2N)]
                     end
                     return result
                 end
-                values = if !chief_only && i<=n && reflection==0 && left<target<right
-                    l = quadgk(t -> integrand(target-(target-left)*t^3)*3(target-left)*t^2,
-                        0.0, 1.0; rtol, atol = 1e-13, maxevals = 10000)[1]
-                    r = quadgk(
-                        t -> integrand(target+(right-target)*t^3)*3(right-target)*t^2,
-                        0.0, 1.0; rtol, atol = 1e-13, maxevals = 10000)[1]
-                    l+r
+                values = parts[reflection + 1]
+                if !chief_only && i<=n && reflection==0 && left<target<right
+                    quadgk!((result, t) -> begin
+                            integrand!(result, target-(target-left)*t^3)
+                            result .*= 3(target-left)
+                            result .*= t^2
+                        end, workspace.left, 0.0, 1.0;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
+                    quadgk!((result, t) -> begin
+                            integrand!(result, target+(right-target)*t^3)
+                            result .*= 3(right-target)
+                            result .*= t^2
+                        end, workspace.right, 0.0, 1.0;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
+                    values .= workspace.left .+ workspace.right
                 elseif min(abs(reflected_target-left), abs(reflected_target-right))<right-left ||
                        left<reflected_target<right
-                    quadgk(integrand, left, right; rtol, atol = 1e-13, maxevals = 10000)[1]
+                    quadgk!(integrand!, values, left, right;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
                 else
-                    value = zeros(ComplexF64, 2N*P)
+                    fill!(values, 0)
                     for q in eachindex(ruleq)
                         source = fixed_sources[e][q]
                         kv = kernel(reflection==0 ? source : pi-source)
                         basis = fixed_weights[e][q]
                         for j in 1:P, c in 1:2N
 
-                            value[(j - 1) * 2N + c] += kv[c]*basis[j]
+                            values[(j - 1) * 2N + c] += kv[c]*basis[j]
                         end
                     end
-                    value
                 end
-                push!(parts, values)
             end
             for j in 1:P, c in 1:count
 
@@ -1579,8 +1654,7 @@ function _spheroid_curved_bem_mode(
         for j in 1:n
             J[j, j] += 0.5
         end
-        # Subtract the background Green identity before discretization. The
-        # incident forcing then vanishes exactly when the two media match.
+        # Subtract the background Green identity to preserve exact zero scattering for matched media.
         forcing = -(Ki-K[1:n, :])*incident+(bc.density_contrast*Vi-V[1:n, :])*derivative
         matrix = [D V; J -bc.density_contrast*Vi]
         rhs = vcat(zeros(ComplexF64, size(D, 1)), forcing)
