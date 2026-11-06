@@ -109,7 +109,7 @@ For cylinder and spheroid meridian FEM, `retain_fields=false` reduces solution s
 
 Cylinder meridian modes run serially by default. `mode_threads` permits concurrent mode solves, limited by the available Julia threads and a conservative mesh-size estimate. Fine meshes can still run serially because simultaneous sparse factorizations increase memory use. This estimate does not impose a hard process-memory limit. `diagnostics(solution).systems` records the actual `mode_workers` count for each mode.
 
-Cylinders and spheroids accept `order=2:8` for higher-order mapped elements. The default remains `order=1`. For a cylinder, element boundaries follow the flat caps and side and meet at both rims. Set an enclosing radius `R > hypot(body.length/2, body.radius)` in meters. `n_r` and `n_theta` count elements, rather than interpolation nodes. With `order>1`, `adaptive=true` refines individual modes until their combined backscatter mesh-change estimate is below `target_tol` dB. Check `diagnostics(solution).refinement.converged` and refine `m_max` and `l_max` independently. This estimate does not bound phase or bistatic error.
+Cylinders and spheroids accept `order=2:8` for higher-order mapped elements. The default remains `order=1`. For a cylinder, element boundaries follow the flat caps and side and meet at both rims. Set an enclosing radius `R > hypot(body.length/2, body.radius)` in meters. `n_r` and `n_theta` count elements, rather than interpolation nodes. With `order>1`, `adaptive=true` refines individual modes until their combined backscatter mesh-change estimate is below `target_tol` dB. Check `diagnostics(solution).refinement.converged` and refine `m_max` and `l_max` independently. This estimate does not bound phase or bistatic error. For higher-order meridian FEM, increase `quadrature_extra` from `0` to check integration independently of element order.
 
 `dtn_form=:augmented` retains the rectangular outgoing modal boundary map and adds auxiliary modal unknowns to the sparse system. It is algebraically equivalent to the default `:assembled` boundary map at fixed `l_max`. This can reduce storage for a fine angular mesh, but sparse factorization cost still depends on its fill pattern. Compare both options on the intended mesh.
 
@@ -123,6 +123,31 @@ diagnostics(solution).refinement.converged
 ```
 
 `pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries. Straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use interpolation at the selected element order in radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
+
+### Coupled FEM and BEM for prolate fluid spheroids
+
+`coupled` supports homogeneous `FluidFilled` prolate spheroids at general incidence. `Coupling(interior=:fem, exterior=:bem)` couples interior finite elements to outgoing exterior sound without an exterior volume mesh.
+
+```julia
+body = Spheroid(0.07, 0.01) # semi-axes in meters
+gas = FluidFilled(1.24 / 1026.8, 345.0 / 1477.3)
+k = 2pi * 200_000 / 1477.3 # exterior wavenumber in rad/m
+solution = coupled(body, gas, k;
+    coupling=Coupling(interior=:fem, exterior=:bem), target_tol=0.005)
+diagnostics(solution).refinement.converged
+target_strength(solution)
+scattering_amplitude(solution; angle=0.7, azimuth=0.4)
+```
+
+- `n_r` counts radial interior elements. `n_theta` and `n_boundary` count full-meridian interior and boundary elements. Polynomial defaults are `order=6` and `boundary_order=5`.
+- `adaptive=true` uses a backscatter TS mesh-change threshold, `target_tol=0.01` dB, with `max_refinements=4`. A named tuple with positive `radial`, `angular` and `boundary` budgets requests separate coordinate checks. Check `refinement.converged` independently of linear-solver convergence.
+- Refine `m_max`, polynomial degrees, boundary quadrature `rtol=1e-6`, `quadrature_extra=0` and `chief_points=8` independently. CHIEF constraints suppress fictitious exterior resonances. Spatial refinement does not certify phase or bistatic convergence. `adaptive=false` selects a fixed mesh.
+
+`interior_field=:scattered` is the default. `:total` uses boundary forcing and requires separate mesh-convergence checks. Prefer scattered pressure near matched fluid properties.
+
+Results provide far-field amplitudes in meters and TS in dB re 1 m². Pressure queries, `retain_fields` and exterior DtN controls are unsupported. `mode_threads` requires sufficient Julia threads.
+
+Callback `incidence_angle_sweep` reuses compatible operators, with a 512 MiB retained-data cap excluding active solves. Separate-coordinate refinement uses the same cap.
 
 ## Elastic and coupled shell FEM
 
