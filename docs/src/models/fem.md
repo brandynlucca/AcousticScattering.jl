@@ -206,15 +206,11 @@ The elastic weak form, with a complex-conjugated test displacement ``\boldsymbol
 =-\int_{\partial\Omega_s}p\boldsymbol v^*\cdot\boldsymbol n_s\,dS.
 ```
 
-This gives the structural dynamic stiffness ``K-\omega^2M`` and pressure loads on both
-faces. See [Yan (2017), equations (8)–(10)](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf)
-for coupled FEM/BEM equations, with normal orientations accounted for explicitly.
+This gives the structural dynamic stiffness ``K-\omega^2M`` and pressure loads on both faces. See [Yan (2017), equations (8)–(10)](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf) for coupled FEM/BEM equations, with normal orientations accounted for explicitly.
 
 ### General shell and oblique incidence
 
-`:general` resolves the elastic volume through the thickness. Displacement and acoustic
-pressure are expanded in azimuthal modes ``e^{im\phi}``. In cylindrical coordinates
-``(x,r,\phi)``, the strain components for one mode are
+`:general` resolves the elastic volume through the thickness. Displacement and acoustic pressure are expanded in azimuthal modes ``e^{im\phi}``. In cylindrical coordinates ``(x,r,\phi)``, the strain components for one mode are
 
 ```math
 \begin{aligned}
@@ -275,9 +271,7 @@ Compare complex amplitude, including phase, under refinement. Near elastic or ca
 
 `method = :volume` meshes the body and the surrounding fluid with curved order-2 tetrahedra. Fluid regions carry pressure and solid regions carry displacement, with continuity of normal displacement and traction across interfaces. It supports `Sphere` and `Spheroid` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries, with a fluid or empty interior.
 
-`SpatialFluid` supplies smooth positive density and sound-speed contrasts at
-every fluid quadrature point. Both may be callbacks or constants. For example,
-this graded sphere uses contrasts relative to its homogeneous exterior:
+`SpatialFluid` supplies smooth positive density and sound-speed contrasts at every fluid quadrature point. Both may be callbacks or constants. For example, this graded sphere uses contrasts relative to its homogeneous exterior:
 
 ```julia
 a = 0.5 # meters
@@ -290,14 +284,7 @@ solution = fem(Sphere(a), material, 2.0; method = :volume,
 pressure(solution, (0.0, 0.0, 0.2); field = :total)
 ```
 
-The callbacks receive global volume-FEM coordinates in meters, in the same
-frame as `centers` and pressure queries. They must be deterministic and safe
-for concurrent evaluation. The minimum speed contrast controls wavelength
-resolution; `h` and `h_body` must also resolve spatial variation of the material.
-Represent jumps with separate regions. A `SpatialFluid` can appear in the
-`materials` vector alongside homogeneous fluid, elastic, and damped-solid
-regions. Its exterior must remain homogeneous; `free_surface` does not yet
-reflect these profiles.
+The callbacks receive global volume-FEM coordinates in meters, in the same frame as `centers` and pressure queries. They must be deterministic and safe for concurrent evaluation. The minimum speed contrast controls wavelength resolution; `h` and `h_body` must also resolve spatial variation of the material. Represent jumps with separate regions. A `SpatialFluid` can appear in the `materials` vector alongside homogeneous fluid, elastic, and damped-solid regions. Its exterior must remain homogeneous; `free_surface` does not yet reflect these profiles.
 
 The default `closure = :auto` uses the exact Dirichlet-to-Neumann map on a sphere of radius `domain_radius`, by default 1.2 times the body's largest semi-axis, or a perfectly matched layer when that domain is smaller. The map is applied without forming its dense matrix, so it works with the iterative solver. `closure = :pml` truncates the exterior with a layer of thickness `pml_thickness`, one wavelength by default and shorter layers lose accuracy. Its domain is a sphere, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that is under 60% of the spherical volume. `:pml_spherical`, `:pml_spheroidal` and `:dtn` force a closure. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
 
@@ -356,11 +343,7 @@ target_strength(solution)
 
 ### Element order and wave resolution
 
-Full-3D volume FEM uses quadratic fields and curved quadratic tetrahedra.
-`points_per_wavelength` sets a target element size; curvature controls and
-meshing can produce different actual edge lengths. There is no volume
-`order` keyword. The radial solver's `order=1` or `order=2` applies only to
-its supported radial configurations.
+Full-3D volume FEM uses quadratic fields and curved quadratic tetrahedra. `points_per_wavelength` sets a target element size; curvature controls and meshing can produce different actual edge lengths. There is no volume `order` keyword. The radial solver's `order=1` or `order=2` applies only to its supported radial configurations.
 
 Check complex amplitudes or fields under mesh refinement at each frequency and material regime. A small linear-system residual does not bound accumulated phase error. Refine the exterior closure separately from the mesh. No single points-per-wavelength setting guarantees accuracy across frequencies and materials.
 
