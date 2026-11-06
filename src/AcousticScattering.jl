@@ -7,6 +7,7 @@ using SparseArrays: SparseArrays, sparse, spzeros, SparseMatrixCSC
 using SpecialFunctions: besselj, bessely, besselh
 using SpheroidalWaves: SpheroidalWaves
 using GenericLinearAlgebra: GenericLinearAlgebra
+using FFTW: FFTW
 using Ferrite: Ferrite
 using Inti: Inti
 using Gmsh: gmsh
