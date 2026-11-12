@@ -14,4 +14,6 @@ function scattering_amplitude(
     _axisymmetric_amplitude(sol.k, sol.data; angle = angle, azimuth = azimuth)
 end
 
-diagnostics(sol::Union{BEMSolution, MFSSolution, FEMSolution}) = sol.data.diagnostics
+function diagnostics(sol::Union{BEMSolution, MFSSolution, FEMSolution, CoupledSolution})
+    sol.data.diagnostics
+end

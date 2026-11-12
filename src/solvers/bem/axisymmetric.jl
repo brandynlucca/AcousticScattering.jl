@@ -1,5 +1,6 @@
-# Outer-quadrature breakpoints for a panel pair's meridian integral, split at the closest-approach
-# parameter s* so adaptive quadrature doesn't have to discover a near-singularity on its own.
+using QuadGK: quadgk!
+
+# Split meridian quadrature at the closest approach.
 function _closest_param(xρ::Real, xz::Real, p::Panel)
     dρ, dz = p.rho2 - p.rho1, p.z2 - p.z1
     denom = dρ^2 + dz^2
@@ -28,6 +29,18 @@ function _azimuthal_sinh_breakpoints(m::Integer, scale::Real, upper::Real)
     return points
 end
 
+# Reuse initial-interval storage separately from adapted segments.
+function _azimuthal_quadgk(integrand::F, points, rtol, atol, workspace) where {F}
+    initial = workspace.azimuthal_initial
+    resize!(initial, length(points)-1)
+    @inbounds for j in eachindex(initial)
+        initial[j] = eltype(initial)(points[j], points[j+1], nothing, nothing)
+    end
+    return quadgk(integrand, first(points), last(points); rtol, atol,
+        eval_segbuf = initial, segbuf = workspace.azimuthal,
+        maxevals = _AZIMUTHAL_MAXEVALS)
+end
+
 # Integrates `integrand(Δφ)` over [0,π]. The substitution `Δφ = scale * sinh(τ)` makes the near-singular peak at Δφ = 0 smooth.
 function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ2::Real,
         z2::Real, rtol::Real, atol::Real, workspace = nothing)
@@ -35,30 +48,35 @@ function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ
     upper = asinh(π / scale)
     if workspace !== nothing
         points = workspace.breaks
-        # Start with full-cycle intervals; the embedded error estimate refines
-        # wherever the kernel or the coordinate map needs more nodes.
+        transformed = τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ))
+        # Try half-cycle intervals first when the full-cycle start exhausts the evaluation cap.
+        fallback = nothing
+        if m > div(_AZIMUTHAL_MAXEVALS, 15)
+            resize!(points, m + 1)
+            for j in eachindex(points)
+                points[j] = asinh((j - 1) * π / (m * scale))
+            end
+            points[end] = upper
+            fallback, error = _azimuthal_quadgk(transformed, points, rtol, atol, workspace)
+            error <= max(atol, rtol * norm(fallback)) && return fallback
+        end
         resize!(points, max(cld(m, 2) + 1, 2))
         for j in eachindex(points)
             points[j] = asinh(2(j - 1) * π / (max(m, 1) * scale))
         end
         points[end] = upper
-        # Passing the endpoints as an array avoids specializing on every mode's
-        # breakpoint count. Only storage is reused; every integral is reevaluated.
-        transformed = τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ))
-        val, error = quadgk(transformed,
-            points; rtol, atol, segbuf = workspace.azimuthal,
-            maxevals = _AZIMUTHAL_MAXEVALS)
+        # Array endpoints avoid specialization on breakpoint counts.
+        val, error = _azimuthal_quadgk(transformed, points, rtol, atol, workspace)
         (m <= 1 || error <= max(atol, rtol * norm(val))) && return val
+        fallback===nothing || return fallback
 
-        # Preserve the former capped result when the coarser start cannot meet
-        # its error target. The fallback has the original grid and its own cap.
+        # Retain the original capped fallback after a failed coarse start.
         resize!(points, max(m + 1, 2))
         for j in eachindex(points)
             points[j] = asinh((j - 1) * π / (m * scale))
         end
         points[end] = upper
-        return quadgk(transformed, points; rtol, atol, segbuf = workspace.azimuthal,
-            maxevals = _AZIMUTHAL_MAXEVALS)[1]
+        return _azimuthal_quadgk(transformed, points, rtol, atol, workspace)[1]
     end
     val, _ = quadgk(τ -> integrand(min(scale * sinh(τ), π)) * (scale * cosh(τ)),
         _azimuthal_sinh_breakpoints(m, scale, upper)...; rtol = rtol, atol = atol,
@@ -67,10 +85,39 @@ function _azimuthal_peak_quadrature(integrand, m::Integer, ρ::Real, z::Real, ρ
 end
 
 # Calls `f(i)` for every row `i` in `1:n`. Threads take one row at a time so uneven row costs stay balanced.
-_foreach_row(f, n::Integer) = _foreach_row((i, _) -> f(i), n, () -> nothing)
+_foreach_row(f::F, n::Integer;
+    compile_serially::Bool = true) where {F} =
+    _foreach_row((i, _) -> f(i), n, () -> nothing; compile_serially)
+
+function _foreach_row_primed_worker(f::F, n::Integer, make_workspace::W,
+        next::Threads.Atomic{Int}, middle::Integer, prime::Bool,
+        ready::Channel{Bool}, release::Base.Event) where {F, W}
+    workspace = if prime
+        completed = false
+        try
+            scratch = make_workspace()
+            f(middle, scratch)
+            completed = true
+            scratch
+        finally
+            put!(ready, completed)
+        end
+    else
+        make_workspace()
+    end
+    prime && wait(release)
+    while true
+        i = Threads.atomic_add!(next, 1) + 1
+        i > n && break
+        i == middle && continue
+        f(i, workspace)
+    end
+    return nothing
+end
 
 # Scratch belongs to the task, so migration between threads cannot alias buffers.
-function _foreach_row(f, n::Integer, make_workspace)
+function _foreach_row(f::F, n::Integer, make_workspace::W;
+        compile_serially::Bool = true) where {F, W}
     if Threads.nthreads() == 1 || n < 2
         workspace = make_workspace()
         for i in 1:n
@@ -79,6 +126,27 @@ function _foreach_row(f, n::Integer, make_workspace)
         return nothing
     end
     next = Threads.Atomic{Int}(0)
+    if compile_serially
+        # Prime a middle row inside the owning worker before releasing other workers.
+        middle = cld(n, 2)
+        ready = Channel{Bool}(1)
+        release = Base.Event()
+        Threads.@sync begin
+            Threads.@spawn _foreach_row_primed_worker(
+                f, n, make_workspace, next, middle, true, ready, release)
+            try
+                if take!(ready)
+                    for _ in 2:min(Threads.nthreads(), n)
+                        Threads.@spawn _foreach_row_primed_worker(
+                            f, n, make_workspace, next, middle, false, ready, release)
+                    end
+                end
+            finally
+                notify(release)
+            end
+        end
+        return nothing
+    end
     Threads.@sync for _ in 1:min(Threads.nthreads(), n)
         Threads.@spawn let workspace = make_workspace()
             while true
@@ -110,15 +178,13 @@ function _ring_distance(ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
     hypot(ρ - ρ2, z - z2, 2sqrt(ρ * ρ2) * sin(Δφ / 2))
 end
 
-# Floor on the ring distance r, guards against a floating-point r=0.0/NaN at fine meshes (a
-# rounding artifact at a measure-zero sample point, not a true kernel singularity).
+# Guard against distance rounding to zero at fine meshes.
 const _RING_DISTANCE_FLOOR = 1e-12
 
-# Absolute-tolerance floor for every quadgk call, lets genuinely tiny panel-pair contributions converge immediately without a pure rtol criterion over-resolving them.
+# Use an absolute tolerance floor for negligible panel-pair contributions.
 const _QUAD_ATOL = 1e-10
 
-# Hard evaluation cap on every adaptive quadrature call, bounds near-axis (small ρ) self-pairs at
-# high Fourier mode m that otherwise converge very slowly, at the cost of some precision there.
+# Cap adaptive evaluations for slowly converging near-axis pairs.
 const _AZIMUTHAL_MAXEVALS = 2000
 
 # ∂G/∂n_y at ring point y=(ρ2,φ',z2), field point x=(ρ,0,z), Δφ=φ'-0, n̂_y=(nρ2 cosΔφ, nρ2 sinΔφ, nz2).
@@ -138,8 +204,7 @@ function _ring_G(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, Δφ::Real)
     return cis(k * r) / (4π * r)
 end
 
-# Breakpoints aligned to cos(mΔφ)'s zero crossings, avoids quadgk having to discover the
-# oscillation structure itself, which otherwise dominates cost and grows explosively with m.
+# Align quadrature intervals with Fourier zero crossings.
 _azimuthal_breakpoints(m::Integer) = m == 0 ? (0.0, 2π) : range(0.0, 2π; length = 4m + 1)
 _azimuthal_half_breakpoints(m::Integer) = m == 0 ? (0.0, π) : range(0.0, π; length = 2m + 1)
 
@@ -156,7 +221,7 @@ end
 # Quadrature error target of the panel rule, well below the solver tolerance.
 const _MERIDIAN_LOG_TOLERANCE = log(1e12)
 
-# Node count for a field point `separation` from the panel midpoint, from the Bernstein ellipse error bound plus the phase change across the panel.
+# Select panel nodes from the Bernstein ellipse bound and phase variation.
 function _meridian_node_count(separation::Real, panel_length::Real, k::Real)
     delta = 2separation / panel_length
     bernstein = delta + sqrt(max(delta^2 - 1, 0))
@@ -284,19 +349,17 @@ end
 # Meridian separation selects panel quadrature; ring separation separately selects azimuthal quadrature.
 const _AZIMUTHAL_FAR_FACTOR = 0.75
 
-# Whether (ρ,z) is far enough from panel `pj` (relative to the panel's own
-# arc length) for the fixed-order azimuthal rule to be safe.
+# Use fixed azimuthal quadrature only for sufficiently distant panels.
 function _azimuthal_is_far(ρ::Real, z::Real, pj::Panel)
     hypot(ρ - pj.rhom, z - pj.zm) > _AZIMUTHAL_FAR_FACTOR * pj.L
 end
 
-# Order for the fixed azimuthal rule, accounts for both cos(mΔφ) and the ring kernel's own phase
-# oscillation (significant when kρ is large, e.g. an oblate spheroid's equator).
+# Resolve both Fourier oscillation and the Helmholtz phase.
 function _azimuthal_fixed_order(m::Integer, k::Real, ρ::Real, ρ2::Real)
     max(4m + 32, ceil(Int, 8 * k * min(ρ, ρ2)) + 32)
 end
 
-# Fixed Gauss-Legendre rules by order. A miss swaps in an updated copy under a lock, so concurrent readers never see a dictionary being modified.
+# Publish cached Gauss-Legendre rules through locked copy replacement.
 mutable struct _FixedRuleCache
     @atomic rules::Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}
 end
@@ -437,8 +500,7 @@ end
     if N > 1
         c[2] = cos((m0 + 1) * x)
         twocos = 2cos(x)
-        # The fixed-width recurrence stays on the stack when bounds checks cannot
-        # expose the mutable temporary through an exception path.
+        # Avoid exception paths that expose the stack-local recurrence buffer.
         @inbounds for i in 3:N
             c[i] = twocos * c[i - 1] - c[i - 2]
         end
@@ -469,11 +531,14 @@ const _MODE_CHUNK = 8
 include("ring_kernel.jl")
 
 # Nested integration needs distinct inner and outer segment buffers.
-function _bem_quadrature_workspace(modes, ::Val{N}) where {N}
+function _bem_quadrature_workspace(modes, ::Val{N}; maxlambda = 0.0) where {N}
     return (; breaks = zeros(max(cld(last(modes), 2) + 1, 2)),
+        azimuthal_initial = alloc_segbuf(Float64, Nothing, Nothing;
+            size = max(last(modes), 1)),
         azimuthal = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
         meridian = alloc_segbuf(Float64, SVector{2N, ComplexF64}, Float64),
-        modal = _ring_split_workspace(modes, Val(N)))
+        modal = _ring_split_workspace(modes, Val(N)),
+        convolution = _ring_convolution_workspace(modes, maxlambda))
 end
 
 # Fixed azimuthal rules and `cos(mΔφ)` tables for every order the assembly requests, built serially.
@@ -519,6 +584,14 @@ function _azimuthal_KV_modes(k::Real, ρ::Real, z::Real, ρ2::Real, z2::Real, n�
         accepted, split = _ring_split_KV(k, ρ, z, ρ2, z2, nρ2, projection,
             modes, rtol, width, workspace.modal)
         accepted && return split
+        accepted, convolution = _ring_convolution_KV(k, ρ, z, ρ2, z2, nρ2, projection,
+            modes, rtol, width, workspace.convolution)
+        accepted && return convolution
+    end
+    if workspace!==nothing && hasproperty(workspace, :recurrence)
+        accepted, recurrence = _ring_recurrence_KV(k, ρ, z, ρ2, z2, nρ2,
+            projection, modes, rtol, width, workspace.recurrence)
+        accepted && return recurrence
     end
     val = _azimuthal_peak_quadrature(
         Δφ -> _ring_KV_modes(k, geometry, Δφ, m0, count, width),
@@ -724,10 +797,7 @@ function solve_axial(::PressureRelease, k::Real, mesh::MeridianMesh;
     return p_scat, dpdn_scat, ps
 end
 
-# Robin condition ∂p_total/∂n=-ik*p_total/zeta folded into the direct CBIE identity
-# 0.5*p_scat-K[p_scat]=-G[∂p_scat/∂n]: substituting ∂p_scat/∂n=-beta*(p_scat+p_inc)-∂p_inc/∂n
-# (beta=ik/zeta) gives (0.5I-K-beta*G)*p_scat = beta*G[p_inc]+G[∂p_inc/∂n], which reduces to
-# Rigid's own equation at beta=0 (zeta→∞) and forces p_scat→-p_inc as beta→∞ (zeta→0).
+# Fold the Robin boundary condition into the direct CBIE.
 function solve_axial(bc::Impedance, k::Real, mesh::MeridianMesh;
         rtol::Real = 1e-6, solve_reports = nothing)
     ps = panels(mesh)
@@ -757,8 +827,7 @@ function solve_axial(bc::Impedance, k::Real, mesh::MeridianMesh;
     return p_scat, dpdn_scat, ps
 end
 
-# Fluid-filled/transmission boundary, axial incidence: standalone (no shell) interface, exterior
-# and interior CBIEs coupled by pressure/velocity continuity into a 4n x 4n system for [p_scat; dpdn_scat; p_int; dpdn_int]. Limiting cases g->∞/g->0 recover Rigid/PressureRelease respectively.
+# Couple exterior and interior CBIEs through pressure and velocity continuity.
 
 """
     _chief_points(mesh, n_points)
@@ -961,8 +1030,7 @@ function solve_axial_adaptive(boundary::Union{Rigid, PressureRelease},
     return p, d, ps
 end
 
-# Oblique incidence, rigid boundary: Jacobi-Anger expansion of p_inc = e^{ik(x sinβ + z cosβ)} into
-# azimuthal Fourier modes cos(mφ), decoupled since the ring kernel depends only on the source/field azimuth difference; mode m solves its own CBIE via assemble_cbie_operators(mesh, k; m=m).
+# Decouple oblique rigid scattering into azimuthal Fourier modes.
 
 function _besselj_deriv(m::Integer, x::Real)
     m == 0 ? -besselj(1, x) : (besselj(m - 1, x) - besselj(m + 1, x)) / 2
@@ -1015,8 +1083,7 @@ function solve_oblique(::Rigid, k::Real, mesh::MeridianMesh, incidence_angle::Re
     return p_scat_modes, dpdn_scat_modes, ps
 end
 
-# Oblique incidence, pressure-release boundary: needs only p_inc's value (Dirichlet data), so the
-# plain Jacobi-Anger expansion suffices, no Jₘ' term; same per-mode decoupling as the rigid case.
+# Pressure-release forcing requires only the incident Dirichlet data.
 
 function _p_inc_mode(m::Integer, k::Real, β::Real, ρ::Real, z::Real)
     εm = m == 0 ? 1.0 : 2.0
@@ -1055,7 +1122,7 @@ function solve_oblique(
     return p_scat_modes, dpdn_scat_modes, ps
 end
 
-# Each mode's system matrix depends only on the mesh/k/mode, not the incidence angle, so `incidence_angle_sweep` factorizes it once and reuses it for every angle.
+# Reuse incidence-independent modal factorizations across angle sweeps.
 function _oblique_mode_factors(
         ::Rigid, k::Real, mesh::MeridianMesh; m_max::Integer, rtol::Real = 1e-5,
         modes::AbstractUnitRange{<:Integer} = 0:m_max)
@@ -1191,8 +1258,7 @@ function _oblique_solve_batch(
         rtol, solve_reports, first_mode = first(modes))
 end
 
-# Oblique incidence, fluid-filled/transmission: generalizes solve_axial(::FluidFilled, ...)'s
-# 4n x 4n coupled system to oblique incidence, only the incident-field RHS data changes per mode m, decoupled the same way as the rigid/pressure-release oblique solvers.
+# Apply the coupled transmission system independently to each azimuthal mode.
 
 """
     solve_oblique(boundary::FluidFilled, k, mesh::MeridianMesh, incidence_angle; m_max, rtol=1e-5, precision=:double)
@@ -1332,8 +1398,7 @@ function solve_oblique(
         A[rows, (off_d + 1):(off_d + n)] = -g .* V_int
         b[rows] = -R
 
-        # CHIEF over-determination breaks the spurious null-space at fictitious interior
-        # eigenvalues; chief_points regularizes the exterior block, chief_points_int the interior block (scaled by g).
+        # CHIEF constraints remove fictitious interior null spaces from both interface blocks.
         for (idx, (ρ0, z0)) in enumerate(chief_pts)
             K_row, V_row = chief_row(mesh, k, ρ0, z0; m = m, rtol = rtol)
             row = n_total + idx
@@ -1354,4 +1419,407 @@ function solve_oblique(
     end
 
     return p_scat_modes, dpdn_scat_modes, ps
+end
+
+function _spheroid_curved_basis(nodes, x)
+    n = length(nodes)
+    return [prod((x-nodes[j])/(nodes[i]-nodes[j]) for j in 1:n if j != i) for i in 1:n]
+end
+
+function _spheroid_curved_boundary(a, b, elements, degree; half = true)
+    nodes, weights = _spheroid_hp_rule(degree)
+    edges = collect(range(0.0, half ? pi/2 : pi; length = elements+1))
+    chi = vcat([(edges[e]+edges[e + 1])/2 .+ (edges[e + 1]-edges[e])/2 .* nodes
+                for e in 1:elements]...)
+    rho, z = b .* sin.(chi), a .* cos.(chi)
+    speed = hypot.(a .* sin.(chi), b .* cos.(chi))
+    return (; a, b, elements, degree, half, nodes, weights, edges, chi, rho, z,
+        nrho = a .* sin.(chi) ./ speed, nz = b .* cos.(chi) ./ speed)
+end
+
+function _spheroid_curved_operators(boundary, k, modes, width::Val{N}, degree::Val{P};
+        rtol = 1e-8, chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0) where {
+        N, P}
+    cache = _numerical_reuse_context()
+    cache===nothing &&
+        return _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, chief_points, split, quadrature_extra)
+    split && !boundary.half &&
+        throw(ArgumentError("parity splitting requires a half boundary"))
+    key = (:curved_operators, boundary.a, boundary.b, boundary.elements, boundary.degree,
+        boundary.half, k, first(modes), last(modes), N, P, rtol, quadrature_extra)
+    # Share physical boundary quadrature across illumination symmetries and CHIEF layouts.
+    base = _reuse_numerical(cache, key) do
+        _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, split = boundary.half, quadrature_extra)
+    end
+    components = split ? 4 : 2
+    chief_points==0 && return ntuple(j->base[j], components)
+    chief = _reuse_numerical(cache, (:chief, key, chief_points)) do
+        _spheroid_curved_operators_uncached(boundary, k, modes, width, degree;
+            rtol, chief_points, split = boundary.half, quadrature_extra, chief_only = true)
+    end
+    return ntuple(components) do j
+        [vcat(base[j][m], chief[j][m]) for m in eachindex(base[j])]
+    end
+end
+
+function _spheroid_curved_operators_uncached(
+        boundary, k, modes, ::Val{N}, ::Val{P}; rtol = 1e-8,
+        chief_points = 0, split::Bool = false, quadrature_extra::Integer = 0,
+        chief_only::Bool = false) where {N, P}
+    a, b = boundary.a, boundary.b
+    count, n = length(modes), length(boundary.chi)
+    chief_angles = [(j-0.5)*last(boundary.edges)/chief_points for j in 1:chief_points]
+    target_chi = vcat(chief_only ? Float64[] : boundary.chi, chief_angles)
+    target_rho = vcat(chief_only ? Float64[] : boundary.rho, [0.72b*sin(t)
+                                                              for t in chief_angles])
+    target_z = vcat(chief_only ? Float64[] : boundary.z, [0.72a*cos(t)
+                                                          for t in chief_angles])
+    Ks = [zeros(ComplexF64, length(target_chi), n) for m in modes]
+    Vs = [zeros(ComplexF64, length(target_chi), n) for m in modes]
+    split && !boundary.half &&
+        throw(ArgumentError("parity splitting requires a half boundary"))
+    oddKs = split ? [zero(K) for K in Ks] : nothing
+    oddVs = split ? [zero(V) for V in Vs] : nothing
+    order = _azimuthal_fixed_order(last(modes), k, b, b)+2quadrature_extra
+    angles, weights = _azimuthal_fixed_rule(order)
+    table = [_cos_multiples(phi, first(modes), count, Val(N)) for phi in angles]
+    half_sines = sin.(angles ./ 2)
+    ruleq, rulew = _spheroid_hp_rule(max(P+6, ceil(Int, k*a*last(boundary.edges)/boundary.elements)+P)+quadrature_extra)
+    # Smooth-cell basis and geometric weights are independent of the target.
+    fixed_basis = [_spheroid_curved_basis(boundary.nodes, x) for x in ruleq]
+    fixed_sources = [[(boundary.edges[e]+boundary.edges[e + 1])/2 +
+                      (boundary.edges[e + 1]-boundary.edges[e])*x/2 for x in ruleq]
+                     for e in 1:boundary.elements]
+    fixed_weights = [[fixed_basis[q]*(b * sin(x) * hypot(a*sin(x), b*cos(x)) * rulew[q] *
+                                      (boundary.edges[e + 1]-boundary.edges[e])/2)
+                      for (q, x) in enumerate(fixed_sources[e])]
+                     for e in 1:boundary.elements]
+    _foreach_row(length(target_chi),
+        () -> (; _bem_quadrature_workspace(modes, Val(N); maxlambda = abs(k*b))...,
+            recurrence = 8<abs(k*b)<=160 ? _ring_recurrence_workspace(modes, Val(N)) : nothing,
+            curved_meridian = alloc_segbuf(Float64, Vector{ComplexF64}, Float64),
+            parts = (zeros(ComplexF64, 2N*P), zeros(ComplexF64, 2N*P)),
+            left = zeros(ComplexF64, 2N*P), right = zeros(ComplexF64, 2N*P))) do i,
+    workspace
+        target = target_chi[i]
+        rho, z = target_rho[i], target_z[i]
+        function kernel(source)
+            sr, sz = b*sin(source), a*cos(source)
+            speed = hypot(a*sin(source), b*cos(source))
+            normal = a*sin(source)/speed
+            projection = !chief_only && i<=n ? -2a*b*sin((target-source)/2)^2/speed :
+                         normal*(rho-sr)+b*cos(source)/speed*(z-sz)
+            if first(modes)>0 && _ring_fourier_tail_logbound(
+                    k, rho, z, sr, sz, normal, projection, modes)<=log(0.01_QUAD_ATOL)
+                return zero(SVector{2N, ComplexF64})
+            end
+            if hypot(rho-sr, z-sz) >= 0.5sqrt(rho*sr)
+                geometry = _ring_geometry(rho, z, sr, sz, normal, projection)
+                total = zero(SVector{2N, ComplexF64})
+                for q in eachindex(angles)
+                    kv = _ring_KV_precomputed(k, geometry, half_sines[q])*weights[q]
+                    total += vcat(kv[1]*table[q], kv[2]*table[q])
+                end
+                return total
+            end
+            return _azimuthal_KV_modes(k, rho, z, sr, sz, normal,
+                projection, modes, false, nothing, rtol, Val(N), workspace)
+        end
+        # Keep direct, reflected and self-half results separate while reusing segment storage.
+        parts = workspace.parts
+        for e in 1:boundary.elements
+            left, right = boundary.edges[e], boundary.edges[e + 1]
+            for reflection in 0:(boundary.half ? 1 : 0)
+                reflected_target = reflection==0 ? target : pi-target
+                function integrand!(result, source)
+                    local_coordinate = (2source-left-right)/(right-left)
+                    basis = _spheroid_curved_basis(boundary.nodes, local_coordinate)
+                    jac = b*sin(source)*hypot(a*sin(source), b*cos(source))
+                    kv = kernel(reflection==0 ? source : pi-source)*jac
+                    for j in eachindex(result)
+                        result[j] = kv[mod1(j, 2N)]*basis[cld(j, 2N)]
+                    end
+                    return result
+                end
+                values = parts[reflection + 1]
+                if !chief_only && i<=n && reflection==0 && left<target<right
+                    quadgk!((result, t) -> begin
+                            integrand!(result, target-(target-left)*t^3)
+                            result .*= 3(target-left)
+                            result .*= t^2
+                        end, workspace.left, 0.0, 1.0;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
+                    quadgk!((result, t) -> begin
+                            integrand!(result, target+(right-target)*t^3)
+                            result .*= 3(right-target)
+                            result .*= t^2
+                        end, workspace.right, 0.0, 1.0;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
+                    values .= workspace.left .+ workspace.right
+                elseif min(abs(reflected_target-left), abs(reflected_target-right))<right-left ||
+                       left<reflected_target<right
+                    quadgk!(integrand!, values, left, right;
+                        rtol, atol = 1e-13, maxevals = 10000, segbuf = workspace.curved_meridian)
+                else
+                    fill!(values, 0)
+                    for q in eachindex(ruleq)
+                        source = fixed_sources[e][q]
+                        kv = kernel(reflection==0 ? source : pi-source)
+                        basis = fixed_weights[e][q]
+                        for j in 1:P, c in 1:2N
+
+                            values[(j - 1) * 2N + c] += kv[c]*basis[j]
+                        end
+                    end
+                end
+            end
+            for j in 1:P, c in 1:count
+
+                ix, iv = (j-1)*2N+c, (j-1)*2N+N+c
+                reflectedK = boundary.half ? parts[2][ix] : 0.0im
+                reflectedV = boundary.half ? parts[2][iv] : 0.0im
+                Ks[c][i, (e - 1) * P + j] = parts[1][ix]+reflectedK
+                Vs[c][i, (e - 1) * P + j] = parts[1][iv]+reflectedV
+                if split
+                    oddKs[c][i, (e - 1) * P + j] = parts[1][ix]-reflectedK
+                    oddVs[c][i, (e - 1) * P + j] = parts[1][iv]-reflectedV
+                end
+            end
+        end
+    end
+    return split ? (Ks, Vs, oddKs, oddVs) : (Ks, Vs)
+end
+
+function _spheroid_curved_amplitude(field, k, m, theta, phi; quadrature_extra::Integer = 0)
+    boundary = field.boundary
+    pressure, derivative = field.pressure, field.derivative
+    q, w = _spheroid_hp_rule(boundary.degree+10+quadrature_extra)
+    total = 0.0im
+    for e in 1:boundary.elements, j in eachindex(q)
+
+        left, right = boundary.edges[e:(e + 1)]
+        chi = (left+right)/2+(right-left)*q[j]/2
+        basis = _spheroid_curved_basis(boundary.nodes, q[j])
+        indices = (e-1)*boundary.degree .+ (1:boundary.degree)
+        rho, z = boundary.b*sin(chi), boundary.a*cos(chi)
+        speed = hypot(boundary.a*sin(chi), boundary.b*cos(chi))
+        nr, nz = boundary.a*sin(chi)/speed, boundary.b*cos(chi)/speed
+        u = k*rho*sin(theta)
+        p, dp = sum(basis .* pressure[indices]), sum(basis .* derivative[indices])
+        J = besselj(m, u)
+        dJ = m==0 ? -besselj(1, u) : (besselj(m-1, u)-besselj(m+1, u))/2
+        for reflection in (boundary.half ? (-1, 1) : (1,))
+            value = ((dp+im*k*cos(theta)*reflection*nz*p)*J-k*sin(theta)*nr*p*dJ)*cis(-k*reflection*z*cos(theta))
+            total += (-im)^m*cos(m*phi)*value*rho*speed*w[j]*(right-left)/2
+        end
+    end
+    return -total/2
+end
+
+function _spheroid_curved_bem_mode(
+        be, bc, K, V, interior, k, m, beta, parity, reports,
+        workers; reuse = nothing, reuse_key = nothing)
+    n = length(be.chi)
+    D = -K
+    for j in 1:n
+        D[j, j] += 0.5
+    end
+    incident = [_p_inc_mode(m, k, beta, r, z) for (r, z) in zip(be.rho, be.z)]
+    derivative = [_dpdn_inc_mode(m, k, beta, r, z, nr, nz)
+                  for (r, z, nr, nz) in zip(be.rho, be.z, be.nrho, be.nz)]
+    if parity != 0
+        for j in 1:n
+            incident[j] = (incident[j]+parity*_p_inc_mode(m, k, beta, be.rho[j], -be.z[j]))/2
+            derivative[j] = (derivative[j]+parity*_dpdn_inc_mode(m, k, beta,
+                be.rho[j], -be.z[j], be.nrho[j], -be.nz[j]))/2
+        end
+    end
+    if bc isa Rigid
+        qs = -derivative
+        matrix, rhs = D, -V*qs
+        ps = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
+        solution = ps
+    elseif bc isa PressureRelease
+        ps = -incident
+        matrix, rhs = V, -D*ps
+        qs = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
+        solution = qs
+    else
+        Ki, Vi = interior
+        J = copy(Ki)
+        for j in 1:n
+            J[j, j] += 0.5
+        end
+        # Subtract the background Green identity to preserve exact zero scattering for matched media.
+        forcing = -(Ki-K[1:n, :])*incident+(bc.density_contrast*Vi-V[1:n, :])*derivative
+        matrix = [D V; J -bc.density_contrast*Vi]
+        rhs = vcat(zeros(ComplexF64, size(D, 1)), forcing)
+        solution = (_reuse_numerical(()->LinearAlgebra.qr(matrix), reuse,
+            (:curved_factor, reuse_key, m, parity)))\rhs
+        ps, qs = solution[1:n], solution[(n + 1):end]
+    end
+    representation_residual = _residual_report(D*ps+V*qs, incident).relative_residual
+    _record_solve!(
+        reports, matrix, solution, rhs; mode = m, component = :curved_bem, parity,
+        mode_workers = workers, representation_residual, n_boundary = be.elements,
+        chief_points = size(V, 1)-n)
+    return _SpheroidSurfaceMode(be, ps, qs)
+end
+
+function _spheroid_curved_bem_level(body, bc, k, nb, degree, modes, fields;
+        incidence_angle, mode_threads, rtol, chief_points, reports, quadrature_extra::Integer = 0)
+    reuse = _numerical_reuse_context()
+    reuse_key = (body.a, body.b, bc, k, nb, degree, rtol, chief_points,
+        quadrature_extra, incidence_angle==pi/2)
+    half = incidence_angle==pi/2 && iseven(nb)
+    split = !half && iseven(nb) && iseven(chief_points)
+    reduced = half || split
+    be = _spheroid_curved_boundary(
+        body.a, body.b, reduced ? div(nb, 2) : nb, degree+1; half = reduced)
+    full = split ? _spheroid_curved_boundary(body.a, body.b, nb, degree+1; half = false) :
+           be
+    groups = UnitRange{Int}[]
+    for m in modes
+        if isempty(groups) || m-first(last(groups))>=16
+            push!(groups, m:m)
+        else
+            groups[end] = first(last(groups)):m
+        end
+    end
+    for span in groups
+        span_key = (reuse_key, first(span), last(span))
+        selected = filter(m->m in span, modes)
+        width = length(span)==1 ? Val(1) :
+                length(span)<=4 ? Val(4) : length(span)<=8 ? Val(8) : Val(16)
+        # A matching Fourier span retains completed traces and solve diagnostics.
+        mode_cache = _mode_solution_reuse_context()
+        result_key = mode_cache === nothing || reports === nothing ? nothing :
+            (:bem, typeof((body, bc, k, rtol, incidence_angle)), body.a, body.b, bc,
+                k, nb, degree, incidence_angle, mode_threads, Threads.nthreads(),
+                rtol, chief_points, quadrature_extra, first(span), last(span), width,
+                Tuple(selected))
+        if result_key !== nothing && _restore_mode_solutions!(mode_cache, result_key, fields, reports)
+            continue
+        end
+        report_start = result_key === nothing ? 0 : length(reports.systems)
+        exterior = _spheroid_curved_operators(be, k, span, width, Val(degree+1);
+            rtol, split, quadrature_extra,
+            chief_points = split ? div(chief_points, 2) : chief_points)
+        interior = bc isa FluidFilled ?
+                   _spheroid_curved_operators(be,
+            k/bc.soundspeed_contrast, span, width, Val(degree+1); rtol, split, quadrature_extra) :
+                   nothing
+        workers = min(mode_threads, Threads.nthreads(), length(selected))
+        @sync for worker in 1:workers
+            Threads.@spawn for index in worker:workers:length(selected)
+                m = selected[index]
+                j = m-first(span)+1
+                traces = map(split ? (1, -1) : (0,)) do parity
+                    offset = parity==-1 ? 2 : 0
+                    inner = interior===nothing ? nothing :
+                            (interior[offset + 1][j], interior[offset + 2][j])
+                    _spheroid_curved_bem_mode(
+                        be, bc, exterior[offset + 1][j], exterior[offset + 2][j],
+                        inner, k, m, incidence_angle, parity, reports,
+                        workers; reuse, reuse_key = span_key)
+                end
+                if split
+                    even, odd = traces
+                    fields[m + 1] = _SpheroidSurfaceMode(full,
+                        vcat(even.pressure+odd.pressure, reverse(even.pressure-odd.pressure)),
+                        vcat(even.derivative+odd.derivative, reverse(even.derivative-odd.derivative)))
+                else
+                    fields[m + 1] = only(traces)
+                end
+            end
+        end
+        result_key === nothing ||
+            _store_mode_solutions!(mode_cache, result_key, selected, fields, reports, report_start)
+    end
+    return fields
+end
+
+function _spheroid_curved_bem(body, bc, k; incidence_angle, m_max,
+        boundary_order::Integer = 7, n::Union{Nothing, Integer} = nothing,
+        mode_threads::Integer = 1, rtol::Real = 1e-6, chief_points::Integer = 8,
+        quadrature_extra::Integer = 0,
+        adaptive::Bool = n===nothing, target_tol::Real = 0.01, max_refinements::Integer = 4)
+    isfinite(k) && k>0 && isfinite(incidence_angle) ||
+        throw(ArgumentError("positive finite k and finite incidence_angle are required"))
+    1<=boundary_order<=8 && m_max>=0 && mode_threads>=1 && chief_points>=1 ||
+        throw(ArgumentError("invalid curved BEM order, Fourier limit, thread count or CHIEF count"))
+    isfinite(rtol) && 0<rtol<1 && isfinite(target_tol) && target_tol>0 &&
+    max_refinements>=1 && quadrature_extra>=0 ||
+        throw(ArgumentError("invalid curved BEM quadrature or refinement controls"))
+    if bc isa FluidFilled
+        all(x->isfinite(x) && x>0, (bc.density_contrast, bc.soundspeed_contrast)) ||
+            throw(ArgumentError("fluid contrasts must be finite and positive"))
+    end
+    wave = bc isa FluidFilled ? max(k, k/bc.soundspeed_contrast) : k
+    nb = n===nothing ? max(32, 2ceil(Int, wave*body.a/(1.8*(boundary_order+1)))) : Int(n)
+    nb>=2 || throw(ArgumentError("n must be at least two"))
+    meshes = [nb]
+    for _ in 1:max_refinements
+        push!(meshes, 2ceil(Int, 2last(meshes)/3))
+    end
+    fields = Vector{_SpheroidSurfaceMode}(undef, m_max+1)
+    contributions = zeros(ComplexF64, m_max+1)
+    changes = fill(ComplexF64(Inf), m_max+1)
+    levels = fill(-1, m_max+1)
+    history = NamedTuple[]
+    reports = _SolveReports()
+    threshold_fraction = -expm1(-target_tol*log(10)/20)
+    while true
+        estimate = _spheroid_hp_ts_change(contributions, changes)
+        adaptive && estimate.change_db<=target_tol && break
+        available = findall(l->l<(adaptive ? max_refinements : 0), levels)
+        isempty(available) && break
+        selected = filter(i->estimate.weights[i]>threshold_fraction*estimate.scale/length(fields), available)
+        if isempty(selected)
+            exhausted = [levels[i]==max_refinements ? changes[i] : 0.0im
+                         for i in eachindex(changes)]
+            _spheroid_hp_ts_change(contributions, exhausted).change_db>target_tol && break
+            index = available[argmax(estimate.weights[available])]
+            iszero(estimate.weights[index]) && break
+            selected = [index]
+        end
+        for level in sort!(unique(levels[selected] .+ 1))
+            indices = filter(i->levels[i]+1==level, selected)
+            nb = meshes[level + 1]
+            _spheroid_curved_bem_level(
+                body, bc, k, nb, boundary_order, indices .- 1, fields;
+                incidence_angle, mode_threads, rtol, chief_points, reports, quadrature_extra)
+            for i in indices
+                value = _spheroid_curved_amplitude(
+                    fields[i], k, i-1, pi-incidence_angle, pi; quadrature_extra)
+                changes[i] = levels[i]<0 ? ComplexF64(Inf) : value-contributions[i]
+                contributions[i], levels[i] = value, level
+            end
+            push!(history,
+                (; n_boundary = nb, modes = indices .- 1,
+                    change_db = _spheroid_hp_ts_change(contributions, changes).change_db))
+        end
+    end
+    change_db = _spheroid_hp_ts_change(contributions, changes).change_db
+    if adaptive
+        _record_refinement!(reports, change_db<=target_tol, change_db,
+            target_tol, maximum(meshes[levels .+ 1]))
+        reports.refinement = merge(reports.refinement,
+            (; estimator = :fourier_ts_mesh_change,
+                history, mode_refinements = levels, mode_n_boundary = meshes[levels .+ 1]))
+        change_db<=target_tol || @warn "Curved BEM did not reach target_tol=$target_tol dB"
+    end
+    report = _summarize_solves(reports; method = :axisymmetric,
+        surface_geometry = :curved,
+        solver_options = (;
+            incidence_angle, m_max, boundary_order, n = maximum(meshes[levels .+ 1]),
+            mode_threads, rtol, chief_points, quadrature_extra, adaptive, target_tol, max_refinements),
+        representation_residual = maximum(r.representation_residual
+        for r in reports.systems))
+    return BEMSolution(body, bc, Float64(k), :axisymmetric,
+        _CurvedSpheroidBEMData(fields, Float64(incidence_angle), report))
 end

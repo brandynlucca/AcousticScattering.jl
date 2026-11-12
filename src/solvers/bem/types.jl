@@ -1,3 +1,15 @@
+struct _SpheroidSurfaceMode{B}
+    boundary::B
+    pressure::Vector{ComplexF64}
+    derivative::Vector{ComplexF64}
+end
+
+struct _CurvedSpheroidBEMData{M}
+    modes::M
+    incidence_angle::Float64
+    diagnostics::NamedTuple
+end
+
 # Full 3D (non-axisymmetric) BEM surface-field data, `bem(...; method=:full)` only.
 struct _FullBEMSurfaceData
     quad::Any

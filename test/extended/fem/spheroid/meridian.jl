@@ -60,3 +60,29 @@ let
         @test all(isfinite, real.(sweep.amplitudes))
     end
 end
+
+@testset "FEM-BEM high-frequency prolate gas validation" begin
+    # Independent adaptive FEM with a spherical DtN boundary, order 6,
+    # target_tol=0.005 dB, m_max=41, l_max=206. Mesh refinement used up to
+    # 43 radial and 172 angular elements. No spheroidal modal answer is used.
+    reference = ComplexF64[0.009251017780836401 - 0.033871069765870364im,
+        -0.07464021253066706 + 0.33924855072102506im,
+        -0.0010437670051196362 + 0.00201777562206837im]
+    body = Spheroid(0.07, 0.01)
+    boundary = FluidFilled(1.24/1026.8, 345/1477.3)
+    solution = coupled(body, boundary, 2pi*200000/1477.3;
+        coupling = Coupling(interior = :fem, exterior = :bem),
+        target_tol = 0.005, mode_threads = 4)
+    amplitudes = [scattering_amplitude(solution; angle, azimuth)
+                  for (angle, azimuth) in ((pi/2, pi), (pi/2, 0.0), (0.7, 0.4))]
+    for i in eachindex(reference)
+        @test isapprox(amplitudes[i], reference[i]; rtol = 2e-4, atol = 1e-8)
+    end
+    @test abs(target_strength(solution)-target_strength(reference[1])) < 0.003
+    report = diagnostics(solution)
+    @test report.refinement.converged
+    @test report.refinement.change_db<=0.005
+    @test report.relative_residual < 1e-9
+    sweep = bistatic_sweep(solution, [0.7, pi/2]; azimuth = 0.4)
+    @test sweep.amplitudes[1] == amplitudes[3]
+end
