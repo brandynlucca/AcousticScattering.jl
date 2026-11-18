@@ -6,6 +6,28 @@ using SpecialFunctions
 const AS = AcousticScattering
 BLAS.set_num_threads(1)
 
+@testset "Higher-order cylinder against refined boundary elements" begin
+    body, wave = Cylinder(0.01, 0.02), 40.0
+    directions = ((pi / 3, 0.0), (2pi / 3, pi), (0.7, 0.4))
+    for boundary in (Rigid(), PressureRelease(), FluidFilled(1.05, 1.02),
+        GasFilled(0.00129, 0.23))
+        references = [bem(body, boundary, wave; n, m_max = 5,
+                          incidence_angle = pi / 3, rtol = 1e-7) for n in (96, 192)]
+        patterns = [[scattering_amplitude(solution; angle, azimuth)
+                     for (angle, azimuth) in directions] for solution in references]
+        scale = maximum(abs, last(patterns))
+        @test maximum(abs, patterns[2] - patterns[1]) / scale < 3e-3
+        fields = [fem(body, boundary, wave; R = 0.018, order,
+                      n_r = 4, n_theta = 16, m_max = 5, l_max = 10,
+                      incidence_angle = pi / 3, dtn_form = :augmented)
+                  for order in (4, 6)]
+        predictions = [[scattering_amplitude(solution; angle, azimuth)
+                        for (angle, azimuth) in directions] for solution in fields]
+        @test maximum(abs, predictions[2] - predictions[1]) / scale < 3e-4
+        @test maximum(abs, predictions[2] - patterns[2]) / scale < 1e-3
+    end
+end
+
 let
     @time "FEM reports across discretizations" @testset "FEM reports across discretizations" begin
         sphere, cylinder, spheroid = Sphere(1.0), Cylinder(1.0, 3.0), Spheroid(1.2, 1.0)

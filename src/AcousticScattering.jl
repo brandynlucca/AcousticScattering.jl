@@ -7,6 +7,7 @@ using SparseArrays: SparseArrays, sparse, spzeros, SparseMatrixCSC
 using SpecialFunctions: besselj, bessely, besselh
 using SpheroidalWaves: SpheroidalWaves
 using GenericLinearAlgebra: GenericLinearAlgebra
+using FFTW: FFTW
 using Ferrite: Ferrite
 using Inti: Inti
 using Gmsh: gmsh
@@ -30,9 +31,10 @@ export RevolvedBody, LoftedBody, Ellipsoid, Superellipsoid, Torus,
 export IncidentField, PlaneWave, SphericalWave, BesselBeam
 export incident_pressure, incident_gradient, incident_coefficient
 export AbstractSolution, ModalSolution, TMatrixSolution,
-       KirchhoffSolution, FEMSolution,
+       KirchhoffSolution, FEMSolution, CoupledSolution,
        BEMSolution,
        MFSSolution, FMSolution, FreeSurfaceSolution
+export Coupling, coupled
 export modal, tmatrix, kirchhoff, fem, bem, mfs, fourier,
        free_surface
 export target_strength, scattering_amplitude, pressure, diagnostics

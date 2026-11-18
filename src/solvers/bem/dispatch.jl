@@ -62,6 +62,14 @@ Boundary-element solve, returns a [`BEMSolution`](@ref). `method=:axisymmetric` 
 Post-process with [`target_strength`](@ref)`(sol; angle, azimuth)` (axisymmetric) or
 [`target_strength`](@ref)`(sol; direction)` (full 3D).
 
+Prolate `Spheroid` with rigid, pressure-release or homogeneous fluid material
+uses curved elements automatically. `boundary_order=7` sets their degree and
+`n` counts elements over the full meridian. Omitting `n` enables adaptive
+backscatter refinement. With an explicit `n`, request `adaptive=true` to refine.
+`target_tol` is the TS mesh-change threshold in dB. Refine `m_max` and `rtol`
+independently. `quadrature_extra=0` adds points to the fixed integration rules
+without changing the mesh or boundary polynomial degree.
+
 Full BEM accepts `meshsize` in m, geometry `mesh_order` (1, 2 or 3, default 2), quadrature
 `qorder` (default 4), `correction`, `compression` and `gmres_kwargs`. Rigid/soft full BEM
 defaults to `formulation=:burton_miller` (`:cbie` selects the conventional equation). Fluid
@@ -79,18 +87,26 @@ See [BEM and MFS](@ref boundary-theory) for the underlying formulations and
 function bem(body::Union{Sphere, Spheroid, Cylinder},
         boundary::AbstractBoundaryCondition, k::Real;
         method::Symbol = :axisymmetric, incidence_angle::Real = π / 2, incidence_azimuth::Real = 0.0,
-        n::Integer = _axisymmetric_default_panels(body, k),
-        m_max::Integer = _default_mode_count(k * _characteristic_radius(body)), kwargs...)
+        n::Union{Nothing, Integer} = nothing,
+        m_max::Integer = body isa Spheroid && body.a>body.b ?
+                         _spheroid_meridian_default_mmax(body, boundary, k, incidence_angle) :
+                         _default_mode_count(k * _characteristic_radius(body)), kwargs...)
     if method === :full
         return _bem_full(body, boundary, k; incidence_angle = incidence_angle,
             incidence_azimuth = incidence_azimuth, kwargs...)
     end
     method === :axisymmetric ||
         throw(ArgumentError("bem(...) supports method=:axisymmetric or :full, got $method"))
+    if body isa Spheroid && body.a>body.b &&
+       boundary isa Union{Rigid, PressureRelease, FluidFilled}
+        iszero(incidence_azimuth) ||
+            throw(ArgumentError("axisymmetric BEM uses incidence_azimuth=0"))
+        return _spheroid_curved_bem(body, boundary, k; incidence_angle, m_max, n, kwargs...)
+    end
     body isa Cylinder && _isbent(body) &&
         throw(ArgumentError(
             "a bent Cylinder requires bem(...; method=:full)"))
-    mesh = _axisymmetric_mesh(body, n)
+    mesh = _axisymmetric_mesh(body, n===nothing ? _axisymmetric_default_panels(body, k) : n)
     iszero(incidence_angle) && return _bem_axial(body, boundary, k, mesh; kwargs...)
     return _bem_oblique(body, boundary, k, mesh, incidence_angle; m_max = m_max, kwargs...)
 end

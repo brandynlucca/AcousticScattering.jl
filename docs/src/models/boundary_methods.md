@@ -14,6 +14,39 @@ Single- and double-layer potentials integrate ``G`` and its normal derivative ag
 
 Axisymmetric BEM expands azimuthal dependence into Fourier modes over a meridian mesh. Panel count, Fourier cutoff and quadrature tolerance each control a separate error source ([Helsing and Karlsson, 2014](https://doi.org/10.1016/j.jcp.2014.04.053)). Fluid shells use paired inner and outer surfaces.
 
+For a prolate `Spheroid(a, b)` with $a>b$, `bem(body, boundary, k)`
+automatically uses the exact curved surface with `Rigid`, `PressureRelease`
+or homogeneous `FluidFilled` material. `boundary_order=7` sets the boundary
+polynomial degree. `n` counts elements over the full meridian. Omitting `n`
+enables adaptive refinement by default. Supplying `n` selects a fixed mesh
+unless `adaptive=true` is also supplied.
+
+```julia
+solution = bem(Spheroid(0.07, 0.01), Rigid(), 2pi * 400_000 / 1477.3;
+    incidence_angle = deg2rad(37), target_tol = 0.005, mode_threads = 4)
+target_strength(solution)
+diagnostics(solution).refinement.converged
+```
+
+Semi-axes are in meters, `k` is exterior wavenumber in rad/m, and incidence
+is measured from the symmetry axis. Even partitions use reflection symmetry
+at broadside and both even and odd problems away from broadside.
+`chief_points=8` adds interior constraints to the exterior equation.
+Adaptive refinement checks changes in backscatter TS per Fourier mode.
+Refine `m_max`, quadrature `rtol` and `boundary_order` independently,
+particularly near resonances or weak backscatter. `quadrature_extra=0` controls
+additional points in the fixed integration rules without changing the boundary
+polynomial degree. Increase it alongside tighter `rtol` to check quadrature. This BEM method supports
+pressure and far-field queries. Interior FEM coupled to exterior BEM is a
+separate [`coupled`](@ref) solve with
+`Coupling(interior=:fem, exterior=:bem)`. See [FEM and shell coupling](@ref fem-theory).
+
+For repeated incidence angles, use
+`incidence_angle_sweep(beta -> bem(body, boundary, k; incidence_angle=beta), angles)`.
+Curved spheroid BEM reuses compatible operators and factorizations within the
+sweep, with a 512 MiB cap on retained operator data. Each angle retains its own
+incident load and adaptive refinement. Active solves require additional memory.
+
 At axial incidence, the direct CBIE ``\tfrac12 p_{\rm scat}-K[p_{\rm scat}]=-G[\partial p_{\rm scat}/\partial n]`` holds for any boundary. `Rigid` and `PressureRelease` set one boundary value and solve for the other. [`Impedance`](@ref)`(zeta)`'s Robin condition, `∂p_scat/∂n = -ik/zeta*(p_scat+p_inc) - ∂p_inc/∂n`, substitutes directly into it, giving a single equation in `p_scat`:
 
 ```math
@@ -38,7 +71,7 @@ where ``S``, ``D``, ``K'`` and ``H`` are the single-, double-, adjoint-double- a
 bem(surface, boundary, k; formulation = :cbie, mesh_order = 3)
 ```
 
-`formulation=:cbie` selects the conventional pressure equation instead of the Burton–Miller default. `mesh_order` selects flat (`1`), quadratic (`2`, default) or cubic (`3`) triangles. Fluid transmission uses its own coupled equations, covered next. `chief_points` adds an optional CHIEF augmentation, for axial axisymmetric fluid transmission only.
+`formulation=:cbie` selects the conventional pressure equation instead of the Burton–Miller default. `mesh_order` selects flat (`1`), quadratic (`2`, default) or cubic (`3`) triangles. Fluid transmission uses its own coupled equations, covered next. `chief_points` also supplies optional CHIEF constraints for axial axisymmetric fluid transmission on panel meshes.
 
 ### Fluid transmission and conditioning
 

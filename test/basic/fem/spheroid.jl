@@ -70,6 +70,24 @@ using Test
             method = :volume, mode_threads = 2)
     end
 
+    @testset "Augmented spheroid DtN" begin
+        for order in (1, 3), beta in (pi / 2, pi / 3),
+            boundary in (PressureRelease(), FluidFilled(1.2, 0.8))
+            body = Spheroid(0.02, 0.015)
+            options = (; R = 0.03, order, n_r = 3, n_theta = 12,
+                m_max = 3, l_max = 8, incidence_angle = beta)
+            assembled = fem(body, boundary, k; options...)
+            augmented = fem(body, boundary, k; options..., dtn_form = :augmented)
+            @test scattering_amplitude(augmented) ≈ scattering_amplitude(assembled) rtol = 2e-9
+            @test scattering_amplitude(augmented; angle = 0.7, azimuth = 0.4) ≈
+                  scattering_amplitude(assembled; angle = 0.7, azimuth = 0.4) rtol = 2e-9
+            @test pressure(augmented, (0.025, 0.003, 0.001)) ≈
+                  pressure(assembled, (0.025, 0.003, 0.001)) rtol = 2e-9
+        end
+        @test_throws ArgumentError fem(Spheroid(0.02, 0.015), Rigid(), k;
+            method = :volume, dtn_form = :augmented)
+    end
+
     @testset "Spheroid azimuthal cutoff and axial symmetry" begin
         body = Spheroid(0.07, 0.01)
         k = 2pi * 38000 / 1477.4

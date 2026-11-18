@@ -105,7 +105,49 @@ Meridian FEM discretizes radial/axial dependence and uses azimuthal Fourier mode
 
 Increase mesh resolution and angular/modal orders separately. Oblique cylinder/spheroid incidence requires the corresponding Fourier content. These methods do not model bend curvature.
 
-`pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries; straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use bilinear interpolation in its radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
+For cylinder and spheroid meridian FEM, `retain_fields=false` reduces solution storage when only scattering amplitudes, target strengths or bistatic patterns are needed. The default retains the nodal fields for `pressure` queries. Incident pressure remains available with either setting.
+
+Cylinder meridian modes run serially by default. `mode_threads` permits concurrent mode solves, limited by the available Julia threads and a conservative mesh-size estimate. Fine meshes can still run serially because simultaneous sparse factorizations increase memory use. This estimate does not impose a hard process-memory limit. `diagnostics(solution).systems` records the actual `mode_workers` count for each mode.
+
+Cylinders and spheroids accept `order=2:8` for higher-order mapped elements. The default remains `order=1`. For a cylinder, element boundaries follow the flat caps and side and meet at both rims. Set an enclosing radius `R > hypot(body.length/2, body.radius)` in meters. `n_r` and `n_theta` count elements, rather than interpolation nodes. With `order>1`, `adaptive=true` refines individual modes until their combined backscatter mesh-change estimate is below `target_tol` dB. Check `diagnostics(solution).refinement.converged` and refine `m_max` and `l_max` independently. This estimate does not bound phase or bistatic error. For higher-order meridian FEM, increase `quadrature_extra` from `0` to check integration independently of element order.
+
+`dtn_form=:augmented` retains the rectangular outgoing modal boundary map and adds auxiliary modal unknowns to the sparse system. It is algebraically equivalent to the default `:assembled` boundary map at fixed `l_max`. This can reduce storage for a fine angular mesh, but sparse factorization cost still depends on its fill pattern. Compare both options on the intended mesh.
+
+```julia
+body = Cylinder(0.01, 0.07)
+solution = fem(body, Rigid(), 100.0;
+    R = 1.2hypot(body.length / 2, body.radius), order = 4,
+    adaptive = true, target_tol = 0.01,
+    retain_fields = false, dtn_form = :augmented)
+diagnostics(solution).refinement.converged
+```
+
+`pressure` samples the retained scattered nodal field inside the meridian FEM mesh and continues it with outgoing spherical waves outside the DtN sphere. Sphere meridian FEM supports rigid and pressure-release boundaries. Straight-cylinder and spheroid meridian FEM also support homogeneous fluid interiors. Exterior `field=:total` adds the incident plane wave, while `field=:interior` returns the transmitted total pressure in a fluid body. Point values within the mesh use interpolation at the selected element order in radial and angular coordinates. Refine `n_r`, `n_theta`, `m_max`, and `l_max` when using values near curved surfaces or sharp rims.
+
+### Coupled FEM and BEM for prolate fluid spheroids
+
+`coupled` supports homogeneous `FluidFilled` prolate spheroids at general incidence. `Coupling(interior=:fem, exterior=:bem)` couples interior finite elements to outgoing exterior sound without an exterior volume mesh.
+
+```julia
+body = Spheroid(0.07, 0.01) # semi-axes in meters
+gas = FluidFilled(1.24 / 1026.8, 345.0 / 1477.3)
+k = 2pi * 200_000 / 1477.3 # exterior wavenumber in rad/m
+solution = coupled(body, gas, k;
+    coupling=Coupling(interior=:fem, exterior=:bem), target_tol=0.005)
+diagnostics(solution).refinement.converged
+target_strength(solution)
+scattering_amplitude(solution; angle=0.7, azimuth=0.4)
+```
+
+- `n_r` counts radial interior elements. `n_theta` and `n_boundary` count full-meridian interior and boundary elements. Polynomial defaults are `order=6` and `boundary_order=5`.
+- `adaptive=true` uses a backscatter TS mesh-change threshold, `target_tol=0.01` dB, with `max_refinements=4`. A named tuple with positive `radial`, `angular` and `boundary` budgets requests separate coordinate checks. Check `refinement.converged` independently of linear-solver convergence.
+- Refine `m_max`, polynomial degrees, boundary quadrature `rtol=1e-6`, `quadrature_extra=0` and `chief_points=8` independently. CHIEF constraints suppress fictitious exterior resonances. Spatial refinement does not certify phase or bistatic convergence. `adaptive=false` selects a fixed mesh.
+
+`interior_field=:scattered` is the default. `:total` uses boundary forcing and requires separate mesh-convergence checks. Prefer scattered pressure near matched fluid properties.
+
+Results provide far-field amplitudes in meters and TS in dB re 1 m². Pressure queries, `retain_fields` and exterior DtN controls are unsupported. `mode_threads` requires sufficient Julia threads.
+
+Callback `incidence_angle_sweep` reuses compatible operators, with a 512 MiB retained-data cap excluding active solves. Separate-coordinate refinement uses the same cap.
 
 ## Elastic and coupled shell FEM
 
@@ -164,15 +206,11 @@ The elastic weak form, with a complex-conjugated test displacement ``\boldsymbol
 =-\int_{\partial\Omega_s}p\boldsymbol v^*\cdot\boldsymbol n_s\,dS.
 ```
 
-This gives the structural dynamic stiffness ``K-\omega^2M`` and pressure loads on both
-faces. See [Yan (2017), equations (8)–(10)](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf)
-for coupled FEM/BEM equations, with normal orientations accounted for explicitly.
+This gives the structural dynamic stiffness ``K-\omega^2M`` and pressure loads on both faces. See [Yan (2017), equations (8)–(10)](https://www.sci-en-tech.com/ICCM2017/PDFs/2377-8247-1-PB.pdf) for coupled FEM/BEM equations, with normal orientations accounted for explicitly.
 
 ### General shell and oblique incidence
 
-`:general` resolves the elastic volume through the thickness. Displacement and acoustic
-pressure are expanded in azimuthal modes ``e^{im\phi}``. In cylindrical coordinates
-``(x,r,\phi)``, the strain components for one mode are
+`:general` resolves the elastic volume through the thickness. Displacement and acoustic pressure are expanded in azimuthal modes ``e^{im\phi}``. In cylindrical coordinates ``(x,r,\phi)``, the strain components for one mode are
 
 ```math
 \begin{aligned}
@@ -233,9 +271,7 @@ Compare complex amplitude, including phase, under refinement. Near elastic or ca
 
 `method = :volume` meshes the body and the surrounding fluid with curved order-2 tetrahedra. Fluid regions carry pressure and solid regions carry displacement, with continuity of normal displacement and traction across interfaces. It supports `Sphere` and `Spheroid` with `Rigid`, `PressureRelease`, `FluidFilled`, `SolidElastic` and elastic `Shelled` boundaries, with a fluid or empty interior.
 
-`SpatialFluid` supplies smooth positive density and sound-speed contrasts at
-every fluid quadrature point. Both may be callbacks or constants. For example,
-this graded sphere uses contrasts relative to its homogeneous exterior:
+`SpatialFluid` supplies smooth positive density and sound-speed contrasts at every fluid quadrature point. Both may be callbacks or constants. For example, this graded sphere uses contrasts relative to its homogeneous exterior:
 
 ```julia
 a = 0.5 # meters
@@ -248,14 +284,7 @@ solution = fem(Sphere(a), material, 2.0; method = :volume,
 pressure(solution, (0.0, 0.0, 0.2); field = :total)
 ```
 
-The callbacks receive global volume-FEM coordinates in meters, in the same
-frame as `centers` and pressure queries. They must be deterministic and safe
-for concurrent evaluation. The minimum speed contrast controls wavelength
-resolution; `h` and `h_body` must also resolve spatial variation of the material.
-Represent jumps with separate regions. A `SpatialFluid` can appear in the
-`materials` vector alongside homogeneous fluid, elastic, and damped-solid
-regions. Its exterior must remain homogeneous; `free_surface` does not yet
-reflect these profiles.
+The callbacks receive global volume-FEM coordinates in meters, in the same frame as `centers` and pressure queries. They must be deterministic and safe for concurrent evaluation. The minimum speed contrast controls wavelength resolution; `h` and `h_body` must also resolve spatial variation of the material. Represent jumps with separate regions. A `SpatialFluid` can appear in the `materials` vector alongside homogeneous fluid, elastic, and damped-solid regions. Its exterior must remain homogeneous; `free_surface` does not yet reflect these profiles.
 
 The default `closure = :auto` uses the exact Dirichlet-to-Neumann map on a sphere of radius `domain_radius`, by default 1.2 times the body's largest semi-axis, or a perfectly matched layer when that domain is smaller. The map is applied without forming its dense matrix, so it works with the iterative solver. `closure = :pml` truncates the exterior with a layer of thickness `pml_thickness`, one wavelength by default and shorter layers lose accuracy. Its domain is a sphere, or for an elongated or flattened spheroid a confocal spheroid at `clearance` from the body when that is under 60% of the spherical volume. `:pml_spherical`, `:pml_spheroidal` and `:dtn` force a closure. Scattering is extracted from the fluid solution, so `scattering_amplitude(solution; angle, azimuth)` accepts any observation direction.
 
@@ -314,11 +343,7 @@ target_strength(solution)
 
 ### Element order and wave resolution
 
-Full-3D volume FEM uses quadratic fields and curved quadratic tetrahedra.
-`points_per_wavelength` sets a target element size; curvature controls and
-meshing can produce different actual edge lengths. There is no volume
-`order` keyword. The radial solver's `order=1` or `order=2` applies only to
-its supported radial configurations.
+Full-3D volume FEM uses quadratic fields and curved quadratic tetrahedra. `points_per_wavelength` sets a target element size; curvature controls and meshing can produce different actual edge lengths. There is no volume `order` keyword. The radial solver's `order=1` or `order=2` applies only to its supported radial configurations.
 
 Check complex amplitudes or fields under mesh refinement at each frequency and material regime. A small linear-system residual does not bound accumulated phase error. Refine the exterior closure separately from the mesh. No single points-per-wavelength setting guarantees accuracy across frequencies and materials.
 

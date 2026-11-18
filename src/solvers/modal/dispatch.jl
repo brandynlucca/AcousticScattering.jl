@@ -13,6 +13,10 @@ projection. `incident_n_eta=max(32,2n_max+12)` and
 `incident_n_phi=max(32,4m_max+4)` control incident quadrature independently of modal
 truncation. Observation angles remain body-frame `scatter_angle`/`scatter_azimuth`.
 Spheroid solutions with `incident=field` provide far-field amplitudes only.
+Default plane-wave spheroid solutions retain coefficients for [`bistatic_sweep`](@ref),
+[`bistatic_map`](@ref) and `scattering_amplitude(sol; angle, azimuth)`.
+Full-fluid `overlap=:auto` selects angular quadrature or coefficient overlaps.
+Use `:quadrature` with increasing `n_quad`, or `:coefficients` with SpheroidalWaves 0.6.
 Post-process with [`target_strength`](@ref)`(sol)` in dB re 1 m² or [`scattering_amplitude`](@ref)`(sol)`,
 the complex scattering amplitude in m.
 """
@@ -89,7 +93,7 @@ function modal(body::Spheroid, boundary::AbstractBoundaryCondition, k::Real;
     legacy = incident === nothing || (incident isa PlaneWave &&
               incident.direction === nothing && incident.amplitude == 1)
     f = if legacy && !haskey(kwargs, :incident_n_eta) && !haskey(kwargs, :incident_n_phi)
-        form_function(boundary, k, body; incidence_angle, kwargs...)
+        return _spheroid_modal_solution(body, boundary, k; incidence_angle, kwargs...)
     else
         _spheroid_incident_amplitude(
             boundary, k, body; incidence_angle,

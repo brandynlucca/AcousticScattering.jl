@@ -65,6 +65,8 @@ modal
 tmatrix
 kirchhoff
 fem
+Coupling
+coupled
 bem
 mfs
 fourier
@@ -79,6 +81,7 @@ ModalSolution
 TMatrixSolution
 KirchhoffSolution
 FEMSolution
+CoupledSolution
 BEMSolution
 MFSSolution
 FMSolution

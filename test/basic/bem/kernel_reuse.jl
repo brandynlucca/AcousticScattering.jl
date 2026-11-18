@@ -58,3 +58,65 @@ end
         end
     end
 end
+
+
+@testset "Scoped mode results preserve ownership and the memory budget" begin
+    AS = AcousticScattering
+    @test AS._mode_solution_reuse_context() === nothing
+    AS._with_mode_solution_reuse(;max_bytes=4096) do
+        cache = AS._mode_solution_reuse_context()
+        fields = [[1.0,2.0]]
+        reports = AS._SolveReports()
+        push!(reports.systems, (;mode=0, absolute_residual=0.0))
+        AS._store_mode_solutions!(cache, (:test,1), 0:0, fields, reports, 0)
+        @test 0 < cache.bytes <= cache.limit
+        fields[1][1] = -9.0
+        target = Any[nothing]
+        restored = AS._SolveReports()
+        @test AS._restore_mode_solutions!(cache, (:test,1), target, restored)
+        @test target[1] == [1.0,2.0]
+        @test restored.systems == reports.systems
+        target[1][1] = 55.0
+        @test AS._restore_mode_solutions!(cache, (:test,1), target, AS._SolveReports())
+        @test target[1] == [1.0,2.0]
+        @test !AS._restore_mode_solutions!(cache, (:test,2), target, AS._SolveReports())
+        retained = cache.bytes
+        AS._store_mode_solutions!(cache, (:too_large,), 0:0, [zeros(10000)], reports, 0)
+        @test cache.bytes == retained
+        AS._with_mode_solution_reuse() do
+            @test AS._mode_solution_reuse_context() === cache
+        end
+    end
+    @test AS._mode_solution_reuse_context() === nothing
+    @test_throws ErrorException AS._with_mode_solution_reuse(() -> error("scoped failure"))
+    @test AS._mode_solution_reuse_context() === nothing
+    @test_throws ArgumentError AS._with_mode_solution_reuse(identity;max_bytes=-1)
+    AS._with_mode_solution_reuse(;max_bytes=0) do
+        @test AS._mode_solution_reuse_context() === nothing
+    end
+end
+
+@testset "Mode reuse requires the complete BEM numerical inputs" begin
+    AS = AcousticScattering
+    body = Spheroid(.01,.005)
+    variants = [(;k=80.,angle=.4,boundary=Rigid(),n=8,quadrature=0),
+        (;k=90.,angle=.4,boundary=Rigid(),n=8,quadrature=0),
+        (;k=80.,angle=.7,boundary=Rigid(),n=8,quadrature=0),
+        (;k=80.,angle=.4,boundary=PressureRelease(),n=8,quadrature=0),
+        (;k=80.,angle=.4,boundary=Rigid(),n=10,quadrature=0),
+        (;k=80.,angle=.4,boundary=Rigid(),n=8,quadrature=1)]
+    solve_variant(v) = bem(body,v.boundary,v.k;incidence_angle=v.angle,n=v.n,
+        m_max=3,boundary_order=3,adaptive=false,quadrature_extra=v.quadrature)
+    expected = map(v -> scattering_amplitude(solve_variant(v)), variants)
+    AS._with_mode_solution_reuse() do
+        cache = AS._mode_solution_reuse_context()
+        for (variant, reference) in zip(variants,expected)
+            hits = cache.hits
+            @test scattering_amplitude(solve_variant(variant)) == reference
+            @test cache.hits == hits
+            @test scattering_amplitude(solve_variant(variant)) == reference
+            @test cache.hits > hits
+        end
+    end
+    @test AS._mode_solution_reuse_context() === nothing
+end

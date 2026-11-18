@@ -108,9 +108,22 @@ Refine `incident_n_eta` and `incident_n_phi` separately from modal orders. Their
 
 Separation in prolate/oblate spheroidal coordinates yields angular and radial spheroidal wave functions. Rigid/soft boundaries decouple appropriate modes. A penetrable spheroid generally couples angular degrees because interior and exterior wavenumbers differ.
 
-`FluidFilled(...; coupling = :full)` solves the off-diagonal coupling system. `:diagonal` neglects that coupling and changes the model approximation. Spheroidal wave functions are evaluated with SpheroidalWaves. Increase both `m_max` and `n_max`.
+`FluidFilled(...; coupling = :full)` solves the off-diagonal coupling system. `:diagonal` neglects that coupling and changes the model approximation. Spheroidal wave functions are evaluated with SpheroidalWaves. Refine the azimuthal limit `m_max` and polar-degree limit `n_max` independently, checking complex amplitudes over the required incident and receive directions. Agreement at one backscatter angle alone does not establish convergence of a retained bistatic pattern.
 
-`incidence_angle_sweep(body, boundary, k, angles; method=:modal)` reuses the spheroidal basis for a full-coupling fluid spheroid at fixed frequency. Angles are radians from the symmetry axis. The result contains complex backscatter amplitudes and target strengths.
+`incidence_angle_sweep(body, boundary, k, angles; method=:modal)` reuses the spheroidal basis for rigid, pressure-release and fluid-filled spheroids at fixed frequency. Full fluid coupling reuses each factorization across incident directions. Angles are radians from the symmetry axis. The result contains complex backscatter amplitudes and target strengths.
+
+Default plane-wave solutions retain their scattered coefficients. Sample other receive directions without repeating the boundary solve:
+
+```julia
+solution = modal(Spheroid(0.07, 0.01), FluidFilled(1.05, 1.02), 160.0;
+    incidence_angle = pi / 3, m_max = 20, n_max = 28)
+cut = bistatic_sweep(solution, collect(range(0, pi; length = 181)); azimuth = pi)
+scattering_amplitude(solution; angle = pi / 4, azimuth = 0.7)
+```
+
+Receive `angle` and `azimuth` use the same body frame as `scatter_angle` and `scatter_azimuth`. Use polar angles in `[0,pi]` from the symmetry axis and azimuth in `[0,2pi]` around it. `bistatic_map` batches a polar/azimuthal grid. Changing frequency, geometry, material or incident direction requires a new solution. Custom incident-field projections still store only the requested receive amplitude.
+
+For full fluid coupling, `overlap=:auto` selects quadrature or coefficient overlaps according to the available SpheroidalWaves version and problem size. SpheroidalWaves 0.6 adds the public coefficients required by `overlap=:coefficients`. Use `overlap=:quadrature` with increasing `n_quad` for an independent convergence check. `n_quad` controls quadrature accuracy and does not truncate coefficient overlaps. Both methods retain the full off-diagonal coupling.
 
 Higher orders can become unreliable when radial functions are poorly conditioned. [Furusawa (1988)](https://www.jstage.jst.go.jp/article/ast1980/9/1/9_1_13/_article) develops the prolate spheroidal fish-target models behind this treatment.
 
